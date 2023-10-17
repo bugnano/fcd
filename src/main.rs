@@ -1,142 +1,84 @@
-use ratatui::{
-    backend::{Backend, TermionBackend},
-    layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    text::Span,
-    widgets::{Block, Borders, List, ListItem, ListState},
-    Frame, Terminal,
-};
 use std::{
-    io,
-    io::{BufRead, BufReader},
-    sync::mpsc,
-    thread,
+    fs::File,
+    io::{self, BufRead, BufReader, Write},
+    panic,
     time::Duration,
 };
+
+use anyhow::{Context, Result};
+use ratatui::{prelude::*, widgets::*};
 use termion::{
-    event::Key,
-    input::{MouseTerminal, TermRead},
+    input::MouseTerminal,
     raw::IntoRawMode,
     screen::IntoAlternateScreen,
 };
 
-use std::fs::File;
-use std::io::prelude::*;
+mod events;
+mod ui;
 
-use anyhow::Result;
-
-enum Event {
-    Input(Key),
-    Tick,
+pub fn initialize_panic_handler() {
+    let panic_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |panic| {
+        let panic_cleanup = || -> Result<()> {
+            let mut output = io::stdout();
+            write!(
+                output,
+                "{}{}{}",
+                termion::clear::All,
+                termion::screen::ToMainScreen,
+                termion::cursor::Show
+            )?;
+            output.into_raw_mode()?.suspend_raw_mode()?;
+            io::stdout().flush()?;
+            Ok(())
+        };
+        panic_cleanup().expect("failed to clean up for panic");
+        panic_hook(panic);
+    }));
 }
 
 fn main() -> Result<()> {
-    // setup terminal
-    let stdout = io::stdout().into_raw_mode()?.into_alternate_screen()?;
-    let stdout = MouseTerminal::from(stdout);
-    let backend = TermionBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    initialize_panic_handler();
 
-    let mut file = File::open("lorem.txt")?;
+    let stdout = MouseTerminal::from(
+        io::stdout()
+            .into_raw_mode()
+            .context("failed to enable raw mode")?
+            .into_alternate_screen()
+            .context("unable to enter alternate screen")?,
+    );
+
+    // Terminal<TermionBackend<MouseTerminal<AlternateScreen<RawTerminal<Stdout>>>>>
+    let mut terminal =
+        Terminal::new(TermionBackend::new(stdout)).context("creating terminal failed")?;
+
+    let file = File::open("lorem.txt")?;
     let buffered = BufReader::new(file);
-    let items: Vec<ListItem> = buffered
-        .lines()
-        .map(|e| ListItem::new(e.unwrap()))
+    let lines: Vec<String> = buffered.lines().map(|e| String::from(e.unwrap())).collect();
+    let items: Vec<Row> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            Row::new(vec![
+                Span::styled(
+                    format!("{:width$}", i + 1, width = lines.len().to_string().len()).to_string(),
+                    Style::default().fg(Color::White),
+                ),
+                e.to_string().into(),
+            ])
+        })
         .collect();
-    let mut state = ListState::default();
+    let mut state = TableState::default();
     state.select(Some(0));
 
-    let events = events(Duration::from_millis(5000));
-    loop {
-        terminal.draw(|f| ui(f, &items, &mut state))?;
+    let events_rx = events::init_events(Duration::from_millis(5000));
 
-        match events.recv()? {
-            Event::Input(key) => match key {
-                Key::Char('q') => break,
-                Key::Up => {
-                    state.select(Some(match state.selected() {
-                        Some(i) if i > 0 => i - 1,
-                        Some(_i) => 0,
-                        None => 0,
-                    }));
-                    *state.offset_mut() = state.selected().unwrap();
-                }
-                Key::Down => {
-                    state.select(Some(match state.selected() {
-                        Some(i) if (i + 1) < items.len() => i + 1,
-                        Some(i) => i,
-                        None => 0,
-                    }));
-                    *state.offset_mut() = state.selected().unwrap();
-                },
-                _ => (),
-            },
-            Event::Tick => {}
+    loop {
+        terminal.draw(|f| ui::render_app(f, &items, &mut state))?;
+        if events::should_quit(&events_rx, &items, &mut state)? {
+            break;
         }
     }
 
     Ok(())
-}
-
-fn ui<B: Backend>(f: &mut Frame<B>, items: &[ListItem], state: &mut ListState) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(
-            [
-                Constraint::Length(1),
-                Constraint::Min(1),
-                Constraint::Length(1),
-            ]
-            .as_ref(),
-        )
-        .split(f.size());
-
-    let block = Block::default()
-        .title(Span::styled(
-            "TODO: File name",
-            Style::default().fg(Color::Black),
-        ))
-        .style(Style::default().bg(Color::Cyan));
-    f.render_widget(block, chunks[0]);
-
-    let items = List::new(items)
-        .block(Block::default().style(Style::default().bg(Color::Blue)))
-        .highlight_style(
-            Style::default()
-                .bg(Color::LightGreen)
-                .add_modifier(Modifier::BOLD),
-        );
-
-    // We can now render the item list
-    f.render_stateful_widget(items, chunks[1], state);
-
-    let block = Block::default()
-        .title(Span::styled(
-            "TODO: Bottom bar",
-            Style::default().fg(Color::Black),
-        ))
-        .style(Style::default().bg(Color::Cyan));
-    f.render_widget(block, chunks[2]);
-}
-
-fn events(tick_rate: Duration) -> mpsc::Receiver<Event> {
-    let (tx, rx) = mpsc::channel();
-    let keys_tx = tx.clone();
-    thread::spawn(move || {
-        let stdin = io::stdin();
-        for key in stdin.keys().flatten() {
-            if let Err(err) = keys_tx.send(Event::Input(key)) {
-                eprintln!("{}", err);
-                return;
-            }
-        }
-    });
-    thread::spawn(move || loop {
-        if let Err(err) = tx.send(Event::Tick) {
-            eprintln!("{}", err);
-            break;
-        }
-        thread::sleep(tick_rate);
-    });
-    rx
 }
