@@ -7,11 +7,10 @@ use std::{
 
 use anyhow::{Context, Result};
 use ratatui::{prelude::*, widgets::*};
-use termion::{
-    input::MouseTerminal,
-    raw::IntoRawMode,
-    screen::IntoAlternateScreen,
-};
+use termion::{input::MouseTerminal, raw::IntoRawMode, screen::IntoAlternateScreen};
+
+use signal_hook::consts::signal::*;
+use signal_hook::iterator::Signals;
 
 mod events;
 mod ui;
@@ -71,7 +70,10 @@ fn main() -> Result<()> {
     let mut state = TableState::default();
     state.select(Some(0));
 
-    let events_rx = events::init_events(Duration::from_millis(5000));
+    let signals = Signals::new(&[SIGWINCH])?;
+    let handle = signals.handle();
+
+    let events_rx = events::init_events(Duration::from_millis(5000), signals);
 
     loop {
         terminal.draw(|f| ui::render_app(f, &items, &mut state))?;
@@ -79,6 +81,8 @@ fn main() -> Result<()> {
             break;
         }
     }
+
+    handle.close();
 
     Ok(())
 }

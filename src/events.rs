@@ -4,9 +4,13 @@ use anyhow::Result;
 use ratatui::widgets::*;
 use termion::{event::Key, input::TermRead};
 
+use signal_hook::consts::signal::*;
+use signal_hook::iterator::Signals;
+
 pub enum Event {
     Input(Key),
     Tick,
+    Signal(i32),
 }
 
 pub fn should_quit(
@@ -37,14 +41,19 @@ pub fn should_quit(
             _ => (),
         },
         Event::Tick => (),
+        Event::Signal(signal) => match signal {
+            SIGWINCH => (),
+            _ => unreachable!(),
+        },
     }
 
     Ok(false)
 }
 
-pub fn init_events(tick_rate: Duration) -> mpsc::Receiver<Event> {
+pub fn init_events(tick_rate: Duration, mut signals: Signals) -> mpsc::Receiver<Event> {
     let (tx, rx) = mpsc::channel();
     let keys_tx = tx.clone();
+    let signals_tx = tx.clone();
 
     thread::spawn(move || {
         let stdin = io::stdin();
@@ -62,6 +71,15 @@ pub fn init_events(tick_rate: Duration) -> mpsc::Receiver<Event> {
             break;
         }
         thread::sleep(tick_rate);
+    });
+
+    thread::spawn(move || {
+        for signal in &mut signals {
+            if let Err(err) = signals_tx.send(Event::Signal(signal)) {
+                eprintln!("{}", err);
+                return;
+            }
+        }
     });
 
     rx
