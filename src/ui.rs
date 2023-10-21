@@ -1,6 +1,9 @@
 use ratatui::{prelude::*, widgets::*};
 
-pub fn render_app<B: Backend>(f: &mut Frame<B>, items: &[Row], state: &mut TableState) {
+use crate::component::Component;
+use crate::text_viewer::TextViewer;
+
+pub fn render_app<B: Backend>(f: &mut Frame<B>, component: &mut TextViewer) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(
@@ -21,22 +24,7 @@ pub fn render_app<B: Backend>(f: &mut Frame<B>, items: &[Row], state: &mut Table
         .style(Style::default().bg(Color::Cyan));
     f.render_widget(block, chunks[0]);
 
-    let widths = [
-        Constraint::Length((items.len().to_string().len() + 1) as u16),
-        Constraint::Percentage(100),
-    ];
-    let items = Table::new(Vec::from(items))
-        .block(Block::default().style(Style::default().bg(Color::Blue)))
-        .widths(&widths)
-        .column_spacing(0)
-        .highlight_style(
-            Style::default()
-                .bg(Color::LightGreen)
-                .add_modifier(Modifier::BOLD),
-        );
-
-    // We can now render the item list
-    f.render_stateful_widget(items, chunks[1], state);
+    component.render(f, &chunks[1]);
 
     let block = Block::default()
         .title(Span::styled(

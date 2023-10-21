@@ -1,19 +1,23 @@
 use std::{
-    fs::File,
-    io::{self, BufRead, BufReader, Write},
+    io::{self, Write},
     panic,
     time::Duration,
 };
 
 use anyhow::{Context, Result};
-use ratatui::{prelude::*, widgets::*};
+use ratatui::prelude::*;
 use termion::{input::MouseTerminal, raw::IntoRawMode, screen::IntoAlternateScreen};
 
 use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
 
+mod component;
 mod events;
+mod text_viewer;
 mod ui;
+
+use crate::component::Component;
+use crate::text_viewer::TextViewer;
 
 pub fn initialize_panic_handler() {
     let panic_hook = panic::take_hook();
@@ -51,24 +55,8 @@ fn main() -> Result<()> {
     let mut terminal =
         Terminal::new(TermionBackend::new(stdout)).context("creating terminal failed")?;
 
-    let file = File::open("lorem.txt")?;
-    let buffered = BufReader::new(file);
-    let lines: Vec<String> = buffered.lines().map(|e| String::from(e.unwrap())).collect();
-    let items: Vec<Row> = lines
-        .iter()
-        .enumerate()
-        .map(|(i, e)| {
-            Row::new(vec![
-                Span::styled(
-                    format!("{:width$}", i + 1, width = lines.len().to_string().len()).to_string(),
-                    Style::default().fg(Color::White),
-                ),
-                e.to_string().into(),
-            ])
-        })
-        .collect();
-    let mut state = TableState::default();
-    state.select(Some(0));
+    let mut component = TextViewer::new()?;
+    component.init()?;
 
     let signals = Signals::new(&[SIGWINCH])?;
     let handle = signals.handle();
@@ -76,10 +64,13 @@ fn main() -> Result<()> {
     let events_rx = events::init_events(Duration::from_millis(5000), signals);
 
     loop {
-        terminal.draw(|f| ui::render_app(f, &items, &mut state))?;
-        if events::should_quit(&events_rx, &items, &mut state)? {
+        let should_quit = events::handle_events(&events_rx, &mut component)?;
+
+        if should_quit {
             break;
         }
+
+        terminal.draw(|f| ui::render_app(f, &mut component))?;
     }
 
     handle.close();
