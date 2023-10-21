@@ -6,8 +6,7 @@ use termion::{event::*, input::TermRead};
 use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
 
-use crate::component::Component;
-use crate::text_viewer::TextViewer;
+use crate::{app::App, component::Component};
 
 pub enum Events {
     Input(Event),
@@ -15,13 +14,10 @@ pub enum Events {
     Signal(i32),
 }
 
-pub fn handle_events(
-    events_rx: &mpsc::Receiver<Events>,
-    component: &mut TextViewer,
-) -> Result<bool> {
+pub fn handle_events(events_rx: &mpsc::Receiver<Events>, app: &mut App) -> Result<bool> {
     let events = events_rx.recv()?;
 
-    let event_handled = component.handle_events(&events)?;
+    let event_handled = app.handle_events(&events)?;
 
     if !event_handled {
         match events {

@@ -12,3 +12,7 @@ signal-hook = "*"
 anyhow = "*"
 clap = "*"
 
+[dev-dependencies.cargo-husky]
+version = "*"
+default-features = false
+features = ["precommit-hook", "run-cargo-fmt"]

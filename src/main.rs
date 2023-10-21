@@ -11,13 +11,14 @@ use termion::{input::MouseTerminal, raw::IntoRawMode, screen::IntoAlternateScree
 use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
 
+mod app;
+mod button_bar;
 mod component;
 mod events;
 mod text_viewer;
-mod ui;
+mod top_bar;
 
-use crate::component::Component;
-use crate::text_viewer::TextViewer;
+use crate::{app::App, component::Component};
 
 pub fn initialize_panic_handler() {
     let panic_hook = panic::take_hook();
@@ -55,8 +56,8 @@ fn main() -> Result<()> {
     let mut terminal =
         Terminal::new(TermionBackend::new(stdout)).context("creating terminal failed")?;
 
-    let mut component = TextViewer::new()?;
-    component.init()?;
+    let mut app = App::new()?;
+    app.init()?;
 
     let signals = Signals::new(&[SIGWINCH])?;
     let handle = signals.handle();
@@ -64,13 +65,13 @@ fn main() -> Result<()> {
     let events_rx = events::init_events(Duration::from_millis(5000), signals);
 
     loop {
-        let should_quit = events::handle_events(&events_rx, &mut component)?;
+        let should_quit = events::handle_events(&events_rx, &mut app)?;
 
         if should_quit {
             break;
         }
 
-        terminal.draw(|f| ui::render_app(f, &mut component))?;
+        terminal.draw(|f| app.render(f, &f.size()))?;
     }
 
     handle.close();
