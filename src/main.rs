@@ -2,26 +2,21 @@ use std::{
     fs::File,
     io::{self, Write},
     panic,
-    time::Duration,
 };
 
 use anyhow::{Context, Result};
 use ratatui::prelude::*;
 use termion::{input::MouseTerminal, raw::IntoRawMode, screen::IntoAlternateScreen};
 
-use signal_hook::consts::signal::*;
-use signal_hook::iterator::Signals;
-
 use env_logger::{Builder, Env, Target};
 
 mod app;
 mod button_bar;
 mod component;
-mod events;
 mod text_viewer;
 mod top_bar;
 
-use crate::{app::App, component::Component};
+use crate::app::{Action, App};
 
 pub fn initialize_panic_handler() {
     let panic_hook = panic::take_hook();
@@ -64,20 +59,24 @@ fn main() -> Result<()> {
         Terminal::new(TermionBackend::new(stdout)).context("creating terminal failed")?;
 
     let mut app = App::new()?;
-    app.init()?;
-
-    let signals = Signals::new(&[SIGWINCH])?;
-
-    let events_rx = events::init_events(Duration::from_millis(5000), signals);
 
     loop {
-        terminal.draw(|f| app.render(f, &f.size()))?;
+        terminal.draw(|f| app.render(f))?;
 
-        let should_quit = events::handle_events(&events_rx, &mut app)?;
-
-        if should_quit {
-            break;
-        }
+        match app.handle_events()? {
+            Action::Continue => (),
+            Action::Quit => break,
+            Action::CtrlC => {
+                write!(io::stdout(), "{}", termion::screen::ToMainScreen)?;
+                println!("Ctrl+C");
+                break;
+            }
+            Action::Term => {
+                write!(io::stdout(), "{}", termion::screen::ToMainScreen)?;
+                println!("Kill");
+                break;
+            }
+        };
     }
 
     Ok(())

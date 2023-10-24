@@ -7,8 +7,7 @@ use anyhow::Result;
 use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
-use crate::component::Component;
-use crate::events::Events;
+use crate::{app::Events, component::Component};
 
 #[derive(Debug)]
 pub struct TextViewer {
@@ -22,19 +21,15 @@ impl TextViewer {
         let buffered = BufReader::new(file);
         let lines: Vec<String> = buffered.lines().map(|e| String::from(e.unwrap())).collect();
 
-        let state = TableState::default();
+        let mut state = TableState::default();
+
+        state.select(Some(0));
 
         Ok(TextViewer { lines, state })
     }
 }
 
 impl Component for TextViewer {
-    fn init(&mut self) -> Result<()> {
-        self.state.select(Some(0));
-
-        Ok(())
-    }
-
     fn handle_events(&mut self, events: &Events) -> Result<bool> {
         let mut event_handled = false;
 
