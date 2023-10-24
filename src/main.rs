@@ -1,4 +1,5 @@
 use std::{
+    fs::File,
     io::{self, Write},
     panic,
     time::Duration,
@@ -10,6 +11,8 @@ use termion::{input::MouseTerminal, raw::IntoRawMode, screen::IntoAlternateScree
 
 use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
+
+use env_logger::{Builder, Env, Target};
 
 mod app;
 mod button_bar;
@@ -42,6 +45,10 @@ pub fn initialize_panic_handler() {
 }
 
 fn main() -> Result<()> {
+    Builder::from_env(Env::default().default_filter_or("trace"))
+        .target(Target::Pipe(Box::new(File::create("fcv.log")?)))
+        .init();
+
     initialize_panic_handler();
 
     let stdout = MouseTerminal::from(
@@ -60,21 +67,18 @@ fn main() -> Result<()> {
     app.init()?;
 
     let signals = Signals::new(&[SIGWINCH])?;
-    let handle = signals.handle();
 
     let events_rx = events::init_events(Duration::from_millis(5000), signals);
 
     loop {
+        terminal.draw(|f| app.render(f, &f.size()))?;
+
         let should_quit = events::handle_events(&events_rx, &mut app)?;
 
         if should_quit {
             break;
         }
-
-        terminal.draw(|f| app.render(f, &f.size()))?;
     }
-
-    handle.close();
 
     Ok(())
 }

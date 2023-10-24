@@ -71,7 +71,7 @@ impl Component for TextViewer {
         Ok(event_handled)
     }
 
-    fn render<B: Backend>(&mut self, f: &mut Frame<B>, chunk: &Rect) {
+    fn render(&mut self, f: &mut Frame, chunk: &Rect) {
         let widths = [
             Constraint::Length((self.lines.len().to_string().len() + 1) as u16),
             Constraint::Percentage(100),

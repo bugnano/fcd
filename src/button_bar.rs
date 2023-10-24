@@ -30,9 +30,9 @@ impl ButtonBar {
 }
 
 impl Component for ButtonBar {
-    fn render<B: Backend>(&mut self, f: &mut Frame<B>, chunk: &Rect) {
+    fn render(&mut self, f: &mut Frame, chunk: &Rect) {
         let label_width = (chunk.width - (2 * LABELS.len() as u16)) / (LABELS.len() as u16);
-        let excess_width = chunk.width - ((label_width + 2) * LABELS.len() as u16);
+        let mut excess_width = chunk.width - ((label_width + 2) * LABELS.len() as u16);
         let nth = match excess_width {
             0 => 0,
             w => LABELS.len() / (w as usize),
@@ -44,9 +44,11 @@ impl Component for ButtonBar {
             .flat_map(|(i, _)| {
                 [
                     Constraint::Length(2),
-                    Constraint::Length(if nth == 0 {
+                    Constraint::Length(if nth == 0 || excess_width == 0 {
                         label_width
                     } else if i % nth == 0 {
+                        excess_width -= 1;
+
                         label_width + 1
                     } else {
                         label_width

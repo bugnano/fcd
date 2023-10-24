@@ -10,9 +10,6 @@ termion = "*"
 ratatui = { version = "*", default-features = false, features = ['termion'] }
 signal-hook = "*"
 anyhow = "*"
+log = "*"
+env_logger = "*"
 clap = "*"
-
-[dev-dependencies.cargo-husky]
-version = "*"
-default-features = false
-features = ["precommit-hook", "run-cargo-fmt"]

@@ -12,5 +12,5 @@ pub trait Component {
         Ok(false)
     }
 
-    fn render<B: Backend>(&mut self, f: &mut Frame<B>, chunk: &Rect);
+    fn render(&mut self, f: &mut Frame, chunk: &Rect);
 }

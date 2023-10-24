@@ -50,7 +50,7 @@ impl Component for App {
         Ok(event_handled)
     }
 
-    fn render<B: Backend>(&mut self, f: &mut Frame<B>, chunk: &Rect) {
+    fn render(&mut self, f: &mut Frame, chunk: &Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints(

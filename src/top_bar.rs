@@ -13,7 +13,7 @@ impl TopBar {
 }
 
 impl Component for TopBar {
-    fn render<B: Backend>(&mut self, f: &mut Frame<B>, chunk: &Rect) {
+    fn render(&mut self, f: &mut Frame, chunk: &Rect) {
         let block = Block::default()
             .title(Span::styled(
                 "TODO: File name",
