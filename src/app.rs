@@ -1,4 +1,4 @@
-use std::{io, panic, sync::mpsc, thread, time::Duration};
+use std::{io, panic, path::Path, sync::mpsc, thread, time::Duration};
 
 use anyhow::Result;
 use ratatui::prelude::*;
@@ -33,11 +33,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn new() -> Result<App> {
+    pub fn new(filename: &Path, tabsize: u8) -> Result<App> {
         Ok(App {
             events_rx: init_events()?,
-            top_bar: TopBar::new()?,
-            text_viewer: TextViewer::new()?,
+            top_bar: TopBar::new(filename)?,
+            text_viewer: TextViewer::new(filename, tabsize)?,
             button_bar: ButtonBar::new()?,
         })
     }

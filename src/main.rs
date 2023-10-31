@@ -2,6 +2,7 @@ use std::{
     fs::File,
     io::{self, Write},
     panic,
+    path::PathBuf,
 };
 
 use anyhow::{Context, Result};
@@ -10,6 +11,8 @@ use termion::{input::MouseTerminal, raw::IntoRawMode, screen::IntoAlternateScree
 
 use env_logger::{Builder, Env, Target};
 
+use clap::Parser;
+
 mod app;
 mod button_bar;
 mod component;
@@ -17,6 +20,17 @@ mod text_viewer;
 mod top_bar;
 
 use crate::app::{Action, App};
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// set tab size
+    #[arg(short, long, default_value_t = 4)]
+    tabsize: u8,
+
+    /// the file to view
+    file: PathBuf,
+}
 
 pub fn initialize_panic_handler() {
     let panic_hook = panic::take_hook();
@@ -44,6 +58,8 @@ fn main() -> Result<()> {
         .target(Target::Pipe(Box::new(File::create("fcv.log")?)))
         .init();
 
+    let cli = Cli::parse();
+
     initialize_panic_handler();
 
     let stdout = MouseTerminal::from(
@@ -58,7 +74,7 @@ fn main() -> Result<()> {
     let mut terminal =
         Terminal::new(TermionBackend::new(stdout)).context("creating terminal failed")?;
 
-    let mut app = App::new()?;
+    let mut app = App::new(&cli.file, cli.tabsize)?;
 
     loop {
         terminal.draw(|f| app.render(f))?;

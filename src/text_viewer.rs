@@ -1,6 +1,7 @@
 use std::{
     fs::File,
     io::{BufRead, BufReader},
+    path::{Path, PathBuf},
 };
 
 use anyhow::Result;
@@ -11,13 +12,15 @@ use crate::{app::Events, component::Component};
 
 #[derive(Debug)]
 pub struct TextViewer {
+    filename: PathBuf,
+    tabsize: u8,
     lines: Vec<String>,
     state: TableState,
 }
 
 impl TextViewer {
-    pub fn new() -> Result<TextViewer> {
-        let file = File::open("lorem.txt")?;
+    pub fn new(filename: &Path, tabsize: u8) -> Result<TextViewer> {
+        let file = File::open(filename)?;
         let buffered = BufReader::new(file);
         let lines: Vec<String> = buffered.lines().map(|e| String::from(e.unwrap())).collect();
 
@@ -25,7 +28,12 @@ impl TextViewer {
 
         state.select(Some(0));
 
-        Ok(TextViewer { lines, state })
+        Ok(TextViewer {
+            filename: PathBuf::from(filename),
+            tabsize,
+            lines,
+            state,
+        })
     }
 }
 

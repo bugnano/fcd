@@ -2,6 +2,7 @@
 name = "fcv"
 version = "0.1.0"
 edition = "2021"
+authors = ["Franco Bugnano <franco@bugnano.it>"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,4 +13,4 @@ signal-hook = "*"
 anyhow = "*"
 log = "*"
 env_logger = "*"
-clap = "*"
+clap = { version = "*", features = ["derive"] }
