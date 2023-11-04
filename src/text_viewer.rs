@@ -12,10 +12,7 @@ use termion::event::*;
 use encoding_rs::WINDOWS_1252;
 use log::debug;
 use syntect::{
-    easy::HighlightLines,
-    highlighting::{self, ThemeSet},
-    parsing::{ParseState, SyntaxSet},
-    util::LinesWithEndings,
+    easy::HighlightLines, highlighting::Theme, parsing::SyntaxSet, util::LinesWithEndings,
 };
 
 use crate::{app::Events, component::Component};
@@ -50,7 +47,12 @@ pub struct TextViewer {
 }
 
 impl TextViewer {
-    pub fn new(filename: &Path, tabsize: u8) -> Result<TextViewer> {
+    pub fn new(
+        filename: &Path,
+        tabsize: u8,
+        syntax_set: &SyntaxSet,
+        theme: &Theme,
+    ) -> Result<TextViewer> {
         let data = fs::read(filename)?;
 
         let content = match str::from_utf8(&data) {
@@ -69,42 +71,42 @@ impl TextViewer {
             .map(|e| expand_tabs_for_line(e, tabsize.into()))
             .collect();
 
-        // TODO: Load these once at the start of your program
-        let ps = SyntaxSet::load_defaults_newlines();
-        let ts = ThemeSet::load_defaults();
-
-        let syntax = match ps.find_syntax_for_file(filename) {
-            Ok(syntax) => syntax.unwrap_or_else(|| ps.find_syntax_plain_text()),
-            Err(_) => ps.find_syntax_plain_text(),
+        let syntax = match syntax_set.find_syntax_for_file(filename) {
+            Ok(syntax) => syntax.unwrap_or_else(|| syntax_set.find_syntax_plain_text()),
+            Err(_) => syntax_set.find_syntax_plain_text(),
         };
 
-        let mut h = HighlightLines::new(syntax, &ts.themes["base16-ocean.dark"]);
+        let mut highlighter = HighlightLines::new(syntax, theme);
         let styled_lines: Vec<Vec<(Color, String)>> = lines
             .iter()
             .map(|line| {
-                h.highlight_line(line, &ps)
+                highlighter
+                    .highlight_line(line, &syntax_set)
                     .unwrap()
                     .iter()
                     .map(|(style, text)| {
                         (
-                            match (style.foreground.r, style.foreground.g, style.foreground.b) {
-                                (0x2b, 0x30, 0x3b) => Color::Black, // base00
-                                (0x34, 0x3d, 0x46) => Color::LightRed,
-                                (0x4f, 0x5b, 0x66) => Color::LightGreen,
-                                (0x65, 0x73, 0x7e) => Color::DarkGray, // base03
-                                (0xa7, 0xad, 0xba) => Color::LightYellow,
-                                (0xc0, 0xc5, 0xce) => Color::Gray, // base05
-                                (0xdf, 0xe1, 0xe8) => Color::LightBlue,
-                                (0xef, 0xf1, 0xf5) => Color::White, // base07
-                                (0xbf, 0x61, 0x6a) => Color::Red,   // base08
-                                (0xd0, 0x87, 0x70) => Color::LightMagenta,
-                                (0xeb, 0xcb, 0x8b) => Color::Yellow, // base0A
-                                (0xa3, 0xbe, 0x8c) => Color::Green,  // base0B
-                                (0x96, 0xb5, 0xb4) => Color::Cyan,   // base0C
-                                (0x8f, 0xa1, 0xb3) => Color::Blue,   // base0D
-                                (0xb4, 0x8e, 0xad) => Color::Magenta, // base0E
-                                (0xab, 0x79, 0x67) => Color::LightCyan,
-                                _ => Color::Gray,
+                            match style.foreground.r {
+                                0 => Color::Black,
+                                1 => Color::Red,
+                                2 => Color::Green,
+                                3 => Color::Yellow,
+                                4 => Color::Blue,
+                                5 => Color::Magenta,
+                                6 => Color::Cyan,
+                                7 => Color::Gray,
+                                8 => Color::DarkGray,
+                                9 => Color::LightRed,
+                                10 => Color::LightGreen,
+                                11 => Color::LightYellow,
+                                12 => Color::LightBlue,
+                                13 => Color::LightMagenta,
+                                14 => Color::LightCyan,
+                                15 => Color::White,
+                                _ => {
+                                    debug!("{:?}", style);
+                                    Color::Gray
+                                }
                             },
                             String::from(*text),
                         )

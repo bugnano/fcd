@@ -16,3 +16,4 @@ env_logger = "*"
 clap = { version = "*", features = ["derive"] }
 encoding_rs = "*"
 syntect = { version = "*", default-features = false, features = ["default-fancy"]}
+bat = { version = "*", default-features = false, features = ["regex-fancy"]}

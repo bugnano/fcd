@@ -4,6 +4,7 @@ use anyhow::Result;
 use ratatui::prelude::*;
 use termion::{event::*, input::TermRead};
 
+use bat::assets::HighlightingAssets;
 use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
 
@@ -34,10 +35,15 @@ pub struct App {
 
 impl App {
     pub fn new(filename: &Path, tabsize: u8) -> Result<App> {
+        // Load these once at the start of your program
+        let assets = HighlightingAssets::from_binary();
+        let syntax_set = assets.get_syntax_set()?;
+        let theme = assets.get_theme("base16");
+
         Ok(App {
             events_rx: init_events()?,
             top_bar: TopBar::new(filename)?,
-            text_viewer: TextViewer::new(filename, tabsize)?,
+            text_viewer: TextViewer::new(filename, tabsize, syntax_set, theme)?,
             button_bar: ButtonBar::new()?,
         })
     }
