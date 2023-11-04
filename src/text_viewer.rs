@@ -1,24 +1,23 @@
 use std::{
-    fs::{self, File},
-    io::{BufRead, BufReader},
+    fs,
     path::{Path, PathBuf},
-    str,
+    str, thread,
 };
 
 use anyhow::Result;
+use crossbeam_channel::Sender;
 use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
+use bat::assets::HighlightingAssets;
 use encoding_rs::WINDOWS_1252;
 use log::debug;
-use syntect::{
-    easy::HighlightLines, highlighting::Theme, parsing::SyntaxSet, util::LinesWithEndings,
-};
+use syntect::{easy::HighlightLines, util::LinesWithEndings};
 
 use crate::{app::Events, component::Component};
 
 fn expand_tabs_for_line(line: &str, tabsize: usize) -> String {
-    let mut expanded = String::with_capacity(line.len() * 2);
+    let mut expanded = String::new();
     let mut column = 0;
 
     for c in line.chars() {
@@ -47,12 +46,7 @@ pub struct TextViewer {
 }
 
 impl TextViewer {
-    pub fn new(
-        filename: &Path,
-        tabsize: u8,
-        syntax_set: &SyntaxSet,
-        theme: &Theme,
-    ) -> Result<TextViewer> {
+    pub fn new(filename: &Path, tabsize: u8, s: Sender<Events>) -> Result<TextViewer> {
         let data = fs::read(filename)?;
 
         let content = match str::from_utf8(&data) {
@@ -71,49 +65,67 @@ impl TextViewer {
             .map(|e| expand_tabs_for_line(e, tabsize.into()))
             .collect();
 
-        let syntax = match syntax_set.find_syntax_for_file(filename) {
-            Ok(syntax) => syntax.unwrap_or_else(|| syntax_set.find_syntax_plain_text()),
-            Err(_) => syntax_set.find_syntax_plain_text(),
-        };
-
-        let mut highlighter = HighlightLines::new(syntax, theme);
+        // Default to unstyled text
         let styled_lines: Vec<Vec<(Color, String)>> = lines
             .iter()
-            .map(|line| {
-                highlighter
-                    .highlight_line(line, &syntax_set)
-                    .unwrap()
-                    .iter()
-                    .map(|(style, text)| {
-                        (
-                            match style.foreground.r {
-                                0 => Color::Black,
-                                1 => Color::Red,
-                                2 => Color::Green,
-                                3 => Color::Yellow,
-                                4 => Color::Blue,
-                                5 => Color::Magenta,
-                                6 => Color::Cyan,
-                                7 => Color::Gray,
-                                8 => Color::DarkGray,
-                                9 => Color::LightRed,
-                                10 => Color::LightGreen,
-                                11 => Color::LightYellow,
-                                12 => Color::LightBlue,
-                                13 => Color::LightMagenta,
-                                14 => Color::LightCyan,
-                                15 => Color::White,
-                                _ => {
-                                    debug!("{:?}", style);
-                                    Color::Gray
-                                }
-                            },
-                            String::from(*text),
-                        )
-                    })
-                    .collect()
-            })
+            .map(|line| vec![(Color::Gray, String::from(line))])
             .collect();
+
+        // Do the highlighting in a separate thread
+        let file_to_highlight = filename.to_path_buf();
+        let lines_to_highlight = lines.clone();
+        thread::spawn(move || {
+            // Load these once at the start of your program
+            let assets = HighlightingAssets::from_binary();
+            let syntax_set = assets.get_syntax_set().unwrap();
+            let theme = assets.get_theme("base16");
+
+            let syntax = match syntax_set.find_syntax_for_file(file_to_highlight) {
+                Ok(syntax) => syntax.unwrap_or_else(|| syntax_set.find_syntax_plain_text()),
+                Err(_) => syntax_set.find_syntax_plain_text(),
+            };
+
+            let mut highlighter = HighlightLines::new(syntax, &theme);
+            let styled_lines: Vec<Vec<(Color, String)>> = lines_to_highlight
+                .iter()
+                .map(|line| {
+                    highlighter
+                        .highlight_line(line, &syntax_set)
+                        .unwrap()
+                        .iter()
+                        .map(|(style, text)| {
+                            (
+                                match style.foreground.r {
+                                    0 => Color::Black,
+                                    1 => Color::Red,
+                                    2 => Color::Green,
+                                    3 => Color::Yellow,
+                                    4 => Color::Blue,
+                                    5 => Color::Magenta,
+                                    6 => Color::Cyan,
+                                    7 => Color::Gray,
+                                    8 => Color::DarkGray,
+                                    9 => Color::LightRed,
+                                    10 => Color::LightGreen,
+                                    11 => Color::LightYellow,
+                                    12 => Color::LightBlue,
+                                    13 => Color::LightMagenta,
+                                    14 => Color::LightCyan,
+                                    15 => Color::White,
+                                    _ => {
+                                        debug!("{:?}", style);
+                                        Color::Gray
+                                    }
+                                },
+                                String::from(*text),
+                            )
+                        })
+                        .collect()
+                })
+                .collect();
+
+            s.send(Events::Highlight(styled_lines)).unwrap();
+        });
 
         let mut state = TableState::default();
 
@@ -124,7 +136,7 @@ impl TextViewer {
             tabsize,
             data,
             content: content.to_string(),
-            lines: lines,
+            lines,
             styled_lines,
             state,
         })
@@ -162,6 +174,7 @@ impl Component for TextViewer {
                 },
                 _ => (),
             },
+            Events::Highlight(styled_lines) => self.styled_lines = styled_lines.to_vec(),
             _ => (),
         }
 

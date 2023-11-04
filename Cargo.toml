@@ -9,6 +9,7 @@ authors = ["Franco Bugnano <franco@bugnano.it>"]
 [dependencies]
 termion = "*"
 ratatui = { version = "*", default-features = false, features = ['termion'] }
+crossbeam-channel = "*"
 signal-hook = "*"
 anyhow = "*"
 log = "*"

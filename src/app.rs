@@ -1,10 +1,10 @@
-use std::{io, panic, path::Path, sync::mpsc, thread, time::Duration};
+use std::{io, panic, path::Path, thread, time::Duration};
 
 use anyhow::Result;
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use ratatui::prelude::*;
 use termion::{event::*, input::TermRead};
 
-use bat::assets::HighlightingAssets;
 use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
 
@@ -16,6 +16,7 @@ pub enum Events {
     Input(Event),
     Tick,
     Signal(i32),
+    Highlight(Vec<Vec<(Color, String)>>),
 }
 
 pub enum Action {
@@ -27,7 +28,7 @@ pub enum Action {
 
 #[derive(Debug)]
 pub struct App {
-    events_rx: mpsc::Receiver<Events>,
+    events_rx: Receiver<Events>,
     top_bar: TopBar,
     text_viewer: TextViewer,
     button_bar: ButtonBar,
@@ -35,15 +36,12 @@ pub struct App {
 
 impl App {
     pub fn new(filename: &Path, tabsize: u8) -> Result<App> {
-        // Load these once at the start of your program
-        let assets = HighlightingAssets::from_binary();
-        let syntax_set = assets.get_syntax_set()?;
-        let theme = assets.get_theme("base16");
+        let (events_tx, events_rx) = init_events()?;
 
         Ok(App {
-            events_rx: init_events()?,
+            events_rx,
             top_bar: TopBar::new(filename)?,
-            text_viewer: TextViewer::new(filename, tabsize, syntax_set, theme)?,
+            text_viewer: TextViewer::new(filename, tabsize, events_tx.clone())?,
             button_bar: ButtonBar::new()?,
         })
     }
@@ -85,6 +83,7 @@ impl App {
                     SIGTERM => return Ok(Action::Term),
                     _ => unreachable!(),
                 },
+                Events::Highlight(_) => (),
             }
         }
 
@@ -110,10 +109,11 @@ impl App {
     }
 }
 
-fn init_events() -> Result<mpsc::Receiver<Events>> {
-    let (tx, rx) = mpsc::channel();
-    let input_tx = tx.clone();
-    let signals_tx = tx.clone();
+fn init_events() -> Result<(Sender<Events>, Receiver<Events>)> {
+    let (s, r) = unbounded();
+    let input_tx = s.clone();
+    let tick_tx = s.clone();
+    let signals_tx = s.clone();
 
     thread::spawn(move || {
         let stdin = io::stdin();
@@ -128,7 +128,7 @@ fn init_events() -> Result<mpsc::Receiver<Events>> {
     let tick_rate = Duration::from_millis(5000);
 
     thread::spawn(move || loop {
-        if let Err(err) = tx.send(Events::Tick) {
+        if let Err(err) = tick_tx.send(Events::Tick) {
             eprintln!("{}", err);
             break;
         }
@@ -146,5 +146,5 @@ fn init_events() -> Result<mpsc::Receiver<Events>> {
         }
     });
 
-    Ok(rx)
+    Ok((s, r))
 }
