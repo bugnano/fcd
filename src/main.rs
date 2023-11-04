@@ -54,11 +54,12 @@ pub fn initialize_panic_handler() {
 }
 
 fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    #[cfg(debug_assertions)]
     Builder::from_env(Env::default().default_filter_or("trace"))
         .target(Target::Pipe(Box::new(File::create("fcv.log")?)))
         .init();
-
-    let cli = Cli::parse();
 
     initialize_panic_handler();
 
