@@ -37,18 +37,20 @@ fn expand_tabs_for_line(line: &str, tabsize: usize) -> String {
 #[derive(Debug)]
 pub struct TextViewer {
     config: Config,
+    rect: Rect,
     filename: PathBuf,
     tabsize: u8,
     data: Vec<u8>,
     content: String,
     lines: Vec<String>,
     styled_lines: Vec<Vec<(Color, String)>>,
-    state: TableState,
+    first_line: usize,
 }
 
 impl TextViewer {
     pub fn new(
         config: &Config,
+        rect: &Rect,
         filename: &Path,
         tabsize: u8,
         s: Sender<Events>,
@@ -77,19 +79,16 @@ impl TextViewer {
             .map(|line| vec![(config.highlight.base05, String::from(line))])
             .collect();
 
-        let mut state = TableState::default();
-
-        state.select(Some(0));
-
         let viewer = TextViewer {
             config: *config,
+            rect: *rect,
             filename: filename.to_path_buf(),
             tabsize,
             data,
             content: content.to_string(),
             lines,
             styled_lines,
-            state,
+            first_line: 0,
         };
 
         viewer.highlight(s);
@@ -125,17 +124,17 @@ impl TextViewer {
                         .map(|(style, text)| {
                             (
                                 match style.foreground.r {
-                                    0 => config.highlight.base00,
-                                    1 => config.highlight.base08,
-                                    2 => config.highlight.base0b,
-                                    3 => config.highlight.base0a,
-                                    4 => config.highlight.base0d,
-                                    5 => config.highlight.base0e,
-                                    6 => config.highlight.base0c,
-                                    7 => config.highlight.base05,
-                                    8 => config.highlight.base03,
-                                    9 => config.highlight.base09,
-                                    15 => config.highlight.base0f,
+                                    0x00 => config.highlight.base00,
+                                    0x01 => config.highlight.base08,
+                                    0x02 => config.highlight.base0b,
+                                    0x03 => config.highlight.base0a,
+                                    0x04 => config.highlight.base0d,
+                                    0x05 => config.highlight.base0e,
+                                    0x06 => config.highlight.base0c,
+                                    0x07 => config.highlight.base05,
+                                    0x08 => config.highlight.base03,
+                                    0x09 => config.highlight.base09,
+                                    0x0F => config.highlight.base0f,
                                     _ => {
                                         debug!("{:?}", style);
                                         config.highlight.base05
@@ -151,6 +150,17 @@ impl TextViewer {
             s.send(Events::Highlight(styled_lines)).unwrap();
         });
     }
+
+    pub fn resize(&mut self, rect: &Rect) {
+        self.rect = *rect;
+
+        self.first_line = match self.first_line {
+            i if (i + (self.rect.height as usize)) > self.lines.len() => {
+                self.lines.len() - (self.rect.height as usize)
+            }
+            i => i,
+        };
+    }
 }
 
 impl Component for TextViewer {
@@ -163,22 +173,18 @@ impl Component for TextViewer {
                     Key::Up => {
                         event_handled = true;
 
-                        self.state.select(Some(match self.state.selected() {
-                            Some(i) if i > 0 => i - 1,
-                            Some(_i) => 0,
-                            None => 0,
-                        }));
-                        *self.state.offset_mut() = self.state.selected().unwrap();
+                        self.first_line = match self.first_line {
+                            i if i > 0 => i - 1,
+                            _ => 0,
+                        };
                     }
                     Key::Down => {
                         event_handled = true;
 
-                        self.state.select(Some(match self.state.selected() {
-                            Some(i) if (i + 1) < self.lines.len() => i + 1,
-                            Some(i) => i,
-                            None => 0,
-                        }));
-                        *self.state.offset_mut() = self.state.selected().unwrap();
+                        self.first_line = match self.first_line {
+                            i if (i + 1 + (self.rect.height as usize)) <= self.lines.len() => i + 1,
+                            i => i,
+                        };
                     }
                     _ => (),
                 },
@@ -192,22 +198,25 @@ impl Component for TextViewer {
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect) {
+        let line_number_width = self.lines.len().to_string().len();
         let widths = [
-            Constraint::Length((self.lines.len().to_string().len() + 1) as u16),
+            Constraint::Length((line_number_width + 1) as u16),
             Constraint::Percentage(100),
         ];
 
         let items: Vec<Row> = self
             .styled_lines
             .iter()
+            .skip(self.first_line)
+            .take(chunk.height.into())
             .enumerate()
             .map(|(i, e)| {
                 Row::new(vec![
                     Cell::from(Span::styled(
                         format!(
-                            "{:width$}",
-                            i + 1,
-                            width = self.lines.len().to_string().len()
+                            "{:width$} ",
+                            self.first_line + i + 1,
+                            width = line_number_width
                         )
                         .to_string(),
                         Style::default().fg(Color::White),
@@ -221,16 +230,11 @@ impl Component for TextViewer {
             })
             .collect();
 
-        let items = Table::new(Vec::from(items))
+        let items = Table::new(items)
             .block(Block::default().style(Style::default().bg(self.config.highlight.base00)))
             .widths(&widths)
-            .column_spacing(0)
-            .highlight_style(
-                Style::default()
-                    .bg(Color::LightGreen)
-                    .add_modifier(Modifier::BOLD),
-            );
+            .column_spacing(0);
 
-        f.render_stateful_widget(items, *chunk, &mut self.state);
+        f.render_widget(items, *chunk);
     }
 }

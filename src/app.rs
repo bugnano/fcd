@@ -1,9 +1,9 @@
-use std::{io, panic, path::Path, thread, time::Duration};
+use std::{io, panic, path::Path, rc::Rc, thread, time::Duration};
 
 use anyhow::Result;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use ratatui::prelude::*;
-use termion::{event::*, input::TermRead};
+use termion::{event::*, input::TermRead, terminal_size};
 
 use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
@@ -41,10 +41,19 @@ impl App {
 
         let (events_tx, events_rx) = init_events()?;
 
+        let (w, h) = terminal_size().unwrap();
+        let chunks = get_chunks(&Rect::new(0, 0, w, h));
+
         Ok(App {
             events_rx,
             top_bar: TopBar::new(filename)?,
-            text_viewer: TextViewer::new(&config, filename, tabsize, events_tx.clone())?,
+            text_viewer: TextViewer::new(
+                &config,
+                &chunks[1],
+                filename,
+                tabsize,
+                events_tx.clone(),
+            )?,
             button_bar: ButtonBar::new()?,
         })
     }
@@ -81,7 +90,12 @@ impl App {
                 },
                 Events::Tick => (),
                 Events::Signal(signal) => match signal {
-                    SIGWINCH => (),
+                    SIGWINCH => {
+                        let (w, h) = terminal_size().unwrap();
+                        let chunks = get_chunks(&Rect::new(0, 0, w, h));
+
+                        self.text_viewer.resize(&chunks[1]);
+                    }
                     SIGINT => return Ok(Action::CtrlC),
                     SIGTERM => return Ok(Action::Term),
                     _ => unreachable!(),
@@ -94,17 +108,7 @@ impl App {
     }
 
     pub fn render(&mut self, f: &mut Frame) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(
-                [
-                    Constraint::Length(1),
-                    Constraint::Min(1),
-                    Constraint::Length(1),
-                ]
-                .as_ref(),
-            )
-            .split(f.size());
+        let chunks = get_chunks(&f.size());
 
         self.top_bar.render(f, &chunks[0]);
         self.text_viewer.render(f, &chunks[1]);
@@ -150,4 +154,18 @@ fn init_events() -> Result<(Sender<Events>, Receiver<Events>)> {
     });
 
     Ok((s, r))
+}
+
+fn get_chunks(rect: &Rect) -> Rc<[Rect]> {
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(1),
+            ]
+            .as_ref(),
+        )
+        .split(*rect)
 }
