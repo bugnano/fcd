@@ -9,7 +9,8 @@ use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
 
 use crate::{
-    button_bar::ButtonBar, component::Component, text_viewer::TextViewer, top_bar::TopBar,
+    button_bar::ButtonBar, component::Component, config::load_config, text_viewer::TextViewer,
+    top_bar::TopBar,
 };
 
 pub enum Events {
@@ -36,12 +37,14 @@ pub struct App {
 
 impl App {
     pub fn new(filename: &Path, tabsize: u8) -> Result<App> {
+        let config = load_config()?;
+
         let (events_tx, events_rx) = init_events()?;
 
         Ok(App {
             events_rx,
             top_bar: TopBar::new(filename)?,
-            text_viewer: TextViewer::new(filename, tabsize, events_tx.clone())?,
+            text_viewer: TextViewer::new(&config, filename, tabsize, events_tx.clone())?,
             button_bar: ButtonBar::new()?,
         })
     }

@@ -16,6 +16,7 @@ use clap::Parser;
 mod app;
 mod button_bar;
 mod component;
+mod config;
 mod text_viewer;
 mod top_bar;
 

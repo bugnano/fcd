@@ -14,7 +14,7 @@ use encoding_rs::WINDOWS_1252;
 use log::debug;
 use syntect::{easy::HighlightLines, util::LinesWithEndings};
 
-use crate::{app::Events, component::Component};
+use crate::{app::Events, component::Component, config::Config};
 
 fn expand_tabs_for_line(line: &str, tabsize: usize) -> String {
     let mut expanded = String::new();
@@ -36,6 +36,7 @@ fn expand_tabs_for_line(line: &str, tabsize: usize) -> String {
 
 #[derive(Debug)]
 pub struct TextViewer {
+    config: Config,
     filename: PathBuf,
     tabsize: u8,
     data: Vec<u8>,
@@ -46,7 +47,12 @@ pub struct TextViewer {
 }
 
 impl TextViewer {
-    pub fn new(filename: &Path, tabsize: u8, s: Sender<Events>) -> Result<TextViewer> {
+    pub fn new(
+        config: &Config,
+        filename: &Path,
+        tabsize: u8,
+        s: Sender<Events>,
+    ) -> Result<TextViewer> {
         let data = fs::read(filename)?;
 
         let content = match str::from_utf8(&data) {
@@ -68,25 +74,48 @@ impl TextViewer {
         // Default to unstyled text
         let styled_lines: Vec<Vec<(Color, String)>> = lines
             .iter()
-            .map(|line| vec![(Color::Gray, String::from(line))])
+            .map(|line| vec![(config.highlight.base05, String::from(line))])
             .collect();
 
+        let mut state = TableState::default();
+
+        state.select(Some(0));
+
+        let viewer = TextViewer {
+            config: *config,
+            filename: filename.to_path_buf(),
+            tabsize,
+            data,
+            content: content.to_string(),
+            lines,
+            styled_lines,
+            state,
+        };
+
+        viewer.highlight(s);
+
+        Ok(viewer)
+    }
+
+    fn highlight(&self, s: Sender<Events>) {
+        let filename = self.filename.clone();
+        let lines = self.lines.clone();
+        let config = self.config.clone();
+
         // Do the highlighting in a separate thread
-        let file_to_highlight = filename.to_path_buf();
-        let lines_to_highlight = lines.clone();
         thread::spawn(move || {
             // Load these once at the start of your program
             let assets = HighlightingAssets::from_binary();
             let syntax_set = assets.get_syntax_set().unwrap();
             let theme = assets.get_theme("base16");
 
-            let syntax = match syntax_set.find_syntax_for_file(file_to_highlight) {
+            let syntax = match syntax_set.find_syntax_for_file(&filename) {
                 Ok(syntax) => syntax.unwrap_or_else(|| syntax_set.find_syntax_plain_text()),
                 Err(_) => syntax_set.find_syntax_plain_text(),
             };
 
             let mut highlighter = HighlightLines::new(syntax, &theme);
-            let styled_lines: Vec<Vec<(Color, String)>> = lines_to_highlight
+            let styled_lines: Vec<Vec<(Color, String)>> = lines
                 .iter()
                 .map(|line| {
                     highlighter
@@ -96,25 +125,20 @@ impl TextViewer {
                         .map(|(style, text)| {
                             (
                                 match style.foreground.r {
-                                    0 => Color::Black,
-                                    1 => Color::Red,
-                                    2 => Color::Green,
-                                    3 => Color::Yellow,
-                                    4 => Color::Blue,
-                                    5 => Color::Magenta,
-                                    6 => Color::Cyan,
-                                    7 => Color::Gray,
-                                    8 => Color::DarkGray,
-                                    9 => Color::LightRed,
-                                    10 => Color::LightGreen,
-                                    11 => Color::LightYellow,
-                                    12 => Color::LightBlue,
-                                    13 => Color::LightMagenta,
-                                    14 => Color::LightCyan,
-                                    15 => Color::White,
+                                    0 => config.highlight.base00,
+                                    1 => config.highlight.base08,
+                                    2 => config.highlight.base0b,
+                                    3 => config.highlight.base0a,
+                                    4 => config.highlight.base0d,
+                                    5 => config.highlight.base0e,
+                                    6 => config.highlight.base0c,
+                                    7 => config.highlight.base05,
+                                    8 => config.highlight.base03,
+                                    9 => config.highlight.base09,
+                                    15 => config.highlight.base0f,
                                     _ => {
                                         debug!("{:?}", style);
-                                        Color::Gray
+                                        config.highlight.base05
                                     }
                                 },
                                 String::from(*text),
@@ -126,20 +150,6 @@ impl TextViewer {
 
             s.send(Events::Highlight(styled_lines)).unwrap();
         });
-
-        let mut state = TableState::default();
-
-        state.select(Some(0));
-
-        Ok(TextViewer {
-            filename: filename.to_path_buf(),
-            tabsize,
-            data,
-            content: content.to_string(),
-            lines,
-            styled_lines,
-            state,
-        })
     }
 }
 
@@ -212,7 +222,7 @@ impl Component for TextViewer {
             .collect();
 
         let items = Table::new(Vec::from(items))
-            .block(Block::default().style(Style::default().bg(Color::Blue)))
+            .block(Block::default().style(Style::default().bg(self.config.highlight.base00)))
             .widths(&widths)
             .column_spacing(0)
             .highlight_style(
