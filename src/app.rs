@@ -46,7 +46,7 @@ impl App {
 
         Ok(App {
             events_rx,
-            top_bar: TopBar::new(filename)?,
+            top_bar: TopBar::new(&config, filename)?,
             text_viewer: TextViewer::new(
                 &config,
                 &chunks[1],
@@ -54,7 +54,7 @@ impl App {
                 tabsize,
                 events_tx.clone(),
             )?,
-            button_bar: ButtonBar::new()?,
+            button_bar: ButtonBar::new(&config)?,
         })
     }
 
@@ -142,7 +142,7 @@ fn init_events() -> Result<(Sender<Events>, Receiver<Events>)> {
         thread::sleep(tick_rate);
     });
 
-    let mut signals = Signals::new(&[SIGWINCH, SIGINT, SIGTERM])?;
+    let mut signals = Signals::new([SIGWINCH, SIGINT, SIGTERM])?;
 
     thread::spawn(move || {
         for signal in &mut signals {

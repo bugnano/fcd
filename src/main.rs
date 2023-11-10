@@ -1,6 +1,7 @@
 use std::{
     fs::File,
     io::{self, Write},
+    num::NonZeroU8,
     panic,
     path::PathBuf,
 };
@@ -26,8 +27,8 @@ use crate::app::{Action, App};
 #[command(author, version, about, long_about = None)]
 struct Cli {
     /// set tab size
-    #[arg(short, long, default_value_t = 4)]
-    tabsize: u8,
+    #[arg(short, long, default_value_t = NonZeroU8::new(4).unwrap())]
+    tabsize: NonZeroU8,
 
     /// the file to view
     file: PathBuf,
@@ -76,7 +77,7 @@ fn main() -> Result<()> {
     let mut terminal =
         Terminal::new(TermionBackend::new(stdout)).context("creating terminal failed")?;
 
-    let mut app = App::new(&cli.file, cli.tabsize)?;
+    let mut app = App::new(&cli.file, cli.tabsize.into())?;
 
     loop {
         terminal.draw(|f| app.render(f))?;

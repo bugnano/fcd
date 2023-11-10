@@ -1,7 +1,7 @@
 use anyhow::Result;
 use ratatui::{prelude::*, widgets::*};
 
-use crate::component::Component;
+use crate::{component::Component, config::Config};
 
 const LABELS: &[&str] = &[
     " ",      //"Help",
@@ -18,12 +18,14 @@ const LABELS: &[&str] = &[
 
 #[derive(Debug)]
 pub struct ButtonBar {
+    config: Config,
     state: TableState,
 }
 
 impl ButtonBar {
-    pub fn new() -> Result<ButtonBar> {
+    pub fn new(config: &Config) -> Result<ButtonBar> {
         Ok(ButtonBar {
+            config: *config,
             state: TableState::default(),
         })
     }
@@ -31,8 +33,8 @@ impl ButtonBar {
 
 impl Component for ButtonBar {
     fn render(&mut self, f: &mut Frame, chunk: &Rect) {
-        let label_width = (chunk.width - (2 * LABELS.len() as u16)) / (LABELS.len() as u16);
-        let mut excess_width = chunk.width - ((label_width + 2) * LABELS.len() as u16);
+        let label_width = (chunk.width.saturating_sub(2 * LABELS.len() as u16)) / (LABELS.len() as u16);
+        let mut excess_width = chunk.width.saturating_sub((label_width + 2) * LABELS.len() as u16);
         let nth = match excess_width {
             0 => 0,
             w => LABELS.len() / (w as usize),
@@ -61,17 +63,21 @@ impl Component for ButtonBar {
             [
                 Span::styled(
                     format!("{:2}", i + 1),
-                    Style::default().fg(Color::White).bg(Color::Black),
+                    Style::default()
+                        .fg(self.config.ui.hotkey_fg)
+                        .bg(self.config.ui.hotkey_bg),
                 ),
                 Span::styled(
                     label.to_string(),
-                    Style::default().fg(Color::Black).bg(Color::Cyan),
+                    Style::default()
+                        .fg(self.config.ui.selected_fg)
+                        .bg(self.config.ui.selected_bg),
                 ),
             ]
         }));
 
         let items = Table::new([items])
-            .block(Block::default().style(Style::default().bg(Color::Cyan)))
+            .block(Block::default().style(Style::default().bg(self.config.ui.selected_bg)))
             .widths(&widths)
             .column_spacing(0);
 

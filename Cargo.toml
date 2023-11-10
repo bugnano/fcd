@@ -14,10 +14,11 @@ signal-hook = "*"
 anyhow = "*"
 log = "*"
 env_logger = "*"
-clap = { version = "*", features = ["derive"] }
+clap = { version = "*", features = ["derive", "cargo"] }
 encoding_rs = "*"
 syntect = { version = "*", default-features = false, features = ["default-fancy"]}
 bat = { version = "*", default-features = false, features = ["regex-fancy"]}
 serde = "*"
 serde_with = "*"
 toml = "*"
+xdg = "*"

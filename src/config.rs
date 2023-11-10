@@ -1,8 +1,9 @@
+use std::fs;
+
 use anyhow::Result;
 use ratatui::prelude::*;
 
-use log::debug;
-
+use clap::crate_name;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
@@ -59,9 +60,19 @@ pub struct Config {
 }
 
 pub fn load_config() -> Result<Config> {
-    let config: Config = toml::from_str(include_str!("../config/fcv-config.toml"))?;
+    let xdg_dirs = xdg::BaseDirectories::with_prefix(crate_name!())?;
+    let config_file_name = format!("{}-config.toml", crate_name!());
 
-    debug!("{:?}", config);
+    if let Some(filename) = xdg_dirs.find_config_file(&config_file_name) {
+        Ok(toml::from_str(&fs::read_to_string(filename)?)?)
+    } else {
+        let default_config_str = include_str!("../config/config.toml");
+        let default_config: Config = toml::from_str(default_config_str)?;
 
-    Ok(config)
+        if let Ok(filename) = xdg_dirs.place_config_file(&config_file_name) {
+            fs::write(filename, default_config_str)?;
+        }
+
+        Ok(default_config)
+    }
 }

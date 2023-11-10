@@ -99,7 +99,7 @@ impl TextViewer {
     fn highlight(&self, s: Sender<Events>) {
         let filename = self.filename.clone();
         let lines = self.lines.clone();
-        let config = self.config.clone();
+        let config = self.config;
 
         // Do the highlighting in a separate thread
         thread::spawn(move || {
@@ -113,12 +113,12 @@ impl TextViewer {
                 Err(_) => syntax_set.find_syntax_plain_text(),
             };
 
-            let mut highlighter = HighlightLines::new(syntax, &theme);
+            let mut highlighter = HighlightLines::new(syntax, theme);
             let styled_lines: Vec<Vec<(Color, String)>> = lines
                 .iter()
                 .map(|line| {
                     highlighter
-                        .highlight_line(line, &syntax_set)
+                        .highlight_line(line, syntax_set)
                         .unwrap()
                         .iter()
                         .map(|(style, text)| {
@@ -156,7 +156,7 @@ impl TextViewer {
 
         self.first_line = match self.first_line {
             i if (i + (self.rect.height as usize)) > self.lines.len() => {
-                self.lines.len() - (self.rect.height as usize)
+                self.lines.len().saturating_sub(self.rect.height as usize)
             }
             i => i,
         };
@@ -201,7 +201,7 @@ impl Component for TextViewer {
         let line_number_width = self.lines.len().to_string().len();
         let widths = [
             Constraint::Length((line_number_width + 1) as u16),
-            Constraint::Percentage(100),
+            Constraint::Length(chunk.width.saturating_sub((line_number_width + 1) as u16)),
         ];
 
         let items: Vec<Row> = self
