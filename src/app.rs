@@ -22,6 +22,7 @@ pub enum Events {
 
 pub enum Action {
     Continue,
+    Redraw,
     Quit,
     CtrlC,
     Term,
@@ -86,7 +87,7 @@ impl App {
                         | Key::F(10) => return Ok(Action::Quit),
                         Key::Char('p') => panic!("at the disco"),
                         Key::Ctrl('c') => return Ok(Action::CtrlC),
-                        Key::Ctrl('l') => (), // Redraw
+                        Key::Ctrl('l') => return Ok(Action::Redraw),
                         _ => (),
                     },
                     Event::Mouse(_mouse) => (),

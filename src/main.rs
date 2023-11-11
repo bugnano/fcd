@@ -1,5 +1,4 @@
 use std::{
-    fs::File,
     io::{self, Write},
     num::NonZeroU8,
     panic,
@@ -9,8 +8,6 @@ use std::{
 use anyhow::{Context, Result};
 use ratatui::prelude::*;
 use termion::{input::MouseTerminal, raw::IntoRawMode, screen::IntoAlternateScreen};
-
-use env_logger::{Builder, Env, Target};
 
 use clap::Parser;
 
@@ -59,8 +56,10 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     #[cfg(debug_assertions)]
-    Builder::from_env(Env::default().default_filter_or("trace"))
-        .target(Target::Pipe(Box::new(File::create("fcv.log")?)))
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
+        .target(env_logger::Target::Pipe(Box::new(std::fs::File::create(
+            "fcv.log",
+        )?)))
         .init();
 
     initialize_panic_handler();
@@ -84,6 +83,9 @@ fn main() -> Result<()> {
 
         match app.handle_events()? {
             Action::Continue => (),
+            Action::Redraw => {
+                terminal.clear()?;
+            }
             Action::Quit => break,
             Action::CtrlC => {
                 write!(io::stdout(), "{}", termion::screen::ToMainScreen)?;
