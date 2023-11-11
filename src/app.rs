@@ -79,7 +79,11 @@ impl App {
             match events {
                 Events::Input(event) => match event {
                     Event::Key(key) => match key {
-                        Key::Char('q') => return Ok(Action::Quit),
+                        Key::Char('q')
+                        | Key::Char('Q')
+                        | Key::Char('v')
+                        | Key::F(3)
+                        | Key::F(10) => return Ok(Action::Quit),
                         Key::Char('p') => panic!("at the disco"),
                         Key::Ctrl('c') => return Ok(Action::CtrlC),
                         Key::Ctrl('l') => (), // Redraw

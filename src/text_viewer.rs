@@ -170,7 +170,7 @@ impl Component for TextViewer {
         match events {
             Events::Input(event) => match event {
                 Event::Key(key) => match key {
-                    Key::Up => {
+                    Key::Up | Key::Char('k') => {
                         event_handled = true;
 
                         self.first_line = match self.first_line {
@@ -178,12 +178,44 @@ impl Component for TextViewer {
                             _ => 0,
                         };
                     }
-                    Key::Down => {
+                    Key::Down | Key::Char('j') => {
                         event_handled = true;
 
                         self.first_line = match self.first_line {
                             i if (i + 1 + (self.rect.height as usize)) <= self.lines.len() => i + 1,
                             i => i,
+                        };
+                    }
+                    Key::Home | Key::Char('g') => {
+                        event_handled = true;
+
+                        self.first_line = 0;
+                    }
+                    Key::End | Key::Char('G') => {
+                        event_handled = true;
+
+                        self.first_line =
+                            self.lines.len().saturating_sub(self.rect.height as usize);
+                    }
+                    Key::PageUp | Key::Ctrl('b') => {
+                        event_handled = true;
+
+                        self.first_line = self
+                            .first_line
+                            .saturating_sub((self.rect.height as usize) - 1);
+                    }
+                    Key::PageDown | Key::Ctrl('f') => {
+                        event_handled = true;
+
+                        self.first_line = match self.first_line {
+                            i if (i
+                                + ((self.rect.height as usize) - 1)
+                                + (self.rect.height as usize))
+                                <= self.lines.len() =>
+                            {
+                                i + ((self.rect.height as usize) - 1)
+                            }
+                            _ => self.lines.len().saturating_sub(self.rect.height as usize),
                         };
                     }
                     _ => (),

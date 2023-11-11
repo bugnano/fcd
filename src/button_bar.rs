@@ -19,22 +19,23 @@ const LABELS: &[&str] = &[
 #[derive(Debug)]
 pub struct ButtonBar {
     config: Config,
-    state: TableState,
 }
 
 impl ButtonBar {
     pub fn new(config: &Config) -> Result<ButtonBar> {
-        Ok(ButtonBar {
-            config: *config,
-            state: TableState::default(),
-        })
+        Ok(ButtonBar { config: *config })
     }
 }
 
 impl Component for ButtonBar {
     fn render(&mut self, f: &mut Frame, chunk: &Rect) {
-        let label_width = (chunk.width.saturating_sub(2 * LABELS.len() as u16)) / (LABELS.len() as u16);
-        let mut excess_width = chunk.width.saturating_sub((label_width + 2) * LABELS.len() as u16);
+        let label_width =
+            (chunk.width.saturating_sub(2 * LABELS.len() as u16)) / (LABELS.len() as u16);
+
+        let mut excess_width = chunk
+            .width
+            .saturating_sub((label_width + 2) * LABELS.len() as u16);
+
         let nth = match excess_width {
             0 => 0,
             w => LABELS.len() / (w as usize),
@@ -81,6 +82,6 @@ impl Component for ButtonBar {
             .widths(&widths)
             .column_spacing(0);
 
-        f.render_stateful_widget(items, *chunk, &mut self.state);
+        f.render_widget(items, *chunk);
     }
 }
