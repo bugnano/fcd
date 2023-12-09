@@ -1,3 +1,5 @@
+use std::fmt;
+
 use anyhow::Result;
 use ratatui::prelude::*;
 
@@ -9,4 +11,10 @@ pub trait Component {
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect);
+}
+
+impl fmt::Debug for dyn Component + '_ {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "dyn Component")
+    }
 }

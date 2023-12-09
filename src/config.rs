@@ -18,6 +18,54 @@ pub struct Ui {
     pub selected_fg: Color,
     #[serde_as(as = "DisplayFromStr")]
     pub selected_bg: Color,
+
+    pub use_shadows: bool,
+
+    #[serde_as(as = "DisplayFromStr")]
+    pub shadow_fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub shadow_bg: Color,
+}
+
+#[serde_as]
+#[derive(Deserialize, Debug, Copy, Clone)]
+pub struct Error {
+    #[serde_as(as = "DisplayFromStr")]
+    pub fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub bg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub title_fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub focus_fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub focus_bg: Color,
+}
+
+#[serde_as]
+#[derive(Deserialize, Debug, Copy, Clone)]
+pub struct Dialog {
+    #[serde_as(as = "DisplayFromStr")]
+    pub fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub bg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub title_fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub focus_fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub focus_bg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub placeholder_fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub input_fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub input_bg: Color,
+}
+
+#[derive(Deserialize, Debug, Copy, Clone)]
+pub struct Viewer {
+    pub tab_size: u8,
 }
 
 #[serde_as]
@@ -56,6 +104,9 @@ pub struct Highlight {
 #[derive(Deserialize, Debug, Copy, Clone)]
 pub struct Config {
     pub ui: Ui,
+    pub error: Error,
+    pub dialog: Dialog,
+    pub viewer: Viewer,
     pub highlight: Highlight,
 }
 

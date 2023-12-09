@@ -57,6 +57,12 @@ impl TextViewer {
     ) -> Result<TextViewer> {
         let data = fs::read(filename)?;
 
+        let tab_size = if tabsize > 0 {
+            tabsize
+        } else {
+            config.viewer.tab_size
+        };
+
         let content = match str::from_utf8(&data) {
             Ok(content) => content.to_string(),
             Err(e) => {
@@ -70,7 +76,7 @@ impl TextViewer {
         };
 
         let lines: Vec<String> = LinesWithEndings::from(&content)
-            .map(|e| expand_tabs_for_line(e, tabsize.into()))
+            .map(|e| expand_tabs_for_line(e, tab_size.into()))
             .collect();
 
         // Default to unstyled text
@@ -83,7 +89,7 @@ impl TextViewer {
             config: *config,
             rect: *rect,
             filename: filename.to_path_buf(),
-            tabsize,
+            tabsize: tab_size,
             data,
             content: content.to_string(),
             lines,

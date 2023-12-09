@@ -1,6 +1,5 @@
 use std::{
     io::{self, Write},
-    num::NonZeroU8,
     panic,
     path::PathBuf,
 };
@@ -15,6 +14,7 @@ mod app;
 mod button_bar;
 mod component;
 mod config;
+mod dlg_goto;
 mod text_viewer;
 mod top_bar;
 
@@ -24,8 +24,8 @@ use crate::app::{Action, App};
 #[command(author, version, about, long_about = None)]
 struct Cli {
     /// set tab size
-    #[arg(short, long, default_value_t = NonZeroU8::new(4).unwrap())]
-    tabsize: NonZeroU8,
+    #[arg(short, long, default_value_t = 0)]
+    tabsize: u8,
 
     /// the file to view
     file: PathBuf,
@@ -76,7 +76,7 @@ fn main() -> Result<()> {
     let mut terminal =
         Terminal::new(TermionBackend::new(stdout)).context("creating terminal failed")?;
 
-    let mut app = App::new(&cli.file, cli.tabsize.into())?;
+    let mut app = App::new(&cli.file, cli.tabsize)?;
 
     loop {
         terminal.draw(|f| app.render(f))?;
@@ -96,6 +96,31 @@ fn main() -> Result<()> {
                 write!(io::stdout(), "{}", termion::screen::ToMainScreen)?;
                 println!("Kill");
                 break;
+            }
+            Action::CtrlZ => {
+                let mut output = io::stdout();
+                write!(
+                    output,
+                    "{}{}",
+                    termion::screen::ToMainScreen,
+                    termion::cursor::Show
+                )?;
+                output.into_raw_mode()?.suspend_raw_mode()?;
+                io::stdout().flush()?;
+
+                println!("Ctrl+Z");
+
+                unsafe {
+                    libc::kill(libc::getpid(), libc::SIGSTOP);
+                }
+            }
+            Action::SigCont => {
+                let mut output = io::stdout();
+                write!(output, "{}", termion::screen::ToAlternateScreen)?;
+                output.into_raw_mode()?;
+                io::stdout().flush()?;
+
+                terminal.clear()?;
             }
         };
     }
