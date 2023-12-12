@@ -1,4 +1,4 @@
-use std::{io, panic, path::Path, rc::Rc, thread, time::Duration};
+use std::{io, panic, path::Path, rc::Rc, thread};
 
 use anyhow::Result;
 use crossbeam_channel::{unbounded, Receiver, Sender};
@@ -15,9 +15,11 @@ use crate::{
 
 pub enum Events {
     Input(Event),
-    Tick,
     Signal(i32),
+
+    // Text viewer events
     Highlight(Vec<Vec<(Color, String)>>),
+    // Dialog goto events
 }
 
 pub enum Action {
@@ -96,7 +98,6 @@ impl App {
                     Event::Mouse(_mouse) => (),
                     Event::Unsupported(_) => (),
                 },
-                Events::Tick => (),
                 Events::Signal(signal) => match signal {
                     SIGWINCH => {
                         let (w, h) = terminal_size().unwrap();
@@ -132,7 +133,6 @@ impl App {
 fn init_events() -> Result<(Sender<Events>, Receiver<Events>)> {
     let (s, r) = unbounded();
     let input_tx = s.clone();
-    let tick_tx = s.clone();
     let signals_tx = s.clone();
 
     thread::spawn(move || {
@@ -143,16 +143,6 @@ fn init_events() -> Result<(Sender<Events>, Receiver<Events>)> {
                 return;
             }
         }
-    });
-
-    let tick_rate = Duration::from_millis(5000);
-
-    thread::spawn(move || loop {
-        if let Err(err) = tick_tx.send(Events::Tick) {
-            eprintln!("{}", err);
-            break;
-        }
-        thread::sleep(tick_rate);
     });
 
     let mut signals = Signals::new([SIGWINCH, SIGINT, SIGTERM, SIGCONT])?;

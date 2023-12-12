@@ -17,6 +17,7 @@ mod config;
 mod dlg_goto;
 mod text_viewer;
 mod top_bar;
+mod widgets;
 
 use crate::app::{Action, App};
 

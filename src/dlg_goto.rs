@@ -6,19 +6,24 @@ use ratatui::{
         *,
     },
 };
+use termion::event::*;
 
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    app::{centered_rect, render_shadow},
+    app::{centered_rect, render_shadow, Events},
     component::Component,
     config::Config,
+    widgets::{button, input::Input},
 };
 
 #[derive(Debug)]
 pub struct DlgGoto {
     config: Config,
     label: String,
+    input: Input,
+    section_focus_position: u16,
+    button_focus_position: u16,
 }
 
 impl DlgGoto {
@@ -26,11 +31,69 @@ impl DlgGoto {
         Ok(DlgGoto {
             config: *config,
             label: String::from(label),
+            input: Input::new(
+                &Style::default()
+                    .fg(config.dialog.input_fg)
+                    .bg(config.dialog.input_bg),
+                true,
+            )?,
+            section_focus_position: 0,
+            button_focus_position: 0,
         })
     }
 }
 
 impl Component for DlgGoto {
+    fn handle_events(&mut self, events: &Events) -> Result<bool> {
+        let mut event_handled = false;
+
+        if !event_handled {
+            if self.section_focus_position == 0 {
+                event_handled = self.input.handle_events(events)?;
+            }
+        }
+
+        if !event_handled {
+            match events {
+                Events::Input(event) => match event {
+                    Event::Key(key) => match key {
+                        Key::Up | Key::Char('k') => {
+                            event_handled = true;
+
+                            self.section_focus_position = 0;
+                            self.input.focused = true;
+                        }
+                        Key::Down | Key::Char('j') => {
+                            event_handled = true;
+
+                            self.section_focus_position = 1;
+                            self.input.focused = false;
+                        }
+                        Key::Left | Key::Char('h') => {
+                            event_handled = true;
+
+                            if self.section_focus_position == 1 {
+                                self.button_focus_position = 0;
+                            }
+                        }
+                        Key::Right | Key::Char('l') => {
+                            event_handled = true;
+
+                            if self.section_focus_position == 1 {
+                                self.button_focus_position = 1;
+                            }
+                        }
+                        _ => (),
+                    },
+                    _ => (),
+                },
+                _ => (),
+            }
+        }
+
+        Ok(event_handled)
+    }
+
     fn render(&mut self, f: &mut Frame, chunk: &Rect) {
         let area = centered_rect(30, 7, chunk);
 
@@ -82,65 +145,58 @@ impl Component for DlgGoto {
                 .bg(self.config.dialog.bg),
         ));
 
-        let edit = Paragraph::new(Span::styled(
-            "",
-            Style::default()
-                .fg(self.config.dialog.input_fg)
-                .bg(self.config.dialog.input_bg),
-        ))
-        .block(
-            Block::default().style(
-                Style::default()
-                    .fg(self.config.dialog.input_fg)
-                    .bg(self.config.dialog.input_bg),
-            ),
-        );
+        let (style_btn_selected, style_btn_selected_text, style_btn) =
+            if self.section_focus_position == 1 {
+                (
+                    Style::default()
+                        .fg(self.config.dialog.focus_fg)
+                        .bg(self.config.dialog.focus_bg),
+                    Style::default()
+                        .fg(self.config.dialog.focus_fg)
+                        .bg(self.config.dialog.focus_bg),
+                    Style::default()
+                        .fg(self.config.dialog.fg)
+                        .bg(self.config.dialog.bg),
+                )
+            } else {
+                (
+                    Style::default()
+                        .fg(self.config.dialog.fg)
+                        .bg(self.config.dialog.bg),
+                    Style::default()
+                        .fg(self.config.dialog.title_fg)
+                        .bg(self.config.dialog.bg),
+                    Style::default()
+                        .fg(self.config.dialog.fg)
+                        .bg(self.config.dialog.bg),
+                )
+            };
+
+        let (style_ok, style_ok_text, focus_ok) = if self.button_focus_position == 0 {
+            (
+                style_btn_selected,
+                style_btn_selected_text,
+                self.section_focus_position == 1,
+            )
+        } else {
+            (style_btn, style_btn, false)
+        };
 
         let txt_ok = "OK";
         let len_ok = txt_ok.width() as u16;
-        let btn_ok = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "[ ",
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            ),
-            Span::styled(
-                txt_ok,
-                Style::default()
-                    .fg(self.config.dialog.title_fg)
-                    .bg(self.config.dialog.bg),
-            ),
-            Span::styled(
-                " ]",
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            ),
-        ]));
+
+        let (style_cancel, style_cancel_text, focus_cancel) = if self.button_focus_position == 1 {
+            (
+                style_btn_selected,
+                style_btn_selected_text,
+                self.section_focus_position == 1,
+            )
+        } else {
+            (style_btn, style_btn, false)
+        };
 
         let txt_cancel = "Cancel";
         let len_cancel = txt_cancel.width() as u16;
-        let btn_cancel = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "[ ",
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            ),
-            Span::styled(
-                txt_cancel,
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            ),
-            Span::styled(
-                " ]",
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            ),
-        ]));
 
         let lower_inner = centered_rect(
             len_ok + 4 + 1 + len_cancel + 4,
@@ -192,10 +248,24 @@ impl Component for DlgGoto {
 
         f.render_widget(upper_block, sections[0]);
         f.render_widget(label, upper_area[0]);
-        f.render_widget(edit, upper_area[1]);
+        self.input.render(f, &upper_area[1]);
 
         f.render_widget(lower_block, sections[1]);
-        f.render_widget(btn_ok, lower_area[0]);
-        f.render_widget(btn_cancel, lower_area[2]);
+        button::render(
+            f,
+            &lower_area[0],
+            txt_ok,
+            &style_ok,
+            &style_ok_text,
+            focus_ok,
+        );
+        button::render(
+            f,
+            &lower_area[2],
+            txt_cancel,
+            &style_cancel,
+            &style_cancel_text,
+            focus_cancel,
+        );
     }
 }
