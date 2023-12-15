@@ -11,7 +11,7 @@ use termion::event::*;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    app::{centered_rect, render_shadow, Events},
+    app::{centered_rect, render_shadow},
     component::Component,
     config::Config,
     widgets::{button, input::Input},
@@ -44,54 +44,40 @@ impl DlgGoto {
 }
 
 impl Component for DlgGoto {
-    fn handle_events(&mut self, events: &Events) -> Result<bool> {
-        let mut event_handled = false;
+    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+        let mut key_handled = true;
 
-        if !event_handled {
-            if self.section_focus_position == 0 {
-                event_handled = self.input.handle_events(events)?;
+        let input_handled = if self.section_focus_position == 0 {
+            self.input.handle_key(key)?
+        } else {
+            false
+        };
+
+        if !input_handled {
+            match key {
+                Key::Up | Key::Char('k') => {
+                    self.section_focus_position = 0;
+                    self.input.focused = true;
+                }
+                Key::Down | Key::Char('j') => {
+                    self.section_focus_position = 1;
+                    self.input.focused = false;
+                }
+                Key::Left | Key::Char('h') => {
+                    if self.section_focus_position == 1 {
+                        self.button_focus_position = 0;
+                    }
+                }
+                Key::Right | Key::Char('l') => {
+                    if self.section_focus_position == 1 {
+                        self.button_focus_position = 1;
+                    }
+                }
+                _ => key_handled = false,
             }
         }
 
-        if !event_handled {
-            match events {
-                Events::Input(event) => match event {
-                    Event::Key(key) => match key {
-                        Key::Up | Key::Char('k') => {
-                            event_handled = true;
-
-                            self.section_focus_position = 0;
-                            self.input.focused = true;
-                        }
-                        Key::Down | Key::Char('j') => {
-                            event_handled = true;
-
-                            self.section_focus_position = 1;
-                            self.input.focused = false;
-                        }
-                        Key::Left | Key::Char('h') => {
-                            event_handled = true;
-
-                            if self.section_focus_position == 1 {
-                                self.button_focus_position = 0;
-                            }
-                        }
-                        Key::Right | Key::Char('l') => {
-                            event_handled = true;
-
-                            if self.section_focus_position == 1 {
-                                self.button_focus_position = 1;
-                            }
-                        }
-                        _ => (),
-                    },
-                    _ => (),
-                },
-                _ => (),
-            }
-        }
-
-        Ok(event_handled)
+        Ok(key_handled)
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect) {

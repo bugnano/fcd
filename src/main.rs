@@ -93,7 +93,7 @@ fn main() -> Result<()> {
                 println!("Ctrl+C");
                 break;
             }
-            Action::Term => {
+            Action::SigTerm => {
                 write!(io::stdout(), "{}", termion::screen::ToMainScreen)?;
                 println!("Kill");
                 break;

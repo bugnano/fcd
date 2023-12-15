@@ -4,7 +4,7 @@ use termion::event::*;
 
 use unicode_width::UnicodeWidthChar;
 
-use crate::{app::Events, component::Component};
+use crate::component::Component;
 
 #[derive(Debug)]
 pub struct Input {
@@ -86,56 +86,22 @@ impl Input {
 }
 
 impl Component for Input {
-    fn handle_events(&mut self, events: &Events) -> Result<bool> {
-        let mut event_handled = false;
+    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+        let mut key_handled = true;
 
-        match events {
-            Events::Input(event) => match event {
-                Event::Key(key) => match key {
-                    Key::Char('\t') => (),
-                    Key::Char(c) => {
-                        event_handled = true;
-
-                        self.enter_char(*c);
-                    }
-                    Key::Left => {
-                        event_handled = true;
-
-                        self.move_cursor_left();
-                    }
-                    Key::Right => {
-                        event_handled = true;
-
-                        self.move_cursor_right();
-                    }
-                    Key::Home => {
-                        event_handled = true;
-
-                        self.cursor_position = 0;
-                    }
-                    Key::End => {
-                        event_handled = true;
-
-                        self.cursor_position = self.clamp_cursor(self.input.len());
-                    }
-                    Key::Backspace => {
-                        event_handled = true;
-
-                        self.delete_char_left()
-                    }
-                    Key::Delete => {
-                        event_handled = true;
-
-                        self.delete_char_right()
-                    }
-                    _ => (),
-                },
-                _ => (),
-            },
-            _ => (),
+        match key {
+            Key::Char('\t') => key_handled = false,
+            Key::Char(c) => self.enter_char(*c),
+            Key::Left => self.move_cursor_left(),
+            Key::Right => self.move_cursor_right(),
+            Key::Home => self.cursor_position = 0,
+            Key::End => self.cursor_position = self.clamp_cursor(self.input.len()),
+            Key::Backspace => self.delete_char_left(),
+            Key::Delete => self.delete_char_right(),
+            _ => key_handled = false,
         }
 
-        Ok(event_handled)
+        Ok(key_handled)
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect) {

@@ -14,7 +14,7 @@ use encoding_rs::WINDOWS_1252;
 use log::debug;
 use syntect::{easy::HighlightLines, util::LinesWithEndings};
 
-use crate::{app::Events, component::Component, config::Config};
+use crate::{app::PubSub, component::Component, config::Config};
 
 fn expand_tabs_for_line(line: &str, tabsize: usize) -> String {
     let mut expanded = String::new();
@@ -53,7 +53,7 @@ impl TextViewer {
         rect: &Rect,
         filename: &Path,
         tabsize: u8,
-        s: Sender<Events>,
+        s: Sender<PubSub>,
     ) -> Result<TextViewer> {
         let data = fs::read(filename)?;
 
@@ -102,7 +102,7 @@ impl TextViewer {
         Ok(viewer)
     }
 
-    fn highlight(&self, s: Sender<Events>) {
+    fn highlight(&self, s: Sender<PubSub>) {
         let filename = self.filename.clone();
         let lines = self.lines.clone();
         let config = self.config;
@@ -153,7 +153,7 @@ impl TextViewer {
                 })
                 .collect();
 
-            s.send(Events::Highlight(styled_lines)).unwrap();
+            s.send(PubSub::Highlight(styled_lines)).unwrap();
         });
     }
 
@@ -170,69 +170,56 @@ impl TextViewer {
 }
 
 impl Component for TextViewer {
-    fn handle_events(&mut self, events: &Events) -> Result<bool> {
-        let mut event_handled = false;
+    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+        let mut key_handled = true;
 
-        match events {
-            Events::Input(event) => match event {
-                Event::Key(key) => match key {
-                    Key::Up | Key::Char('k') => {
-                        event_handled = true;
-
-                        self.first_line = match self.first_line {
-                            i if i > 0 => i - 1,
-                            _ => 0,
-                        };
+        match key {
+            Key::Up | Key::Char('k') => {
+                self.first_line = match self.first_line {
+                    i if i > 0 => i - 1,
+                    _ => 0,
+                };
+            }
+            Key::Down | Key::Char('j') => {
+                self.first_line = match self.first_line {
+                    i if (i + 1 + (self.rect.height as usize)) <= self.lines.len() => i + 1,
+                    i => i,
+                };
+            }
+            Key::Home | Key::Char('g') => {
+                self.first_line = 0;
+            }
+            Key::End | Key::Char('G') => {
+                self.first_line = self.lines.len().saturating_sub(self.rect.height as usize);
+            }
+            Key::PageUp | Key::Ctrl('b') => {
+                self.first_line = self
+                    .first_line
+                    .saturating_sub((self.rect.height as usize) - 1);
+            }
+            Key::PageDown | Key::Ctrl('f') => {
+                self.first_line = match self.first_line {
+                    i if (i + ((self.rect.height as usize) - 1) + (self.rect.height as usize))
+                        <= self.lines.len() =>
+                    {
+                        i + ((self.rect.height as usize) - 1)
                     }
-                    Key::Down | Key::Char('j') => {
-                        event_handled = true;
+                    _ => self.lines.len().saturating_sub(self.rect.height as usize),
+                };
+            }
+            _ => key_handled = false,
+        }
 
-                        self.first_line = match self.first_line {
-                            i if (i + 1 + (self.rect.height as usize)) <= self.lines.len() => i + 1,
-                            i => i,
-                        };
-                    }
-                    Key::Home | Key::Char('g') => {
-                        event_handled = true;
+        Ok(key_handled)
+    }
 
-                        self.first_line = 0;
-                    }
-                    Key::End | Key::Char('G') => {
-                        event_handled = true;
-
-                        self.first_line =
-                            self.lines.len().saturating_sub(self.rect.height as usize);
-                    }
-                    Key::PageUp | Key::Ctrl('b') => {
-                        event_handled = true;
-
-                        self.first_line = self
-                            .first_line
-                            .saturating_sub((self.rect.height as usize) - 1);
-                    }
-                    Key::PageDown | Key::Ctrl('f') => {
-                        event_handled = true;
-
-                        self.first_line = match self.first_line {
-                            i if (i
-                                + ((self.rect.height as usize) - 1)
-                                + (self.rect.height as usize))
-                                <= self.lines.len() =>
-                            {
-                                i + ((self.rect.height as usize) - 1)
-                            }
-                            _ => self.lines.len().saturating_sub(self.rect.height as usize),
-                        };
-                    }
-                    _ => (),
-                },
-                _ => (),
-            },
-            Events::Highlight(styled_lines) => self.styled_lines = styled_lines.to_vec(),
+    fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
+        match event {
+            PubSub::Highlight(styled_lines) => self.styled_lines = styled_lines.to_vec(),
             _ => (),
         }
 
-        Ok(event_handled)
+        Ok(())
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect) {

@@ -1,7 +1,7 @@
 use std::{io, panic, path::Path, rc::Rc, thread};
 
 use anyhow::Result;
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{select, unbounded, Receiver, Sender};
 use ratatui::{prelude::*, widgets::*};
 use termion::{event::*, input::TermRead, terminal_size};
 
@@ -16,7 +16,9 @@ use crate::{
 pub enum Events {
     Input(Event),
     Signal(i32),
+}
 
+pub enum PubSub {
     // Text viewer events
     Highlight(Vec<Vec<(Color, String)>>),
     // Dialog goto events
@@ -27,7 +29,7 @@ pub enum Action {
     Redraw,
     Quit,
     CtrlC,
-    Term,
+    SigTerm,
     CtrlZ,
     SigCont,
 }
@@ -36,6 +38,8 @@ pub enum Action {
 pub struct App {
     config: Config,
     events_rx: Receiver<Events>,
+    _pubsub_tx: Sender<PubSub>,
+    pubsub_rx: Receiver<PubSub>,
     top_bar: TopBar,
     text_viewer: TextViewer,
     button_bar: ButtonBar,
@@ -46,7 +50,8 @@ impl App {
     pub fn new(filename: &Path, tabsize: u8) -> Result<App> {
         let config = load_config()?;
 
-        let (events_tx, events_rx) = init_events()?;
+        let (_events_tx, events_rx) = init_events()?;
+        let (pubsub_tx, pubsub_rx) = unbounded();
 
         let (w, h) = terminal_size().unwrap();
         let chunks = get_chunks(&Rect::new(0, 0, w, h));
@@ -54,13 +59,15 @@ impl App {
         Ok(App {
             config: config,
             events_rx,
+            _pubsub_tx: pubsub_tx.clone(),
+            pubsub_rx,
             top_bar: TopBar::new(&config, filename)?,
             text_viewer: TextViewer::new(
                 &config,
                 &chunks[1],
                 filename,
                 tabsize,
-                events_tx.clone(),
+                pubsub_tx.clone(),
             )?,
             button_bar: ButtonBar::new(&config)?,
             dialog: None,
@@ -68,34 +75,48 @@ impl App {
     }
 
     pub fn handle_events(&mut self) -> Result<Action> {
-        let events = self.events_rx.recv()?;
-
-        let event_handled = match &mut self.dialog {
-            Some(dlg) => dlg.handle_events(&events)?,
-            None => self.text_viewer.handle_events(&events)?,
-        };
-
-        if !event_handled {
-            match events {
+        select! {
+            recv(self.events_rx) -> events => match events? {
                 Events::Input(event) => match event {
-                    Event::Key(key) => match key {
-                        Key::Char('q')
-                        | Key::Char('Q')
-                        | Key::Char('v')
-                        | Key::F(3)
-                        | Key::F(10) => return Ok(Action::Quit),
-                        Key::Char('p') => panic!("at the disco"),
-                        Key::Ctrl('c') => return Ok(Action::CtrlC),
-                        Key::Ctrl('l') => return Ok(Action::Redraw),
-                        Key::Ctrl('z') => return Ok(Action::CtrlZ),
-                        Key::Char(':') | Key::F(5) => {
-                            // TODO: Maybe check that there are no other open dialogs
-                            self.dialog =
-                                Some(Box::new(DlgGoto::new(&self.config, "Line number: ")?));
+                    Event::Key(key) => {
+                        let key_handled = match &mut self.dialog {
+                            Some(dlg) => dlg.handle_key(&key)?,
+                            None => self.text_viewer.handle_key(&key)?,
+                        };
+
+                        if !key_handled {
+                            match key {
+                                Key::Char('q')
+                                | Key::Char('Q')
+                                | Key::Char('v')
+                                | Key::F(3)
+                                | Key::F(10) => return Ok(Action::Quit),
+                                Key::Char('p') => panic!("at the disco"),
+                                Key::Ctrl('c') => return Ok(Action::CtrlC),
+                                Key::Ctrl('l') => return Ok(Action::Redraw),
+                                Key::Ctrl('z') => return Ok(Action::CtrlZ),
+                                Key::Char(':') | Key::F(5) => {
+                                    if let None = self.dialog {
+                                        self.dialog = Some(Box::new(DlgGoto::new(
+                                            &self.config,
+                                            "Line number: ",
+                                        )?));
+                                    }
+                                }
+                                _ => log::debug!("{:?}", key),
+                            }
                         }
-                        _ => log::debug!("{:?}", key),
-                    },
-                    Event::Mouse(_mouse) => (),
+                    }
+                    Event::Mouse(mouse) => {
+                        self.top_bar.handle_mouse(&mouse)?;
+
+                        match &mut self.dialog {
+                            Some(dlg) => dlg.handle_mouse(&mouse)?,
+                            None => self.text_viewer.handle_mouse(&mouse)?,
+                        };
+
+                        self.button_bar.handle_mouse(&mouse)?;
+                    }
                     Event::Unsupported(_) => (),
                 },
                 Events::Signal(signal) => match signal {
@@ -103,15 +124,31 @@ impl App {
                         let (w, h) = terminal_size().unwrap();
                         let chunks = get_chunks(&Rect::new(0, 0, w, h));
 
+                        self.top_bar.resize(&chunks[0]);
                         self.text_viewer.resize(&chunks[1]);
+                        self.button_bar.resize(&chunks[2]);
+
+                        if let Some(dlg) = &mut self.dialog {
+                            dlg.resize(&chunks[1]);
+                        }
                     }
                     SIGINT => return Ok(Action::CtrlC),
-                    SIGTERM => return Ok(Action::Term),
+                    SIGTERM => return Ok(Action::SigTerm),
                     SIGCONT => return Ok(Action::SigCont),
                     _ => unreachable!(),
                 },
-                Events::Highlight(_) => (),
-            }
+            },
+            recv(self.pubsub_rx) -> pubsub => {
+                let event = pubsub?;
+
+                self.top_bar.handle_pubsub(&event)?;
+                self.text_viewer.handle_pubsub(&event)?;
+                self.button_bar.handle_pubsub(&event)?;
+
+                if let Some(dlg) = &mut self.dialog {
+                    dlg.handle_pubsub(&event)?;
+                }
+            },
         }
 
         Ok(Action::Continue)

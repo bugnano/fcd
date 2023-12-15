@@ -2,13 +2,24 @@ use std::fmt;
 
 use anyhow::Result;
 use ratatui::prelude::*;
+use termion::event::*;
 
-use crate::app::Events;
+use crate::app::PubSub;
 
 pub trait Component {
-    fn handle_events(&mut self, _events: &Events) -> Result<bool> {
+    fn handle_key(&mut self, _key: &Key) -> Result<bool> {
         Ok(false)
     }
+
+    fn handle_mouse(&mut self, _event: &MouseEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn handle_pubsub(&mut self, _event: &PubSub) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&mut self, _rect: &Rect) {}
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect);
 }
