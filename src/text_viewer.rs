@@ -37,6 +37,7 @@ fn expand_tabs_for_line(line: &str, tabsize: usize) -> String {
 #[derive(Debug)]
 pub struct TextViewer {
     config: Config,
+    pubsub_tx: Sender<PubSub>,
     rect: Rect,
     filename: PathBuf,
     tabsize: u8,
@@ -50,10 +51,10 @@ pub struct TextViewer {
 impl TextViewer {
     pub fn new(
         config: &Config,
+        pubsub_tx: Sender<PubSub>,
         rect: &Rect,
         filename: &Path,
         tabsize: u8,
-        s: Sender<PubSub>,
     ) -> Result<TextViewer> {
         let data = fs::read(filename)?;
 
@@ -87,6 +88,7 @@ impl TextViewer {
 
         let viewer = TextViewer {
             config: *config,
+            pubsub_tx,
             rect: *rect,
             filename: filename.to_path_buf(),
             tabsize: tab_size,
@@ -97,15 +99,16 @@ impl TextViewer {
             first_line: 0,
         };
 
-        viewer.highlight(s);
+        viewer.highlight();
 
         Ok(viewer)
     }
 
-    fn highlight(&self, s: Sender<PubSub>) {
+    fn highlight(&self) {
         let filename = self.filename.clone();
         let lines = self.lines.clone();
         let config = self.config;
+        let pubsub_tx = self.pubsub_tx.clone();
 
         // Do the highlighting in a separate thread
         thread::spawn(move || {
@@ -153,7 +156,7 @@ impl TextViewer {
                 })
                 .collect();
 
-            s.send(PubSub::Highlight(styled_lines)).unwrap();
+            pubsub_tx.send(PubSub::Highlight(styled_lines)).unwrap();
         });
     }
 
@@ -216,6 +219,26 @@ impl Component for TextViewer {
     fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
         match event {
             PubSub::Highlight(styled_lines) => self.styled_lines = styled_lines.to_vec(),
+            PubSub::Goto(str_line_number) => match usize::from_str_radix(str_line_number, 10) {
+                Ok(line_number) => {
+                    self.first_line = if (line_number.saturating_sub(1)
+                        + (self.rect.height as usize))
+                        <= self.lines.len()
+                    {
+                        line_number.saturating_sub(1)
+                    } else {
+                        self.lines.len().saturating_sub(self.rect.height as usize)
+                    }
+                }
+                Err(_) => {
+                    self.pubsub_tx
+                        .send(PubSub::Error(format!(
+                            "Invalid number: {}",
+                            str_line_number
+                        )))
+                        .unwrap();
+                }
+            },
             _ => (),
         }
 

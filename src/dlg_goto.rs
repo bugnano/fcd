@@ -1,4 +1,5 @@
 use anyhow::Result;
+use crossbeam_channel::Sender;
 use ratatui::{
     prelude::*,
     widgets::{
@@ -11,7 +12,7 @@ use termion::event::*;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    app::{centered_rect, render_shadow},
+    app::{centered_rect, render_shadow, PubSub},
     component::Component,
     config::Config,
     widgets::{button, input::Input},
@@ -20,6 +21,7 @@ use crate::{
 #[derive(Debug)]
 pub struct DlgGoto {
     config: Config,
+    pubsub_tx: Sender<PubSub>,
     label: String,
     input: Input,
     section_focus_position: u16,
@@ -27,9 +29,10 @@ pub struct DlgGoto {
 }
 
 impl DlgGoto {
-    pub fn new(config: &Config, label: &str) -> Result<DlgGoto> {
+    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>, label: &str) -> Result<DlgGoto> {
         Ok(DlgGoto {
             config: *config,
+            pubsub_tx,
             label: String::from(label),
             input: Input::new(
                 &Style::default()
@@ -55,6 +58,21 @@ impl Component for DlgGoto {
 
         if !input_handled {
             match key {
+                Key::Esc | Key::Char('q') | Key::Char('Q') | Key::F(10) => {
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+                }
+                Key::Char('\n') | Key::Char(' ') => {
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                    if (self.section_focus_position == 0) || (self.button_focus_position == 0) {
+                        self.pubsub_tx
+                            .send(PubSub::Goto(self.input.value()))
+                            .unwrap();
+                    }
+                }
+                Key::BackTab | Key::Char('\t') => {
+                    self.section_focus_position = (self.section_focus_position + 1) % 2;
+                }
                 Key::Up | Key::Char('k') => {
                     self.section_focus_position = 0;
                     self.input.focused = true;
@@ -73,6 +91,7 @@ impl Component for DlgGoto {
                         self.button_focus_position = 1;
                     }
                 }
+                Key::Char(_) | Key::F(_) => (),
                 _ => key_handled = false,
             }
         }

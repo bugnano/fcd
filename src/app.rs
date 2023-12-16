@@ -10,7 +10,7 @@ use signal_hook::iterator::Signals;
 
 use crate::{
     button_bar::ButtonBar, component::Component, config::load_config, config::Config,
-    dlg_goto::DlgGoto, text_viewer::TextViewer, top_bar::TopBar,
+    dlg_error::DlgError, dlg_goto::DlgGoto, text_viewer::TextViewer, top_bar::TopBar,
 };
 
 pub enum Events {
@@ -19,9 +19,15 @@ pub enum Events {
 }
 
 pub enum PubSub {
+    // App-wide events
+    Error(String),
+    CloseDialog,
+
     // Text viewer events
     Highlight(Vec<Vec<(Color, String)>>),
+
     // Dialog goto events
+    Goto(String),
 }
 
 pub enum Action {
@@ -38,7 +44,7 @@ pub enum Action {
 pub struct App {
     config: Config,
     events_rx: Receiver<Events>,
-    _pubsub_tx: Sender<PubSub>,
+    pubsub_tx: Sender<PubSub>,
     pubsub_rx: Receiver<PubSub>,
     top_bar: TopBar,
     text_viewer: TextViewer,
@@ -59,15 +65,15 @@ impl App {
         Ok(App {
             config: config,
             events_rx,
-            _pubsub_tx: pubsub_tx.clone(),
+            pubsub_tx: pubsub_tx.clone(),
             pubsub_rx,
             top_bar: TopBar::new(&config, filename)?,
             text_viewer: TextViewer::new(
                 &config,
+                pubsub_tx.clone(),
                 &chunks[1],
                 filename,
                 tabsize,
-                pubsub_tx.clone(),
             )?,
             button_bar: ButtonBar::new(&config)?,
             dialog: None,
@@ -99,6 +105,7 @@ impl App {
                                     if let None = self.dialog {
                                         self.dialog = Some(Box::new(DlgGoto::new(
                                             &self.config,
+                                            self.pubsub_tx.clone(),
                                             "Line number: ",
                                         )?));
                                     }
@@ -148,9 +155,20 @@ impl App {
                 if let Some(dlg) = &mut self.dialog {
                     dlg.handle_pubsub(&event)?;
                 }
+
+                match event {
+                    PubSub::Error(msg) => {
+                        self.dialog = Some(Box::new(DlgError::new(
+                            &self.config,
+                            self.pubsub_tx.clone(),
+                            &msg,
+                        )?));
+                    },
+                    PubSub::CloseDialog => self.dialog = None,
+                    _ => (),
+                }
             },
         }
-
         Ok(Action::Continue)
     }
 

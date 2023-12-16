@@ -14,6 +14,7 @@ mod app;
 mod button_bar;
 mod component;
 mod config;
+mod dlg_error;
 mod dlg_goto;
 mod text_viewer;
 mod top_bar;
