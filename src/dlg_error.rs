@@ -15,6 +15,7 @@ use crate::{
     app::{centered_rect, render_shadow, PubSub},
     component::Component,
     config::Config,
+    tilde_layout::tilde_layout,
 };
 
 #[derive(Debug)]
@@ -49,12 +50,10 @@ impl Component for DlgError {
             &area,
         );
 
-        let message = Paragraph::new(Span::styled(
+        let message = Paragraph::new(Span::raw(tilde_layout(
             &self.message,
-            Style::default()
-                .fg(self.config.error.fg)
-                .bg(self.config.error.bg),
-        ))
+            section.width.saturating_sub(4).into(),
+        )))
         .block(
             Block::default()
                 .title(

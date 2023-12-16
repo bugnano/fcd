@@ -143,12 +143,7 @@ impl Component for DlgGoto {
                     .bg(self.config.dialog.bg),
             );
 
-        let label = Paragraph::new(Span::styled(
-            &self.label,
-            Style::default()
-                .fg(self.config.dialog.fg)
-                .bg(self.config.dialog.bg),
-        ));
+        let label = Paragraph::new(Span::raw(&self.label));
 
         let (style_btn_selected, style_btn_selected_text, style_btn) =
             if self.section_focus_position == 1 {

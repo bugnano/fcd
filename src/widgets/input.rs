@@ -155,9 +155,8 @@ impl Component for Input {
             })
             .collect();
 
-        let input = Paragraph::new(scrolled_string.as_str())
-            .style(self.style)
-            .block(Block::default().style(self.style));
+        let input =
+            Paragraph::new(scrolled_string.as_str()).block(Block::default().style(self.style));
 
         f.render_widget(input, *chunk);
 
