@@ -6,7 +6,11 @@ use std::{
 use anyhow::Result;
 use ratatui::{prelude::*, widgets::*};
 
-use crate::{component::Component, config::Config, tilde_layout::tilde_layout};
+use crate::{
+    component::{Component, Focus},
+    config::Config,
+    tilde_layout::tilde_layout,
+};
 
 #[derive(Debug)]
 pub struct TopBar {
@@ -24,7 +28,7 @@ impl TopBar {
 }
 
 impl Component for TopBar {
-    fn render(&mut self, f: &mut Frame, chunk: &Rect) {
+    fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
         let block = Block::default()
             .title(Span::raw(tilde_layout(
                 &self.filename.to_string_lossy(),

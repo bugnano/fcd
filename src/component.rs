@@ -6,6 +6,12 @@ use termion::event::*;
 
 use crate::app::PubSub;
 
+pub enum Focus {
+    Normal,
+    Focused,
+    Active,
+}
+
 pub trait Component {
     fn handle_key(&mut self, _key: &Key) -> Result<bool> {
         Ok(false)
@@ -21,7 +27,7 @@ pub trait Component {
 
     fn resize(&mut self, _rect: &Rect) {}
 
-    fn render(&mut self, f: &mut Frame, chunk: &Rect);
+    fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus);
 }
 
 impl fmt::Debug for dyn Component + '_ {

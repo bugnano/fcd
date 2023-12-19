@@ -9,8 +9,15 @@ use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
 
 use crate::{
-    button_bar::ButtonBar, component::Component, config::load_config, config::Config,
-    dlg_error::DlgError, dlg_goto::DlgGoto, text_viewer::TextViewer, top_bar::TopBar,
+    button_bar::ButtonBar,
+    component::{Component, Focus},
+    config::load_config,
+    config::Config,
+    dlg_error::DlgError,
+    dlg_goto::DlgGoto,
+    dlg_search::DlgSearch,
+    text_viewer::TextViewer,
+    top_bar::TopBar,
 };
 
 pub enum Events {
@@ -102,13 +109,23 @@ impl App {
                                 Key::Ctrl('l') => return Ok(Action::Redraw),
                                 Key::Ctrl('z') => return Ok(Action::CtrlZ),
                                 Key::Char(':') | Key::F(5) => {
-                                    if let None = self.dialog {
-                                        self.dialog = Some(Box::new(DlgGoto::new(
-                                            &self.config,
-                                            self.pubsub_tx.clone(),
-                                            "Line number: ",
-                                        )?));
-                                    }
+                                    // TODO: Don't show the dialog if the file size is 0
+                                    self.dialog = Some(Box::new(DlgGoto::new(
+                                        &self.config,
+                                        self.pubsub_tx.clone(),
+                                        "Line number: ",
+                                    )?));
+                                }
+                                Key::Char('/')
+                                | Key::Char('?')
+                                | Key::Char('f')
+                                | Key::Char('F')
+                                | Key::F(7) => {
+                                    // TODO: Don't show the dialog if the file size is 0
+                                    self.dialog = Some(Box::new(DlgSearch::new(
+                                        &self.config,
+                                        self.pubsub_tx.clone(),
+                                    )?));
                                 }
                                 _ => log::debug!("{:?}", key),
                             }
@@ -175,12 +192,12 @@ impl App {
     pub fn render(&mut self, f: &mut Frame) {
         let chunks = get_chunks(&f.size());
 
-        self.top_bar.render(f, &chunks[0]);
-        self.text_viewer.render(f, &chunks[1]);
-        self.button_bar.render(f, &chunks[2]);
+        self.top_bar.render(f, &chunks[0], Focus::Normal);
+        self.text_viewer.render(f, &chunks[1], Focus::Normal);
+        self.button_bar.render(f, &chunks[2], Focus::Normal);
 
         if let Some(dlg) = &mut self.dialog {
-            dlg.render(f, &chunks[1]);
+            dlg.render(f, &chunks[1], Focus::Normal);
         }
     }
 }

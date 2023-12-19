@@ -14,7 +14,11 @@ use encoding_rs::WINDOWS_1252;
 use log::debug;
 use syntect::{easy::HighlightLines, util::LinesWithEndings};
 
-use crate::{app::PubSub, component::Component, config::Config};
+use crate::{
+    app::PubSub,
+    component::{Component, Focus},
+    config::Config,
+};
 
 fn expand_tabs_for_line(line: &str, tabsize: usize) -> String {
     let mut expanded = String::new();
@@ -245,7 +249,7 @@ impl Component for TextViewer {
         Ok(())
     }
 
-    fn render(&mut self, f: &mut Frame, chunk: &Rect) {
+    fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
         let line_number_width = self.lines.len().to_string().len();
         let widths = [
             Constraint::Length((line_number_width + 1) as u16),
@@ -278,9 +282,8 @@ impl Component for TextViewer {
             })
             .collect();
 
-        let items = Table::new(items)
+        let items = Table::new(items, &widths)
             .block(Block::default().style(Style::default().bg(self.config.highlight.base00)))
-            .widths(&widths)
             .column_spacing(0);
 
         f.render_widget(items, *chunk);

@@ -13,7 +13,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::{centered_rect, render_shadow, PubSub},
-    component::Component,
+    component::{Component, Focus},
     config::Config,
     tilde_layout::tilde_layout,
 };
@@ -42,8 +42,28 @@ impl Component for DlgError {
         Ok(true)
     }
 
-    fn render(&mut self, f: &mut Frame, chunk: &Rect) {
+    fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
         let area = centered_rect((self.message.width() + 6) as u16, 7, chunk);
+
+        f.render_widget(Clear, area);
+        f.render_widget(
+            Block::default().style(
+                Style::default()
+                    .fg(self.config.error.fg)
+                    .bg(self.config.error.bg),
+            ),
+            area,
+        );
+        if self.config.ui.use_shadows {
+            render_shadow(
+                f,
+                &area,
+                &Style::default()
+                    .bg(self.config.ui.shadow_bg)
+                    .fg(self.config.ui.shadow_fg),
+            );
+        }
+
         let section = centered_rect(
             area.width.saturating_sub(2),
             area.height.saturating_sub(2),
@@ -72,25 +92,6 @@ impl Component for DlgError {
                         .bg(self.config.error.bg),
                 ),
         );
-
-        f.render_widget(Clear, area);
-        f.render_widget(
-            Block::default().style(
-                Style::default()
-                    .fg(self.config.error.fg)
-                    .bg(self.config.error.bg),
-            ),
-            area,
-        );
-        if self.config.ui.use_shadows {
-            render_shadow(
-                f,
-                &area,
-                &Style::default()
-                    .bg(self.config.ui.shadow_bg)
-                    .fg(self.config.ui.shadow_fg),
-            );
-        }
 
         f.render_widget(message, section);
     }

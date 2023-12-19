@@ -9,37 +9,41 @@ use ratatui::{
 };
 use termion::event::*;
 
-use unicode_width::UnicodeWidthStr;
-
 use crate::{
     app::{centered_rect, render_shadow, PubSub},
     component::{Component, Focus},
     config::Config,
-    widgets::{button::Button, input::Input},
+    widgets::{button::Button, input::Input, radio_box::RadioBox},
 };
 
 #[derive(Debug)]
-pub struct DlgGoto {
+pub struct DlgSearch {
     config: Config,
     pubsub_tx: Sender<PubSub>,
-    label: String,
     input: Input,
+    radio: RadioBox,
     btn_ok: Button,
     btn_cancel: Button,
     section_focus_position: u16,
     button_focus_position: u16,
 }
 
-impl DlgGoto {
-    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>, label: &str) -> Result<DlgGoto> {
-        Ok(DlgGoto {
+impl DlgSearch {
+    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>) -> Result<DlgSearch> {
+        Ok(DlgSearch {
             config: *config,
             pubsub_tx,
-            label: String::from(label),
             input: Input::new(
                 &Style::default()
                     .fg(config.dialog.input_fg)
                     .bg(config.dialog.input_bg),
+            )?,
+            radio: RadioBox::new(
+                &["Normal", "Regular expression", "Wildcard search"],
+                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
+                &Style::default()
+                    .fg(config.dialog.focus_fg)
+                    .bg(config.dialog.focus_bg),
             )?,
             btn_ok: Button::new(
                 "OK",
@@ -67,14 +71,15 @@ impl DlgGoto {
     }
 }
 
-impl Component for DlgGoto {
+impl Component for DlgSearch {
     fn handle_key(&mut self, key: &Key) -> Result<bool> {
         let mut key_handled = true;
 
-        let input_handled = if self.section_focus_position == 0 {
-            self.input.handle_key(key)?
-        } else {
-            false
+        let input_handled = match self.section_focus_position {
+            0 => self.input.handle_key(key)?,
+            1 => self.radio.handle_key(key)?,
+            2 => false,
+            _ => unreachable!(),
         };
 
         if !input_handled {
@@ -85,28 +90,37 @@ impl Component for DlgGoto {
                 Key::Char('\n') | Key::Char(' ') => {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
 
+                    // TODO: Search, not Goto
                     if (self.section_focus_position == 0) || (self.button_focus_position == 0) {
                         self.pubsub_tx
                             .send(PubSub::Goto(self.input.value()))
                             .unwrap();
                     }
                 }
-                Key::BackTab | Key::Char('\t') => {
-                    self.section_focus_position = (self.section_focus_position + 1) % 2;
+                Key::BackTab => {
+                    self.section_focus_position =
+                        ((self.section_focus_position as isize) - 1).rem_euclid(3) as u16;
+                }
+                Key::Char('\t') => {
+                    self.section_focus_position = (self.section_focus_position + 1) % 3;
                 }
                 Key::Up | Key::Char('k') => {
-                    self.section_focus_position = 0;
+                    if self.section_focus_position > 0 {
+                        self.section_focus_position -= 1;
+                    }
                 }
                 Key::Down | Key::Char('j') => {
-                    self.section_focus_position = 1;
+                    if (self.section_focus_position + 1) < 3 {
+                        self.section_focus_position += 1;
+                    }
                 }
                 Key::Left | Key::Char('h') => {
-                    if self.section_focus_position == 1 {
+                    if self.section_focus_position == 2 {
                         self.button_focus_position = 0;
                     }
                 }
                 Key::Right | Key::Char('l') => {
-                    if self.section_focus_position == 1 {
+                    if self.section_focus_position == 2 {
                         self.button_focus_position = 1;
                     }
                 }
@@ -119,7 +133,7 @@ impl Component for DlgGoto {
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
-        let area = centered_rect(30, 7, chunk);
+        let area = centered_rect(58, 12, chunk);
 
         f.render_widget(Clear, area);
         f.render_widget(
@@ -148,7 +162,11 @@ impl Component for DlgGoto {
 
         let sections = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(2), Constraint::Length(3)])
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(4),
+                Constraint::Length(3),
+            ])
             .split(centered_rect(
                 area.width.saturating_sub(2),
                 area.height.saturating_sub(2),
@@ -160,7 +178,7 @@ impl Component for DlgGoto {
         let upper_block = Block::default()
             .title(
                 Title::from(Span::styled(
-                    " Goto ",
+                    " Search ",
                     Style::default().fg(self.config.dialog.title_fg),
                 ))
                 .position(Position::Top)
@@ -175,14 +193,11 @@ impl Component for DlgGoto {
             );
 
         let upper_area = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(self.label.width() as u16),
-                Constraint::Min(1),
-            ])
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Length(1)])
             .split(upper_block.inner(sections[0]));
 
-        let label = Paragraph::new(Span::raw(&self.label));
+        let label = Paragraph::new(Span::raw("Enter search string:"));
 
         f.render_widget(upper_block, sections[0]);
         f.render_widget(label, upper_area[0]);
@@ -190,6 +205,30 @@ impl Component for DlgGoto {
             f,
             &upper_area[1],
             if self.section_focus_position == 0 {
+                Focus::Focused
+            } else {
+                Focus::Normal
+            },
+        );
+
+        // Middle section
+
+        let middle_block = Block::default()
+            .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
+            .border_set(middle_border_set)
+            .padding(Padding::horizontal(1))
+            .style(
+                Style::default()
+                    .fg(self.config.dialog.fg)
+                    .bg(self.config.dialog.bg),
+            );
+
+        let radio_section = middle_block.inner(sections[1]);
+        f.render_widget(middle_block, sections[1]);
+        self.radio.render(
+            f,
+            &radio_section,
+            if self.section_focus_position == 1 {
                 Focus::Focused
             } else {
                 Focus::Normal
@@ -217,15 +256,15 @@ impl Component for DlgGoto {
             .split(centered_rect(
                 (self.btn_ok.width() + 1 + self.btn_cancel.width()) as u16,
                 1,
-                &lower_block.inner(sections[1]),
+                &lower_block.inner(sections[2]),
             ));
 
-        f.render_widget(lower_block, sections[1]);
+        f.render_widget(lower_block, sections[2]);
         self.btn_ok.render(
             f,
             &lower_area[0],
             if self.button_focus_position == 0 {
-                if self.section_focus_position == 1 {
+                if self.section_focus_position == 2 {
                     Focus::Focused
                 } else {
                     Focus::Active
@@ -238,7 +277,7 @@ impl Component for DlgGoto {
             f,
             &lower_area[2],
             if self.button_focus_position == 1 {
-                if self.section_focus_position == 1 {
+                if self.section_focus_position == 2 {
                     Focus::Focused
                 } else {
                     Focus::Active

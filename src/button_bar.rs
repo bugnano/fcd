@@ -1,7 +1,10 @@
 use anyhow::Result;
 use ratatui::{prelude::*, widgets::*};
 
-use crate::{component::Component, config::Config};
+use crate::{
+    component::{Component, Focus},
+    config::Config,
+};
 
 const LABELS: &[&str] = &[
     " ",      //"Help",
@@ -28,7 +31,7 @@ impl ButtonBar {
 }
 
 impl Component for ButtonBar {
-    fn render(&mut self, f: &mut Frame, chunk: &Rect) {
+    fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
         let label_width =
             (chunk.width.saturating_sub(2 * LABELS.len() as u16)) / (LABELS.len() as u16);
 
@@ -77,9 +80,8 @@ impl Component for ButtonBar {
             ]
         }));
 
-        let items = Table::new([items])
+        let items = Table::new([items], &widths)
             .block(Block::default().style(Style::default().bg(self.config.ui.selected_bg)))
-            .widths(&widths)
             .column_spacing(0);
 
         f.render_widget(items, *chunk);

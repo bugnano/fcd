@@ -4,23 +4,21 @@ use termion::event::*;
 
 use unicode_width::UnicodeWidthChar;
 
-use crate::component::Component;
+use crate::component::{Component, Focus};
 
 #[derive(Debug)]
 pub struct Input {
-    pub style: Style,
-    pub focused: bool,
     input: String,
+    style: Style,
     cursor_position: usize,
     scroll_offset: usize,
 }
 
 impl Input {
-    pub fn new(style: &Style, focused: bool) -> Result<Input> {
+    pub fn new(style: &Style) -> Result<Input> {
         Ok(Input {
-            style: *style,
-            focused,
             input: String::from(""),
+            style: *style,
             cursor_position: 0,
             scroll_offset: 0,
         })
@@ -104,7 +102,7 @@ impl Component for Input {
         Ok(key_handled)
     }
 
-    fn render(&mut self, f: &mut Frame, chunk: &Rect) {
+    fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {
         if chunk.width == 0 {
             return;
         }
@@ -160,7 +158,7 @@ impl Component for Input {
 
         f.render_widget(input, *chunk);
 
-        if self.focused {
+        if let Focus::Focused = focus {
             f.set_cursor(chunk.x + (cursor_width as u16), chunk.y);
         }
     }
