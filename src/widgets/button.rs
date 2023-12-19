@@ -21,10 +21,10 @@ impl Button {
         active_style: &Style,
     ) -> Result<Button> {
         Ok(Button {
+            label: String::from(label),
             style: *style,
             focused_style: *focused_style,
             active_style: *active_style,
-            label: String::from(label),
         })
     }
 
@@ -63,7 +63,7 @@ impl Component for Button {
         f.render_widget(button, *chunk);
 
         if let Focus::Focused = focus {
-            if chunk.width > 2 {
+            if (chunk.width > 2) && (chunk.height > 0) {
                 f.set_cursor(chunk.x + 2, chunk.y);
             }
         }

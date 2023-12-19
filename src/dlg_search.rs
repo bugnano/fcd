@@ -13,7 +13,7 @@ use crate::{
     app::{centered_rect, render_shadow, PubSub},
     component::{Component, Focus},
     config::Config,
-    widgets::{button::Button, input::Input, radio_box::RadioBox},
+    widgets::{button::Button, check_box::CheckBox, input::Input, radio_box::RadioBox},
 };
 
 #[derive(Debug)]
@@ -22,9 +22,12 @@ pub struct DlgSearch {
     pubsub_tx: Sender<PubSub>,
     input: Input,
     radio: RadioBox,
+    check_boxes: Vec<CheckBox>,
     btn_ok: Button,
     btn_cancel: Button,
     section_focus_position: u16,
+    middle_focus_position: u16,
+    check_focus_position: u16,
     button_focus_position: u16,
 }
 
@@ -45,6 +48,29 @@ impl DlgSearch {
                     .fg(config.dialog.focus_fg)
                     .bg(config.dialog.focus_bg),
             )?,
+            check_boxes: vec![
+                CheckBox::new(
+                    "Case sensitive",
+                    &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
+                    &Style::default()
+                        .fg(config.dialog.focus_fg)
+                        .bg(config.dialog.focus_bg),
+                )?,
+                CheckBox::new(
+                    "Backwards",
+                    &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
+                    &Style::default()
+                        .fg(config.dialog.focus_fg)
+                        .bg(config.dialog.focus_bg),
+                )?,
+                CheckBox::new(
+                    "Whole words",
+                    &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
+                    &Style::default()
+                        .fg(config.dialog.focus_fg)
+                        .bg(config.dialog.focus_bg),
+                )?,
+            ],
             btn_ok: Button::new(
                 "OK",
                 &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
@@ -66,6 +92,8 @@ impl DlgSearch {
                     .bg(config.dialog.bg),
             )?,
             section_focus_position: 0,
+            middle_focus_position: 0,
+            check_focus_position: 0,
             button_focus_position: 0,
         })
     }
@@ -77,7 +105,11 @@ impl Component for DlgSearch {
 
         let input_handled = match self.section_focus_position {
             0 => self.input.handle_key(key)?,
-            1 => self.radio.handle_key(key)?,
+            1 => match self.middle_focus_position {
+                0 => self.radio.handle_key(key)?,
+                1 => self.check_boxes[self.check_focus_position as usize].handle_key(key)?,
+                _ => unreachable!(),
+            },
             2 => false,
             _ => unreachable!(),
         };
@@ -105,25 +137,43 @@ impl Component for DlgSearch {
                     self.section_focus_position = (self.section_focus_position + 1) % 3;
                 }
                 Key::Up | Key::Char('k') => {
-                    if self.section_focus_position > 0 {
-                        self.section_focus_position -= 1;
+                    if (self.section_focus_position == 1) && (self.middle_focus_position == 1) {
+                        if self.check_focus_position > 0 {
+                            self.check_focus_position -= 1;
+                        } else {
+                            self.section_focus_position -= 1;
+                        }
+                    } else {
+                        if self.section_focus_position > 0 {
+                            self.section_focus_position -= 1;
+                        }
                     }
                 }
                 Key::Down | Key::Char('j') => {
-                    if (self.section_focus_position + 1) < 3 {
-                        self.section_focus_position += 1;
+                    if (self.section_focus_position == 1) && (self.middle_focus_position == 1) {
+                        if (self.check_focus_position + 1) < (self.check_boxes.len() as u16) {
+                            self.check_focus_position += 1;
+                        } else {
+                            self.section_focus_position += 1;
+                        }
+                    } else {
+                        if (self.section_focus_position + 1) < 3 {
+                            self.section_focus_position += 1;
+                        }
                     }
                 }
-                Key::Left | Key::Char('h') => {
-                    if self.section_focus_position == 2 {
-                        self.button_focus_position = 0;
-                    }
-                }
-                Key::Right | Key::Char('l') => {
-                    if self.section_focus_position == 2 {
-                        self.button_focus_position = 1;
-                    }
-                }
+                Key::Left | Key::Char('h') => match self.section_focus_position {
+                    0 => (),
+                    1 => self.middle_focus_position = 0,
+                    2 => self.button_focus_position = 0,
+                    _ => unreachable!(),
+                },
+                Key::Right | Key::Char('l') => match self.section_focus_position {
+                    0 => (),
+                    1 => self.middle_focus_position = 1,
+                    2 => self.button_focus_position = 1,
+                    _ => unreachable!(),
+                },
                 Key::Char(_) | Key::F(_) => (),
                 _ => key_handled = false,
             }
@@ -223,17 +273,45 @@ impl Component for DlgSearch {
                     .bg(self.config.dialog.bg),
             );
 
-        let radio_section = middle_block.inner(sections[1]);
+        let middle_sections = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Min(1)])
+            .split(middle_block.inner(sections[1]));
+
+        let check_sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(vec![Constraint::Length(1); self.check_boxes.len()])
+            .split(middle_sections[1]);
+
         f.render_widget(middle_block, sections[1]);
+
         self.radio.render(
             f,
-            &radio_section,
-            if self.section_focus_position == 1 {
+            &middle_sections[0],
+            if (self.section_focus_position == 1) && (self.middle_focus_position == 0) {
                 Focus::Focused
             } else {
                 Focus::Normal
             },
         );
+
+        self.check_boxes
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, check_box)| {
+                check_box.render(
+                    f,
+                    &check_sections[i],
+                    if (self.section_focus_position == 1)
+                        && (self.middle_focus_position == 1)
+                        && (self.check_focus_position == (i as u16))
+                    {
+                        Focus::Focused
+                    } else {
+                        Focus::Normal
+                    },
+                );
+            });
 
         // Lower section
 

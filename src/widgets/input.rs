@@ -103,7 +103,7 @@ impl Component for Input {
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {
-        if chunk.width == 0 {
+        if (chunk.width == 0) || (chunk.height == 0) {
             return;
         }
 
