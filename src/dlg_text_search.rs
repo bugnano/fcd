@@ -17,7 +17,23 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct DlgSearch {
+pub enum SearchType {
+    Normal,
+    Regex,
+    Wildcard,
+}
+
+#[derive(Debug)]
+pub struct TextSearch {
+    search_string: String,
+    search_type: SearchType,
+    case_sensitive: bool,
+    backwards: bool,
+    whole_words: bool,
+}
+
+#[derive(Debug)]
+pub struct DlgTextSearch {
     config: Config,
     pubsub_tx: Sender<PubSub>,
     input: Input,
@@ -31,9 +47,9 @@ pub struct DlgSearch {
     button_focus_position: u16,
 }
 
-impl DlgSearch {
-    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>) -> Result<DlgSearch> {
-        Ok(DlgSearch {
+impl DlgTextSearch {
+    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>) -> Result<DlgTextSearch> {
+        Ok(DlgTextSearch {
             config: *config,
             pubsub_tx,
             input: Input::new(
@@ -42,7 +58,7 @@ impl DlgSearch {
                     .bg(config.dialog.input_bg),
             )?,
             radio: RadioBox::new(
-                &["Normal", "Regular expression", "Wildcard search"],
+                ["Normal", "Regular expression", "Wildcard search"],
                 &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
                 &Style::default()
                     .fg(config.dialog.focus_fg)
@@ -99,7 +115,7 @@ impl DlgSearch {
     }
 }
 
-impl Component for DlgSearch {
+impl Component for DlgTextSearch {
     fn handle_key(&mut self, key: &Key) -> Result<bool> {
         let mut key_handled = true;
 
@@ -122,10 +138,20 @@ impl Component for DlgSearch {
                 Key::Char('\n') | Key::Char(' ') => {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
 
-                    // TODO: Search, not Goto
                     if (self.section_focus_position == 0) || (self.button_focus_position == 0) {
                         self.pubsub_tx
-                            .send(PubSub::Goto(self.input.value()))
+                            .send(PubSub::TextSearch(TextSearch {
+                                search_string: self.input.value(),
+                                search_type: match self.radio.value() {
+                                    0 => SearchType::Normal,
+                                    1 => SearchType::Regex,
+                                    2 => SearchType::Wildcard,
+                                    _ => unreachable!(),
+                                },
+                                case_sensitive: self.check_boxes[0].value(),
+                                backwards: self.check_boxes[1].value(),
+                                whole_words: self.check_boxes[2].value(),
+                            }))
                             .unwrap();
                     }
                 }
@@ -137,28 +163,34 @@ impl Component for DlgSearch {
                     self.section_focus_position = (self.section_focus_position + 1) % 3;
                 }
                 Key::Up | Key::Char('k') => {
-                    if (self.section_focus_position == 1) && (self.middle_focus_position == 1) {
-                        if self.check_focus_position > 0 {
-                            self.check_focus_position -= 1;
-                        } else {
-                            self.section_focus_position -= 1;
+                    match (self.section_focus_position, self.middle_focus_position) {
+                        (1, 1) => {
+                            if self.check_focus_position > 0 {
+                                self.check_focus_position -= 1;
+                            } else {
+                                self.section_focus_position -= 1;
+                            }
                         }
-                    } else {
-                        if self.section_focus_position > 0 {
-                            self.section_focus_position -= 1;
+                        _ => {
+                            if self.section_focus_position > 0 {
+                                self.section_focus_position -= 1;
+                            }
                         }
                     }
                 }
                 Key::Down | Key::Char('j') => {
-                    if (self.section_focus_position == 1) && (self.middle_focus_position == 1) {
-                        if (self.check_focus_position + 1) < (self.check_boxes.len() as u16) {
-                            self.check_focus_position += 1;
-                        } else {
-                            self.section_focus_position += 1;
+                    match (self.section_focus_position, self.middle_focus_position) {
+                        (1, 1) => {
+                            if (self.check_focus_position + 1) < (self.check_boxes.len() as u16) {
+                                self.check_focus_position += 1;
+                            } else {
+                                self.section_focus_position += 1;
+                            }
                         }
-                    } else {
-                        if (self.section_focus_position + 1) < 3 {
-                            self.section_focus_position += 1;
+                        _ => {
+                            if (self.section_focus_position + 1) < 3 {
+                                self.section_focus_position += 1;
+                            }
                         }
                     }
                 }

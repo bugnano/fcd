@@ -6,6 +6,7 @@ use termion::event::*;
 
 use crate::app::PubSub;
 
+#[derive(Debug)]
 pub enum Focus {
     Normal,
     Focused,

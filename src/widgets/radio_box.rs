@@ -22,7 +22,7 @@ impl RadioBox {
         Ok(RadioBox {
             buttons: buttons
                 .into_iter()
-                .map(|item| item.as_ref().to_string())
+                .map(|item| String::from(item.as_ref()))
                 .collect(),
             style: *style,
             focused_style: *focused_style,

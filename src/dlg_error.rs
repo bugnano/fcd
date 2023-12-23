@@ -19,18 +19,34 @@ use crate::{
 };
 
 #[derive(Debug)]
+pub enum DialogType {
+    Error,
+    Warning,
+}
+
+#[derive(Debug)]
 pub struct DlgError {
     config: Config,
     pubsub_tx: Sender<PubSub>,
     message: String,
+    title: String,
+    dialog_type: DialogType,
 }
 
 impl DlgError {
-    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>, message: &str) -> Result<DlgError> {
+    pub fn new(
+        config: &Config,
+        pubsub_tx: Sender<PubSub>,
+        message: &str,
+        title: &str,
+        dialog_type: DialogType,
+    ) -> Result<DlgError> {
         Ok(DlgError {
             config: *config,
             pubsub_tx,
             message: String::from(message),
+            title: String::from(title),
+            dialog_type,
         })
     }
 }
@@ -45,15 +61,27 @@ impl Component for DlgError {
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
         let area = centered_rect((self.message.width() + 6) as u16, 7, chunk);
 
-        f.render_widget(Clear, area);
-        f.render_widget(
-            Block::default().style(
+        let (style, title_style) = match self.dialog_type {
+            DialogType::Error => (
                 Style::default()
                     .fg(self.config.error.fg)
                     .bg(self.config.error.bg),
+                Style::default()
+                    .fg(self.config.error.title_fg)
+                    .bg(self.config.error.bg),
             ),
-            area,
-        );
+            DialogType::Warning => (
+                Style::default()
+                    .fg(self.config.dialog.fg)
+                    .bg(self.config.dialog.bg),
+                Style::default()
+                    .fg(self.config.dialog.title_fg)
+                    .bg(self.config.dialog.bg),
+            ),
+        };
+
+        f.render_widget(Clear, area);
+        f.render_widget(Block::default().style(style), area);
         if self.config.ui.use_shadows {
             render_shadow(
                 f,
@@ -77,20 +105,13 @@ impl Component for DlgError {
         .block(
             Block::default()
                 .title(
-                    Title::from(Span::styled(
-                        " Error ",
-                        Style::default().fg(self.config.error.title_fg),
-                    ))
-                    .position(Position::Top)
-                    .alignment(Alignment::Center),
+                    Title::from(Span::styled(format!(" {} ", self.title), title_style))
+                        .position(Position::Top)
+                        .alignment(Alignment::Center),
                 )
                 .borders(Borders::ALL)
                 .padding(Padding::uniform(1))
-                .style(
-                    Style::default()
-                        .fg(self.config.error.fg)
-                        .bg(self.config.error.bg),
-                ),
+                .style(style),
         );
 
         f.render_widget(message, section);

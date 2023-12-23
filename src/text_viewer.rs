@@ -69,12 +69,12 @@ impl TextViewer {
         };
 
         let content = match str::from_utf8(&data) {
-            Ok(content) => content.to_string(),
+            Ok(content) => String::from(content),
             Err(e) => {
                 // TODO: Instead of a fallback to WINDOWS_1252, we could use chardetng
                 // to find the correct encoding
                 match WINDOWS_1252.decode_without_bom_handling_and_without_replacement(&data) {
-                    Some(content) => content.to_string(),
+                    Some(content) => String::from(content),
                     None => return Err(e.into()),
                 }
             }
@@ -97,7 +97,7 @@ impl TextViewer {
             filename: filename.to_path_buf(),
             tabsize: tab_size,
             data,
-            content: content.to_string(),
+            content,
             lines,
             styled_lines,
             first_line: 0,
@@ -223,7 +223,7 @@ impl Component for TextViewer {
     fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
         match event {
             PubSub::Highlight(styled_lines) => self.styled_lines = styled_lines.to_vec(),
-            PubSub::Goto(str_line_number) => match usize::from_str_radix(str_line_number, 10) {
+            PubSub::Goto(str_line_number) => match str_line_number.parse::<usize>() {
                 Ok(line_number) => {
                     self.first_line = if (line_number.saturating_sub(1)
                         + (self.rect.height as usize))
@@ -243,6 +243,14 @@ impl Component for TextViewer {
                         .unwrap();
                 }
             },
+            PubSub::TextSearch(search) => {
+                self.pubsub_tx
+                    .send(PubSub::Warning(
+                        String::from("Search"),
+                        String::from("Search string not found"),
+                    ))
+                    .unwrap();
+            }
             _ => (),
         }
 
@@ -269,8 +277,7 @@ impl Component for TextViewer {
                             "{:width$} ",
                             self.first_line + i + 1,
                             width = line_number_width
-                        )
-                        .to_string(),
+                        ),
                         Style::default().fg(Color::White),
                     )),
                     Cell::from(Line::from(
@@ -282,7 +289,7 @@ impl Component for TextViewer {
             })
             .collect();
 
-        let items = Table::new(items, &widths)
+        let items = Table::new(items, widths)
             .block(Block::default().style(Style::default().bg(self.config.highlight.base00)))
             .column_spacing(0);
 

@@ -13,9 +13,9 @@ use crate::{
     component::{Component, Focus},
     config::load_config,
     config::Config,
-    dlg_error::DlgError,
+    dlg_error::{DialogType, DlgError},
     dlg_goto::DlgGoto,
-    dlg_search::DlgSearch,
+    dlg_text_search::{DlgTextSearch, TextSearch},
     text_viewer::TextViewer,
     top_bar::TopBar,
 };
@@ -28,6 +28,7 @@ pub enum Events {
 pub enum PubSub {
     // App-wide events
     Error(String),
+    Warning(String, String),
     CloseDialog,
 
     // Text viewer events
@@ -35,6 +36,9 @@ pub enum PubSub {
 
     // Dialog goto events
     Goto(String),
+
+    // Dialog text search events
+    TextSearch(TextSearch),
 }
 
 pub enum Action {
@@ -70,7 +74,7 @@ impl App {
         let chunks = get_chunks(&Rect::new(0, 0, w, h));
 
         Ok(App {
-            config: config,
+            config,
             events_rx,
             pubsub_tx: pubsub_tx.clone(),
             pubsub_rx,
@@ -122,7 +126,7 @@ impl App {
                                 | Key::Char('F')
                                 | Key::F(7) => {
                                     // TODO: Don't show the dialog if the file size is 0
-                                    self.dialog = Some(Box::new(DlgSearch::new(
+                                    self.dialog = Some(Box::new(DlgTextSearch::new(
                                         &self.config,
                                         self.pubsub_tx.clone(),
                                     )?));
@@ -179,6 +183,17 @@ impl App {
                             &self.config,
                             self.pubsub_tx.clone(),
                             &msg,
+                            "Error",
+                            DialogType::Error,
+                        )?));
+                    },
+                    PubSub::Warning(title, msg) => {
+                        self.dialog = Some(Box::new(DlgError::new(
+                            &self.config,
+                            self.pubsub_tx.clone(),
+                            &msg,
+                            &title,
+                            DialogType::Warning,
                         )?));
                     },
                     PubSub::CloseDialog => self.dialog = None,

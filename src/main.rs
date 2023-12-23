@@ -16,7 +16,7 @@ mod component;
 mod config;
 mod dlg_error;
 mod dlg_goto;
-mod dlg_search;
+mod dlg_text_search;
 mod text_viewer;
 mod tilde_layout;
 mod top_bar;

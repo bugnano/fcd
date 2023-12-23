@@ -72,7 +72,7 @@ impl Component for ButtonBar {
                         .bg(self.config.ui.hotkey_bg),
                 ),
                 Span::styled(
-                    label.to_string(),
+                    String::from(*label),
                     Style::default()
                         .fg(self.config.ui.selected_fg)
                         .bg(self.config.ui.selected_bg),
