@@ -12,12 +12,14 @@ use termion::event::*;
 use bat::assets::HighlightingAssets;
 use encoding_rs::WINDOWS_1252;
 use log::debug;
+use regex::{self, Regex, RegexBuilder};
 use syntect::{easy::HighlightLines, util::LinesWithEndings};
 
 use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
+    dlg_text_search::SearchType,
     fnmatch,
 };
 
@@ -51,6 +53,11 @@ pub struct TextViewer {
     lines: Vec<String>,
     styled_lines: Vec<Vec<(Color, String)>>,
     first_line: usize,
+
+    expression: Option<Regex>,
+    lines_with_matches: Vec<bool>,
+    backwards: bool,
+    search_pos: usize,
 }
 
 impl TextViewer {
@@ -102,6 +109,11 @@ impl TextViewer {
             lines,
             styled_lines,
             first_line: 0,
+
+            expression: None,
+            lines_with_matches: Vec::new(),
+            backwards: false,
+            search_pos: 0,
         };
 
         viewer.highlight();
@@ -168,12 +180,65 @@ impl TextViewer {
     pub fn resize(&mut self, rect: &Rect) {
         self.rect = *rect;
 
+        self.clamp_first_line();
+    }
+
+    pub fn clamp_first_line(&mut self) {
         self.first_line = match self.first_line {
             i if (i + (self.rect.height as usize)) > self.lines.len() => {
                 self.lines.len().saturating_sub(self.rect.height as usize)
             }
             i => i,
         };
+    }
+
+    pub fn search_next(&mut self) {
+        if let Some(_re) = &self.expression {
+            self.search_pos = match self
+                .lines_with_matches
+                .iter()
+                .skip(self.search_pos + 1)
+                .position(|&matches| matches)
+            {
+                Some(pos) => self.search_pos + 1 + pos,
+                None => self
+                    .lines_with_matches
+                    .iter()
+                    .position(|&matches| matches)
+                    .unwrap(),
+            };
+
+            self.first_line = self.search_pos;
+            self.clamp_first_line();
+        }
+    }
+
+    pub fn search_prev(&mut self) {
+        if let Some(_re) = &self.expression {
+            self.search_pos = match self
+                .lines_with_matches
+                .iter()
+                .rev()
+                .skip(self.lines_with_matches.len().wrapping_sub(self.search_pos))
+                .position(|&matches| matches)
+            {
+                Some(pos) => self.search_pos.saturating_sub(1).saturating_sub(pos),
+                None => self
+                    .lines_with_matches
+                    .len()
+                    .saturating_sub(1)
+                    .saturating_sub(
+                        self.lines_with_matches
+                            .iter()
+                            .rev()
+                            .position(|&matches| matches)
+                            .unwrap(),
+                    ),
+            };
+
+            self.first_line = self.search_pos;
+            self.clamp_first_line();
+        }
     }
 }
 
@@ -187,23 +252,28 @@ impl Component for TextViewer {
                     i if i > 0 => i - 1,
                     _ => 0,
                 };
+                self.search_pos = self.first_line;
             }
             Key::Down | Key::Char('j') => {
                 self.first_line = match self.first_line {
                     i if (i + 1 + (self.rect.height as usize)) <= self.lines.len() => i + 1,
                     i => i,
                 };
+                self.search_pos = self.first_line;
             }
             Key::Home | Key::Char('g') => {
                 self.first_line = 0;
+                self.search_pos = self.first_line;
             }
             Key::End | Key::Char('G') => {
                 self.first_line = self.lines.len().saturating_sub(self.rect.height as usize);
+                self.search_pos = self.first_line;
             }
             Key::PageUp | Key::Ctrl('b') => {
                 self.first_line = self
                     .first_line
                     .saturating_sub((self.rect.height as usize) - 1);
+                self.search_pos = self.first_line;
             }
             Key::PageDown | Key::Ctrl('f') => {
                 self.first_line = match self.first_line {
@@ -214,7 +284,16 @@ impl Component for TextViewer {
                     }
                     _ => self.lines.len().saturating_sub(self.rect.height as usize),
                 };
+                self.search_pos = self.first_line;
             }
+            Key::Char('n') => match self.backwards {
+                true => self.search_prev(),
+                false => self.search_next(),
+            },
+            Key::Char('N') => match self.backwards {
+                true => self.search_next(),
+                false => self.search_prev(),
+            },
             _ => key_handled = false,
         }
 
@@ -233,7 +312,8 @@ impl Component for TextViewer {
                         line_number.saturating_sub(1)
                     } else {
                         self.lines.len().saturating_sub(self.rect.height as usize)
-                    }
+                    };
+                    self.search_pos = self.first_line;
                 }
                 Err(_) => {
                     self.pubsub_tx
@@ -245,13 +325,65 @@ impl Component for TextViewer {
                 }
             },
             PubSub::TextSearch(search) => {
-                let s = fnmatch::translate(&search.search_string);
-                self.pubsub_tx
-                    .send(PubSub::Warning(
-                        String::from("Search"),
-                        String::from(&s[..(s.len() - 2)]),
-                    ))
-                    .unwrap();
+                self.backwards = search.backwards;
+
+                let expression = match search.search_type {
+                    SearchType::Normal => regex::escape(&search.search_string),
+                    SearchType::Regex => String::from(&search.search_string),
+                    SearchType::Wildcard => {
+                        let re = fnmatch::translate(&search.search_string);
+
+                        String::from(&re[..(re.len() - 2)])
+                    }
+                };
+
+                let expression = match search.whole_words {
+                    true => format!(r"\b{}\b", expression),
+                    false => expression,
+                };
+
+                self.expression = match RegexBuilder::new(&expression)
+                    .case_insensitive(!search.case_sensitive)
+                    .multi_line(true)
+                    .build()
+                {
+                    Ok(re) => {
+                        self.lines_with_matches =
+                            self.lines.iter().map(|line| re.is_match(line)).collect();
+
+                        match self.lines_with_matches.iter().any(|&matches| matches) {
+                            true => Some(re),
+                            false => {
+                                self.pubsub_tx
+                                    .send(PubSub::Warning(
+                                        String::from("Search"),
+                                        String::from("Search string not found"),
+                                    ))
+                                    .unwrap();
+
+                                None
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        self.pubsub_tx
+                            .send(PubSub::Error(String::from("Invalid search string")))
+                            .unwrap();
+
+                        None
+                    }
+                };
+
+                if let Some(_re) = &self.expression {
+                    self.search_pos = self.first_line;
+
+                    if !self.lines_with_matches[self.search_pos] {
+                        match self.backwards {
+                            true => self.search_prev(),
+                            false => self.search_next(),
+                        }
+                    }
+                }
             }
             _ => (),
         }
