@@ -17,6 +17,7 @@ mod config;
 mod dlg_error;
 mod dlg_goto;
 mod dlg_text_search;
+mod fnmatch;
 mod text_viewer;
 mod tilde_layout;
 mod top_bar;

@@ -25,11 +25,11 @@ pub enum SearchType {
 
 #[derive(Debug)]
 pub struct TextSearch {
-    search_string: String,
-    search_type: SearchType,
-    case_sensitive: bool,
-    backwards: bool,
-    whole_words: bool,
+    pub search_string: String,
+    pub search_type: SearchType,
+    pub case_sensitive: bool,
+    pub backwards: bool,
+    pub whole_words: bool,
 }
 
 #[derive(Debug)]

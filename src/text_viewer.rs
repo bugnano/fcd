@@ -18,6 +18,7 @@ use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
+    fnmatch,
 };
 
 fn expand_tabs_for_line(line: &str, tabsize: usize) -> String {
@@ -244,10 +245,11 @@ impl Component for TextViewer {
                 }
             },
             PubSub::TextSearch(search) => {
+                let s = fnmatch::translate(&search.search_string);
                 self.pubsub_tx
                     .send(PubSub::Warning(
                         String::from("Search"),
-                        String::from("Search string not found"),
+                        String::from(&s[..(s.len() - 2)]),
                     ))
                     .unwrap();
             }
