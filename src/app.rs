@@ -32,7 +32,7 @@ pub enum PubSub {
     CloseDialog,
 
     // Text viewer events
-    Highlight(Vec<Vec<(Color, String)>>),
+    Highlight(Vec<Vec<(Style, String)>>),
 
     // Dialog goto events
     Goto(String),

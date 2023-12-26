@@ -19,6 +19,9 @@ pub struct Ui {
     #[serde_as(as = "DisplayFromStr")]
     pub selected_bg: Color,
 
+    #[serde_as(as = "DisplayFromStr")]
+    pub markselect_fg: Color,
+
     pub use_shadows: bool,
 
     #[serde_as(as = "DisplayFromStr")]

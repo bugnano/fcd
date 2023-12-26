@@ -51,7 +51,7 @@ pub struct TextViewer {
     data: Vec<u8>,
     content: String,
     lines: Vec<String>,
-    styled_lines: Vec<Vec<(Color, String)>>,
+    styled_lines: Vec<Vec<(Style, String)>>,
     first_line: usize,
 
     expression: Option<Regex>,
@@ -93,9 +93,14 @@ impl TextViewer {
             .collect();
 
         // Default to unstyled text
-        let styled_lines: Vec<Vec<(Color, String)>> = lines
+        let styled_lines: Vec<Vec<(Style, String)>> = lines
             .iter()
-            .map(|line| vec![(config.highlight.base05, String::from(line))])
+            .map(|line| {
+                vec![(
+                    Style::default().fg(config.highlight.base05),
+                    String::from(line),
+                )]
+            })
             .collect();
 
         let viewer = TextViewer {
@@ -140,7 +145,7 @@ impl TextViewer {
             };
 
             let mut highlighter = HighlightLines::new(syntax, theme);
-            let styled_lines: Vec<Vec<(Color, String)>> = lines
+            let styled_lines: Vec<Vec<(Style, String)>> = lines
                 .iter()
                 .map(|line| {
                     highlighter
@@ -149,7 +154,7 @@ impl TextViewer {
                         .iter()
                         .map(|(style, text)| {
                             (
-                                match style.foreground.r {
+                                Style::default().fg(match style.foreground.r {
                                     0x00 => config.highlight.base00,
                                     0x01 => config.highlight.base08,
                                     0x02 => config.highlight.base0b,
@@ -165,7 +170,7 @@ impl TextViewer {
                                         debug!("{:?}", style);
                                         config.highlight.base05
                                     }
-                                },
+                                }),
                                 String::from(*text),
                             )
                         })
@@ -294,6 +299,7 @@ impl Component for TextViewer {
                 true => self.search_next(),
                 false => self.search_prev(),
             },
+            Key::Esc => self.expression = None,
             _ => key_handled = false,
         }
 
@@ -325,6 +331,11 @@ impl Component for TextViewer {
                 }
             },
             PubSub::TextSearch(search) => {
+                if search.search_string.len() == 0 {
+                    self.expression = None;
+                    return Ok(());
+                }
+
                 self.backwards = search.backwards;
 
                 let expression = match search.search_type {
@@ -344,12 +355,14 @@ impl Component for TextViewer {
 
                 self.expression = match RegexBuilder::new(&expression)
                     .case_insensitive(!search.case_sensitive)
-                    .multi_line(true)
                     .build()
                 {
                     Ok(re) => {
-                        self.lines_with_matches =
-                            self.lines.iter().map(|line| re.is_match(line)).collect();
+                        self.lines_with_matches = self
+                            .lines
+                            .iter()
+                            .map(|line| re.is_match(line.trim_end_matches('\n')))
+                            .collect();
 
                         match self.lines_with_matches.iter().any(|&matches| matches) {
                             true => Some(re),
@@ -398,11 +411,93 @@ impl Component for TextViewer {
             Constraint::Length(chunk.width.saturating_sub((line_number_width + 1) as u16)),
         ];
 
-        let items: Vec<Row> = self
+        let highlighted_lines: Vec<Vec<(Style, String)>> = self
             .styled_lines
             .iter()
             .skip(self.first_line)
             .take(chunk.height.into())
+            .enumerate()
+            .map(|(i, e)| {
+                match (
+                    &self.expression,
+                    self.lines_with_matches.get(self.first_line + i),
+                ) {
+                    (Some(re), Some(true)) => {
+                        let line = &self.lines[self.first_line + i];
+
+                        let mut v = Vec::new();
+                        let mut bytes_written = 0;
+                        let mut i_e = 0;
+                        let mut i_text = 0;
+                        for m in re.find_iter(line.trim_end_matches('\n')) {
+                            while bytes_written < m.start() {
+                                let (color, text) = &e[i_e];
+
+                                if (bytes_written + (text.len() - i_text)) <= m.start() {
+                                    v.push((*color, String::from(&text[i_text..])));
+                                    bytes_written += text.len() - i_text;
+                                    i_e += 1;
+                                    i_text = 0;
+                                } else {
+                                    let end = i_text + (m.start() - bytes_written);
+
+                                    v.push((*color, String::from(&text[i_text..end])));
+                                    i_text = end;
+                                    bytes_written = m.start();
+                                }
+                            }
+
+                            v.push((
+                                Style::default()
+                                    .fg(if (self.first_line + i) == self.search_pos {
+                                        self.config.ui.markselect_fg
+                                    } else {
+                                        self.config.ui.selected_fg
+                                    })
+                                    .bg(self.config.ui.selected_bg),
+                                String::from(m.as_str()),
+                            ));
+
+                            while bytes_written < m.end() {
+                                let (_color, text) = &e[i_e];
+
+                                if (bytes_written + (text.len() - i_text)) <= m.end() {
+                                    bytes_written += text.len() - i_text;
+                                    i_e += 1;
+                                    i_text = 0;
+                                } else {
+                                    i_text += m.end() - bytes_written;
+                                    bytes_written = m.end();
+                                }
+                            }
+                        }
+
+                        while bytes_written < line.len() {
+                            let (color, text) = &e[i_e];
+
+                            if (bytes_written + (text.len() - i_text)) <= line.len() {
+                                v.push((*color, String::from(&text[i_text..])));
+                                bytes_written += text.len() - i_text;
+                                i_e += 1;
+                                i_text = 0;
+                            } else {
+                                let end = i_text + (line.len() - bytes_written);
+
+                                v.push((*color, String::from(&text[i_text..end])));
+                                i_text = end;
+                                bytes_written = line.len();
+                            }
+                        }
+
+                        v
+                    }
+                    _ => e.to_vec(),
+                }
+            })
+            .collect();
+
+        let items: Vec<Row> = highlighted_lines
+            .iter()
             .enumerate()
             .map(|(i, e)| {
                 Row::new(vec![
@@ -416,7 +511,7 @@ impl Component for TextViewer {
                     )),
                     Cell::from(Line::from(
                         e.iter()
-                            .map(|(color, text)| Span::styled(text, Style::default().fg(*color)))
+                            .map(|(color, text)| Span::styled(text, *color))
                             .collect::<Vec<_>>(),
                     )),
                 ])
