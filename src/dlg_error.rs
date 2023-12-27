@@ -18,7 +18,7 @@ use crate::{
     tilde_layout::tilde_layout,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum DialogType {
     Error,
     Warning,

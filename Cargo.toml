@@ -16,10 +16,10 @@ log = "*"
 env_logger = "*"
 clap = { version = "*", features = ["derive", "cargo"] }
 encoding_rs = "*"
-#syntect = { version = "*", default-features = false, features = ["default-fancy"]}
+#syntect = { version = "*", default-features = false, features = ["default-fancy"] }
 syntect = "*"
-#bat = { version = "*", default-features = false, features = ["regex-fancy"]}
-bat = { version = "*", default-features = false, features = ["regex-onig"]}
+#bat = { version = "*", default-features = false, features = ["regex-fancy"] }
+bat = { version = "*", default-features = false, features = ["regex-onig"] }
 serde = "*"
 serde_with = "*"
 toml = "*"

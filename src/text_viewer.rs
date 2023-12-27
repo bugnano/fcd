@@ -19,7 +19,8 @@ use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
-    dlg_text_search::SearchType,
+    dlg_goto::GotoType,
+    dlg_text_search::{SearchType, TextSearch},
     fnmatch,
 };
 
@@ -291,6 +292,30 @@ impl Component for TextViewer {
                 };
                 self.search_pos = self.first_line;
             }
+            Key::Char(':') | Key::F(5) => {
+                // TODO: Don't show the dialog if the file size is 0
+                self.pubsub_tx
+                    .send(PubSub::DlgGoto(GotoType::LineNumber))
+                    .unwrap();
+            }
+            Key::Char('/') | Key::Char('?') | Key::Char('f') | Key::Char('F') | Key::F(7) => {
+                // TODO: Don't show the dialog if the file size is 0
+                self.pubsub_tx
+                    .send(PubSub::DlgTextSearch(TextSearch {
+                        search_string: String::from(""),
+                        search_type: match key {
+                            Key::Char('/') | Key::Char('?') => SearchType::Regex,
+                            _ => SearchType::Normal,
+                        },
+                        case_sensitive: false,
+                        backwards: match key {
+                            Key::Char('?') | Key::Char('F') => true,
+                            _ => false,
+                        },
+                        whole_words: false,
+                    }))
+                    .unwrap();
+            }
             Key::Char('n') => match self.backwards {
                 true => self.search_prev(),
                 false => self.search_next(),
@@ -309,27 +334,29 @@ impl Component for TextViewer {
     fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
         match event {
             PubSub::Highlight(styled_lines) => self.styled_lines = styled_lines.to_vec(),
-            PubSub::Goto(str_line_number) => match str_line_number.parse::<usize>() {
-                Ok(line_number) => {
-                    self.first_line = if (line_number.saturating_sub(1)
-                        + (self.rect.height as usize))
-                        <= self.lines.len()
-                    {
-                        line_number.saturating_sub(1)
-                    } else {
-                        self.lines.len().saturating_sub(self.rect.height as usize)
-                    };
-                    self.search_pos = self.first_line;
+            PubSub::Goto(GotoType::LineNumber, str_line_number) => {
+                match str_line_number.parse::<usize>() {
+                    Ok(line_number) => {
+                        self.first_line = if (line_number.saturating_sub(1)
+                            + (self.rect.height as usize))
+                            <= self.lines.len()
+                        {
+                            line_number.saturating_sub(1)
+                        } else {
+                            self.lines.len().saturating_sub(self.rect.height as usize)
+                        };
+                        self.search_pos = self.first_line;
+                    }
+                    Err(_) => {
+                        self.pubsub_tx
+                            .send(PubSub::Error(format!(
+                                "Invalid number: {}",
+                                str_line_number
+                            )))
+                            .unwrap();
+                    }
                 }
-                Err(_) => {
-                    self.pubsub_tx
-                        .send(PubSub::Error(format!(
-                            "Invalid number: {}",
-                            str_line_number
-                        )))
-                        .unwrap();
-                }
-            },
+            }
             PubSub::TextSearch(search) => {
                 if search.search_string.len() == 0 {
                     self.expression = None;

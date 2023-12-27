@@ -1,3 +1,5 @@
+use std::cmp::min;
+
 use anyhow::Result;
 use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
@@ -9,8 +11,8 @@ pub struct RadioBox {
     buttons: Vec<String>,
     style: Style,
     focused_style: Style,
-    cursor_position: usize,
     selected_button: usize,
+    cursor_position: usize,
 }
 
 impl RadioBox {
@@ -18,16 +20,21 @@ impl RadioBox {
         buttons: T,
         style: &Style,
         focused_style: &Style,
+        selected_button: usize,
     ) -> Result<RadioBox> {
+        let b: Vec<String> = buttons
+            .into_iter()
+            .map(|item| String::from(item.as_ref()))
+            .collect();
+
+        let selected = min(selected_button, b.len().saturating_sub(1));
+
         Ok(RadioBox {
-            buttons: buttons
-                .into_iter()
-                .map(|item| String::from(item.as_ref()))
-                .collect(),
+            buttons: b,
             style: *style,
             focused_style: *focused_style,
+            selected_button: selected,
             cursor_position: 0,
-            selected_button: 0,
         })
     }
 

@@ -18,11 +18,17 @@ use crate::{
     widgets::{button::Button, input::Input},
 };
 
+#[derive(Debug, Copy, Clone)]
+pub enum GotoType {
+    LineNumber,
+    HexOffset,
+}
+
 #[derive(Debug)]
 pub struct DlgGoto {
     config: Config,
     pubsub_tx: Sender<PubSub>,
-    label: String,
+    goto_type: GotoType,
     input: Input,
     btn_ok: Button,
     btn_cancel: Button,
@@ -31,11 +37,11 @@ pub struct DlgGoto {
 }
 
 impl DlgGoto {
-    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>, label: &str) -> Result<DlgGoto> {
+    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>, goto_type: GotoType) -> Result<DlgGoto> {
         Ok(DlgGoto {
             config: *config,
             pubsub_tx,
-            label: String::from(label),
+            goto_type,
             input: Input::new(
                 &Style::default()
                     .fg(config.dialog.input_fg)
@@ -87,7 +93,7 @@ impl Component for DlgGoto {
 
                     if (self.section_focus_position == 0) || (self.button_focus_position == 0) {
                         self.pubsub_tx
-                            .send(PubSub::Goto(self.input.value()))
+                            .send(PubSub::Goto(self.goto_type, self.input.value()))
                             .unwrap();
                     }
                 }
@@ -157,6 +163,11 @@ impl Component for DlgGoto {
 
         // Upper section
 
+        let label = match self.goto_type {
+            GotoType::LineNumber => "Line number: ",
+            GotoType::HexOffset => "Hex offset: ",
+        };
+
         let upper_block = Block::default()
             .title(
                 Title::from(Span::styled(
@@ -176,16 +187,11 @@ impl Component for DlgGoto {
 
         let upper_area = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(self.label.width() as u16),
-                Constraint::Min(1),
-            ])
+            .constraints([Constraint::Length(label.width() as u16), Constraint::Min(1)])
             .split(upper_block.inner(sections[0]));
 
-        let label = Paragraph::new(Span::raw(&self.label));
-
         f.render_widget(upper_block, sections[0]);
-        f.render_widget(label, upper_area[0]);
+        f.render_widget(Paragraph::new(Span::raw(label)), upper_area[0]);
         self.input.render(
             f,
             &upper_area[1],

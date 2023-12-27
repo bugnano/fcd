@@ -1,4 +1,4 @@
-use std::{io, panic, path::Path, rc::Rc, thread};
+use std::{io, path::Path, rc::Rc, thread};
 
 use anyhow::Result;
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
@@ -14,17 +14,19 @@ use crate::{
     config::load_config,
     config::Config,
     dlg_error::{DialogType, DlgError},
-    dlg_goto::DlgGoto,
+    dlg_goto::{DlgGoto, GotoType},
     dlg_text_search::{DlgTextSearch, TextSearch},
     text_viewer::TextViewer,
     top_bar::TopBar,
 };
 
+#[derive(Debug, Clone)]
 pub enum Events {
     Input(Event),
     Signal(i32),
 }
 
+#[derive(Debug, Clone)]
 pub enum PubSub {
     // App-wide events
     Error(String),
@@ -35,12 +37,15 @@ pub enum PubSub {
     Highlight(Vec<Vec<(Style, String)>>),
 
     // Dialog goto events
-    Goto(String),
+    DlgGoto(GotoType),
+    Goto(GotoType, String),
 
     // Dialog text search events
+    DlgTextSearch(TextSearch),
     TextSearch(TextSearch),
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum Action {
     Continue,
     Redraw,
@@ -108,29 +113,10 @@ impl App {
                                 | Key::Char('v')
                                 | Key::F(3)
                                 | Key::F(10) => return Ok(Action::Quit),
-                                Key::Char('p') => panic!("at the disco"),
+                                //Key::Char('p') => panic!("at the disco"),
                                 Key::Ctrl('c') => return Ok(Action::CtrlC),
                                 Key::Ctrl('l') => return Ok(Action::Redraw),
                                 Key::Ctrl('z') => return Ok(Action::CtrlZ),
-                                Key::Char(':') | Key::F(5) => {
-                                    // TODO: Don't show the dialog if the file size is 0
-                                    self.dialog = Some(Box::new(DlgGoto::new(
-                                        &self.config,
-                                        self.pubsub_tx.clone(),
-                                        "Line number: ",
-                                    )?));
-                                }
-                                Key::Char('/')
-                                | Key::Char('?')
-                                | Key::Char('f')
-                                | Key::Char('F')
-                                | Key::F(7) => {
-                                    // TODO: Don't show the dialog if the file size is 0
-                                    self.dialog = Some(Box::new(DlgTextSearch::new(
-                                        &self.config,
-                                        self.pubsub_tx.clone(),
-                                    )?));
-                                }
                                 _ => log::debug!("{:?}", key),
                             }
                         }
@@ -197,6 +183,20 @@ impl App {
                         )?));
                     },
                     PubSub::CloseDialog => self.dialog = None,
+                    PubSub::DlgGoto(goto_type) => {
+                        self.dialog = Some(Box::new(DlgGoto::new(
+                            &self.config,
+                            self.pubsub_tx.clone(),
+                            goto_type,
+                        )?));
+                    },
+                    PubSub::DlgTextSearch(text_search) => {
+                        self.dialog = Some(Box::new(DlgTextSearch::new(
+                            &self.config,
+                            self.pubsub_tx.clone(),
+                            &text_search,
+                        )?));
+                    },
                     _ => (),
                 }
             },

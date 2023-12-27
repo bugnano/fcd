@@ -16,14 +16,14 @@ use crate::{
     widgets::{button::Button, check_box::CheckBox, input::Input, radio_box::RadioBox},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum SearchType {
     Normal,
     Regex,
     Wildcard,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TextSearch {
     pub search_string: String,
     pub search_type: SearchType,
@@ -48,7 +48,11 @@ pub struct DlgTextSearch {
 }
 
 impl DlgTextSearch {
-    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>) -> Result<DlgTextSearch> {
+    pub fn new(
+        config: &Config,
+        pubsub_tx: Sender<PubSub>,
+        text_search: &TextSearch,
+    ) -> Result<DlgTextSearch> {
         Ok(DlgTextSearch {
             config: *config,
             pubsub_tx,
@@ -63,6 +67,11 @@ impl DlgTextSearch {
                 &Style::default()
                     .fg(config.dialog.focus_fg)
                     .bg(config.dialog.focus_bg),
+                match text_search.search_type {
+                    SearchType::Normal => 0,
+                    SearchType::Regex => 1,
+                    SearchType::Wildcard => 2,
+                },
             )?,
             check_boxes: vec![
                 CheckBox::new(
@@ -71,6 +80,7 @@ impl DlgTextSearch {
                     &Style::default()
                         .fg(config.dialog.focus_fg)
                         .bg(config.dialog.focus_bg),
+                    text_search.case_sensitive,
                 )?,
                 CheckBox::new(
                     "Backwards",
@@ -78,6 +88,7 @@ impl DlgTextSearch {
                     &Style::default()
                         .fg(config.dialog.focus_fg)
                         .bg(config.dialog.focus_bg),
+                    text_search.backwards,
                 )?,
                 CheckBox::new(
                     "Whole words",
@@ -85,6 +96,7 @@ impl DlgTextSearch {
                     &Style::default()
                         .fg(config.dialog.focus_fg)
                         .bg(config.dialog.focus_bg),
+                    text_search.whole_words,
                 )?,
             ],
             btn_ok: Button::new(

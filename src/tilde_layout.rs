@@ -8,7 +8,7 @@ pub fn tilde_layout(text: &str, max_width: usize) -> String {
         return String::from(text);
     }
 
-    let norm_text: String = text.chars().nfkc().collect();
+    let norm_text: String = text.nfkc().collect();
 
     let full_width = max(max_width.saturating_sub(1), 2);
     let max_left = full_width / 2;

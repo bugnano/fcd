@@ -13,12 +13,17 @@ pub struct CheckBox {
 }
 
 impl CheckBox {
-    pub fn new(label: &str, style: &Style, focused_style: &Style) -> Result<CheckBox> {
+    pub fn new(
+        label: &str,
+        style: &Style,
+        focused_style: &Style,
+        checked: bool,
+    ) -> Result<CheckBox> {
         Ok(CheckBox {
             label: String::from(label),
             style: *style,
             focused_style: *focused_style,
-            checked: false,
+            checked,
         })
     }
 
