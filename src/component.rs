@@ -26,8 +26,6 @@ pub trait Component {
         Ok(())
     }
 
-    fn resize(&mut self, _rect: &Rect) {}
-
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus);
 }
 

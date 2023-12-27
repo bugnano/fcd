@@ -1,5 +1,5 @@
 use std::{
-    cmp::max,
+    cmp::{max, min},
     fs,
     path::{Path, PathBuf},
     str, thread,
@@ -67,7 +67,6 @@ impl TextViewer {
     pub fn new(
         config: &Config,
         pubsub_tx: Sender<PubSub>,
-        rect: &Rect,
         filename: &Path,
         tabsize: u8,
     ) -> Result<TextViewer> {
@@ -106,10 +105,10 @@ impl TextViewer {
             })
             .collect();
 
-        let viewer = TextViewer {
+        let mut viewer = TextViewer {
             config: *config,
             pubsub_tx,
-            rect: *rect,
+            rect: Rect::default(),
             filename: filename.to_path_buf(),
             tabsize: tab_size,
             data,
@@ -125,6 +124,7 @@ impl TextViewer {
             search_pos: 0,
         };
 
+        viewer.send_updated_position();
         viewer.highlight();
 
         Ok(viewer)
@@ -186,19 +186,47 @@ impl TextViewer {
         });
     }
 
-    pub fn resize(&mut self, rect: &Rect) {
-        self.rect = *rect;
-
-        self.clamp_first_line();
+    pub fn clamp_first_line(&mut self) {
+        match self.wrap {
+            true => {
+                if (self.first_line + 1) > self.lines.len() {
+                    self.first_line = self.lines.len().saturating_sub(1);
+                }
+            }
+            false => {
+                if (self.first_line + (self.rect.height as usize)) > self.lines.len() {
+                    self.first_line = self.lines.len().saturating_sub(self.rect.height as usize);
+                }
+            }
+        }
     }
 
-    pub fn clamp_first_line(&mut self) {
-        self.first_line = match self.first_line {
-            i if (i + (self.rect.height as usize)) > self.lines.len() => {
-                self.lines.len().saturating_sub(self.rect.height as usize)
-            }
-            i => i,
+    pub fn send_updated_position(&mut self) {
+        let current_line = match self.wrap {
+            true => self.first_line + 1,
+            false => self.first_line + (self.rect.height as usize),
         };
+
+        self.pubsub_tx
+            .send(PubSub::FileInfo(
+                fs::canonicalize(&self.filename)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                format!(
+                    "{}/{}",
+                    min(current_line, self.lines.len()),
+                    self.lines.len()
+                ),
+                format!(
+                    "{:3}%",
+                    match self.lines.len() {
+                        0 => 100,
+                        n => (min(current_line, n) * 100) / n,
+                    }
+                ),
+            ))
+            .unwrap();
     }
 
     pub fn search_next(&mut self) {
@@ -217,8 +245,14 @@ impl TextViewer {
                     .unwrap(),
             };
 
+            let old_first_line = self.first_line;
+
             self.first_line = self.search_pos;
             self.clamp_first_line();
+
+            if self.first_line != old_first_line {
+                self.send_updated_position();
+            }
         }
     }
 
@@ -245,8 +279,14 @@ impl TextViewer {
                     ),
             };
 
+            let old_first_line = self.first_line;
+
             self.first_line = self.search_pos;
             self.clamp_first_line();
+
+            if self.first_line != old_first_line {
+                self.send_updated_position();
+            }
         }
     }
 }
@@ -257,42 +297,77 @@ impl Component for TextViewer {
 
         match key {
             Key::Up | Key::Char('k') => {
-                self.first_line = match self.first_line {
-                    i if i > 0 => i - 1,
-                    _ => 0,
-                };
+                let old_first_line = self.first_line;
+
+                self.first_line = self.first_line.saturating_sub(1);
+                self.clamp_first_line();
+
+                if self.first_line != old_first_line {
+                    self.send_updated_position();
+                }
+
                 self.search_pos = self.first_line;
             }
             Key::Down | Key::Char('j') => {
-                self.first_line = match self.first_line {
-                    i if (i + 1 + (self.rect.height as usize)) <= self.lines.len() => i + 1,
-                    i => i,
-                };
+                let old_first_line = self.first_line;
+
+                self.first_line += 1;
+                self.clamp_first_line();
+
+                if self.first_line != old_first_line {
+                    self.send_updated_position();
+                }
+
                 self.search_pos = self.first_line;
             }
             Key::Home | Key::Char('g') => {
+                let old_first_line = self.first_line;
+
                 self.first_line = 0;
+                self.clamp_first_line();
+
+                if self.first_line != old_first_line {
+                    self.send_updated_position();
+                }
+
                 self.search_pos = self.first_line;
             }
             Key::End | Key::Char('G') => {
-                self.first_line = self.lines.len().saturating_sub(self.rect.height as usize);
+                let old_first_line = self.first_line;
+
+                self.first_line = self.lines.len();
+                self.clamp_first_line();
+
+                if self.first_line != old_first_line {
+                    self.send_updated_position();
+                }
+
                 self.search_pos = self.first_line;
             }
             Key::PageUp | Key::Ctrl('b') => {
+                let old_first_line = self.first_line;
+
                 self.first_line = self
                     .first_line
-                    .saturating_sub((self.rect.height as usize) - 1);
+                    .saturating_sub((self.rect.height as usize).saturating_sub(1));
+                self.clamp_first_line();
+
+                if self.first_line != old_first_line {
+                    self.send_updated_position();
+                }
+
                 self.search_pos = self.first_line;
             }
             Key::PageDown | Key::Ctrl('f') => {
-                self.first_line = match self.first_line {
-                    i if (i + ((self.rect.height as usize) - 1) + (self.rect.height as usize))
-                        <= self.lines.len() =>
-                    {
-                        i + ((self.rect.height as usize) - 1)
-                    }
-                    _ => self.lines.len().saturating_sub(self.rect.height as usize),
-                };
+                let old_first_line = self.first_line;
+
+                self.first_line += (self.rect.height as usize).saturating_sub(1);
+                self.clamp_first_line();
+
+                if self.first_line != old_first_line {
+                    self.send_updated_position();
+                }
+
                 self.search_pos = self.first_line;
             }
             Key::Char(':') | Key::F(5) => {
@@ -311,10 +386,7 @@ impl Component for TextViewer {
                             _ => SearchType::Normal,
                         },
                         case_sensitive: false,
-                        backwards: match key {
-                            Key::Char('?') | Key::Char('F') => true,
-                            _ => false,
-                        },
+                        backwards: matches!(key, Key::Char('?') | Key::Char('F')),
                         whole_words: false,
                     }))
                     .unwrap();
@@ -330,6 +402,7 @@ impl Component for TextViewer {
             Key::Esc => self.expression = None,
             Key::Char('w') | Key::F(2) => {
                 self.wrap = !self.wrap;
+                self.send_updated_position();
             }
             _ => key_handled = false,
         }
@@ -343,14 +416,15 @@ impl Component for TextViewer {
             PubSub::Goto(GotoType::LineNumber, str_line_number) => {
                 match str_line_number.parse::<usize>() {
                     Ok(line_number) => {
-                        self.first_line = if (line_number.saturating_sub(1)
-                            + (self.rect.height as usize))
-                            <= self.lines.len()
-                        {
-                            line_number.saturating_sub(1)
-                        } else {
-                            self.lines.len().saturating_sub(self.rect.height as usize)
-                        };
+                        let old_first_line = self.first_line;
+
+                        self.first_line = line_number.saturating_sub(1);
+                        self.clamp_first_line();
+
+                        if self.first_line != old_first_line {
+                            self.send_updated_position();
+                        }
+
                         self.search_pos = self.first_line;
                     }
                     Err(_) => {
@@ -364,7 +438,7 @@ impl Component for TextViewer {
                 }
             }
             PubSub::TextSearch(search) => {
-                if search.search_string.len() == 0 {
+                if search.search_string.is_empty() {
                     self.expression = None;
                     return Ok(());
                 }
@@ -438,6 +512,16 @@ impl Component for TextViewer {
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
+        let old_height = self.rect.height;
+        let old_first_line = self.first_line;
+
+        self.rect = *chunk;
+        self.clamp_first_line();
+
+        if (self.rect.height != old_height) || (self.first_line != old_first_line) {
+            self.send_updated_position();
+        }
+
         let line_number_width = self.lines.len().to_string().len();
         let text_width = chunk.width.saturating_sub((line_number_width + 1) as u16);
         let widths = [

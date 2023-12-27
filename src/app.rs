@@ -1,9 +1,9 @@
-use std::{io, path::Path, rc::Rc, thread};
+use std::{io, path::Path, thread};
 
 use anyhow::Result;
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
 use ratatui::{prelude::*, widgets::*};
-use termion::{event::*, input::TermRead, terminal_size};
+use termion::{event::*, input::TermRead};
 
 use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
@@ -35,6 +35,7 @@ pub enum PubSub {
 
     // Text viewer events
     Highlight(Vec<Vec<(Style, String)>>),
+    FileInfo(String, String, String),
 
     // Dialog goto events
     DlgGoto(GotoType),
@@ -75,22 +76,13 @@ impl App {
         let (_events_tx, events_rx) = init_events()?;
         let (pubsub_tx, pubsub_rx) = unbounded();
 
-        let (w, h) = terminal_size().unwrap();
-        let chunks = get_chunks(&Rect::new(0, 0, w, h));
-
         Ok(App {
             config,
             events_rx,
             pubsub_tx: pubsub_tx.clone(),
             pubsub_rx,
-            top_bar: TopBar::new(&config, filename)?,
-            text_viewer: TextViewer::new(
-                &config,
-                pubsub_tx.clone(),
-                &chunks[1],
-                filename,
-                tabsize,
-            )?,
+            top_bar: TopBar::new(&config)?,
+            text_viewer: TextViewer::new(&config, pubsub_tx.clone(), filename, tabsize)?,
             button_bar: ButtonBar::new(&config)?,
             dialog: None,
         })
@@ -134,18 +126,7 @@ impl App {
                     Event::Unsupported(_) => (),
                 },
                 Events::Signal(signal) => match signal {
-                    SIGWINCH => {
-                        let (w, h) = terminal_size().unwrap();
-                        let chunks = get_chunks(&Rect::new(0, 0, w, h));
-
-                        self.top_bar.resize(&chunks[0]);
-                        self.text_viewer.resize(&chunks[1]);
-                        self.button_bar.resize(&chunks[2]);
-
-                        if let Some(dlg) = &mut self.dialog {
-                            dlg.resize(&chunks[1]);
-                        }
-                    }
+                    SIGWINCH => return Ok(Action::Redraw),
                     SIGINT => return Ok(Action::CtrlC),
                     SIGTERM => return Ok(Action::SigTerm),
                     SIGCONT => return Ok(Action::SigCont),
@@ -205,7 +186,17 @@ impl App {
     }
 
     pub fn render(&mut self, f: &mut Frame) {
-        let chunks = get_chunks(&f.size());
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(
+                [
+                    Constraint::Length(1),
+                    Constraint::Min(1),
+                    Constraint::Length(1),
+                ]
+                .as_ref(),
+            )
+            .split(f.size());
 
         self.top_bar.render(f, &chunks[0], Focus::Normal);
         self.text_viewer.render(f, &chunks[1], Focus::Normal);
@@ -244,20 +235,6 @@ fn init_events() -> Result<(Sender<Events>, Receiver<Events>)> {
     });
 
     Ok((s, r))
-}
-
-fn get_chunks(rect: &Rect) -> Rc<[Rect]> {
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(
-            [
-                Constraint::Length(1),
-                Constraint::Min(1),
-                Constraint::Length(1),
-            ]
-            .as_ref(),
-        )
-        .split(*rect)
 }
 
 pub fn centered_rect(width: u16, height: u16, r: &Rect) -> Rect {
