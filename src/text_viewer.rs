@@ -1,4 +1,5 @@
 use std::{
+    cmp::max,
     fs,
     path::{Path, PathBuf},
     str, thread,
@@ -11,9 +12,9 @@ use termion::event::*;
 
 use bat::assets::HighlightingAssets;
 use encoding_rs::WINDOWS_1252;
-use log::debug;
 use regex::{self, Regex, RegexBuilder};
 use syntect::{easy::HighlightLines, util::LinesWithEndings};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     app::PubSub,
@@ -54,6 +55,7 @@ pub struct TextViewer {
     lines: Vec<String>,
     styled_lines: Vec<Vec<(Style, String)>>,
     first_line: usize,
+    wrap: bool,
 
     expression: Option<Regex>,
     lines_with_matches: Vec<bool>,
@@ -115,6 +117,7 @@ impl TextViewer {
             lines,
             styled_lines,
             first_line: 0,
+            wrap: false,
 
             expression: None,
             lines_with_matches: Vec::new(),
@@ -168,11 +171,11 @@ impl TextViewer {
                                     0x09 => config.highlight.base09,
                                     0x0F => config.highlight.base0f,
                                     _ => {
-                                        debug!("{:?}", style);
+                                        log::debug!("{:?}", style);
                                         config.highlight.base05
                                     }
                                 }),
-                                String::from(*text),
+                                String::from(text.trim_end_matches('\n')),
                             )
                         })
                         .collect()
@@ -325,6 +328,9 @@ impl Component for TextViewer {
                 false => self.search_prev(),
             },
             Key::Esc => self.expression = None,
+            Key::Char('w') | Key::F(2) => {
+                self.wrap = !self.wrap;
+            }
             _ => key_handled = false,
         }
 
@@ -433,9 +439,10 @@ impl Component for TextViewer {
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
         let line_number_width = self.lines.len().to_string().len();
+        let text_width = chunk.width.saturating_sub((line_number_width + 1) as u16);
         let widths = [
             Constraint::Length((line_number_width + 1) as u16),
-            Constraint::Length(chunk.width.saturating_sub((line_number_width + 1) as u16)),
+            Constraint::Length(text_width),
         ];
 
         let highlighted_lines: Vec<Vec<(Style, String)>> = self
@@ -450,13 +457,13 @@ impl Component for TextViewer {
                     self.lines_with_matches.get(self.first_line + i),
                 ) {
                     (Some(re), Some(true)) => {
-                        let line = &self.lines[self.first_line + i];
+                        let line = &self.lines[self.first_line + i].trim_end_matches('\n');
 
                         let mut v = Vec::new();
                         let mut bytes_written = 0;
                         let mut i_e = 0;
                         let mut i_text = 0;
-                        for m in re.find_iter(line.trim_end_matches('\n')) {
+                        for m in re.find_iter(line) {
                             while bytes_written < m.start() {
                                 let (color, text) = &e[i_e];
 
@@ -523,7 +530,54 @@ impl Component for TextViewer {
             })
             .collect();
 
-        let items: Vec<Row> = highlighted_lines
+        let wrapped_lines: Vec<Vec<Line>> = highlighted_lines
+            .iter()
+            .map(|line| match self.wrap {
+                true => {
+                    let mut lines = Vec::new();
+                    let mut current_line = Vec::new();
+                    let mut current_width = 0;
+                    for (color, text) in line {
+                        if (current_width + text.width()) <= text_width.into() {
+                            current_line.push(Span::styled(text, *color));
+                            current_width += text.width();
+                        } else {
+                            let mut s = String::from("");
+
+                            for c in text.chars() {
+                                if current_width + c.width().unwrap_or(0) > text_width.into() {
+                                    current_line.push(Span::styled(s.clone(), *color));
+                                    lines.push(Line::from(current_line.clone()));
+                                    s.clear();
+                                    current_line.clear();
+                                    current_width = 0;
+                                }
+
+                                s.push(c);
+                                current_width += c.width().unwrap_or(0);
+                            }
+
+                            if !s.is_empty() {
+                                current_line.push(Span::styled(s.clone(), *color));
+                            }
+                        }
+                    }
+
+                    if !current_line.is_empty() {
+                        lines.push(Line::from(current_line.clone()));
+                    }
+
+                    lines
+                }
+                false => vec![Line::from(
+                    line.iter()
+                        .map(|(color, text)| Span::styled(text, *color))
+                        .collect::<Vec<Span>>(),
+                )],
+            })
+            .collect();
+
+        let items: Vec<Row> = wrapped_lines
             .iter()
             .enumerate()
             .map(|(i, e)| {
@@ -536,19 +590,16 @@ impl Component for TextViewer {
                         ),
                         Style::default().fg(Color::White),
                     )),
-                    Cell::from(Line::from(
-                        e.iter()
-                            .map(|(color, text)| Span::styled(text, *color))
-                            .collect::<Vec<_>>(),
-                    )),
+                    Cell::from(e.clone()),
                 ])
+                .height(max(e.len() as u16, 1))
             })
             .collect();
 
-        let items = Table::new(items, widths)
+        let table = Table::new(items, widths)
             .block(Block::default().style(Style::default().bg(self.config.highlight.base00)))
             .column_spacing(0);
 
-        f.render_widget(items, *chunk);
+        f.render_widget(table, *chunk);
     }
 }
