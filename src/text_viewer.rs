@@ -1,6 +1,5 @@
 use std::{
     cmp::{max, min},
-    fs,
     path::{Path, PathBuf},
     str, thread,
 };
@@ -49,9 +48,9 @@ pub struct TextViewer {
     pubsub_tx: Sender<PubSub>,
     rect: Rect,
     filename: PathBuf,
+    filename_str: String,
     tabsize: u8,
     data: Vec<u8>,
-    content: String,
     lines: Vec<String>,
     styled_lines: Vec<Vec<(Style, String)>>,
     first_line: usize,
@@ -68,10 +67,10 @@ impl TextViewer {
         config: &Config,
         pubsub_tx: Sender<PubSub>,
         filename: &Path,
+        filename_str: &str,
         tabsize: u8,
+        data: Vec<u8>,
     ) -> Result<TextViewer> {
-        let data = fs::read(filename)?;
-
         let tab_size = if tabsize > 0 {
             tabsize
         } else {
@@ -110,9 +109,9 @@ impl TextViewer {
             pubsub_tx,
             rect: Rect::default(),
             filename: filename.to_path_buf(),
+            filename_str: String::from(filename_str),
             tabsize: tab_size,
             data,
-            content,
             lines,
             styled_lines,
             first_line: 0,
@@ -209,10 +208,7 @@ impl TextViewer {
 
         self.pubsub_tx
             .send(PubSub::FileInfo(
-                fs::canonicalize(&self.filename)
-                    .unwrap()
-                    .to_string_lossy()
-                    .to_string(),
+                String::from(&self.filename_str),
                 format!(
                     "{}/{}",
                     min(current_line, self.lines.len()),
@@ -549,17 +545,17 @@ impl Component for TextViewer {
                         let mut i_text = 0;
                         for m in re.find_iter(line) {
                             while bytes_written < m.start() {
-                                let (color, text) = &e[i_e];
+                                let (style, text) = &e[i_e];
 
                                 if (bytes_written + (text.len() - i_text)) <= m.start() {
-                                    v.push((*color, String::from(&text[i_text..])));
+                                    v.push((*style, String::from(&text[i_text..])));
                                     bytes_written += text.len() - i_text;
                                     i_e += 1;
                                     i_text = 0;
                                 } else {
                                     let end = i_text + (m.start() - bytes_written);
 
-                                    v.push((*color, String::from(&text[i_text..end])));
+                                    v.push((*style, String::from(&text[i_text..end])));
                                     i_text = end;
                                     bytes_written = m.start();
                                 }
@@ -591,17 +587,17 @@ impl Component for TextViewer {
                         }
 
                         while bytes_written < line.len() {
-                            let (color, text) = &e[i_e];
+                            let (style, text) = &e[i_e];
 
                             if (bytes_written + (text.len() - i_text)) <= line.len() {
-                                v.push((*color, String::from(&text[i_text..])));
+                                v.push((*style, String::from(&text[i_text..])));
                                 bytes_written += text.len() - i_text;
                                 i_e += 1;
                                 i_text = 0;
                             } else {
                                 let end = i_text + (line.len() - bytes_written);
 
-                                v.push((*color, String::from(&text[i_text..end])));
+                                v.push((*style, String::from(&text[i_text..end])));
                                 i_text = end;
                                 bytes_written = line.len();
                             }
@@ -621,16 +617,16 @@ impl Component for TextViewer {
                     let mut lines = Vec::new();
                     let mut current_line = Vec::new();
                     let mut current_width = 0;
-                    for (color, text) in line {
+                    for (style, text) in line {
                         if (current_width + text.width()) <= text_width.into() {
-                            current_line.push(Span::styled(text, *color));
+                            current_line.push(Span::styled(text, *style));
                             current_width += text.width();
                         } else {
                             let mut s = String::from("");
 
                             for c in text.chars() {
                                 if current_width + c.width().unwrap_or(0) > text_width.into() {
-                                    current_line.push(Span::styled(s.clone(), *color));
+                                    current_line.push(Span::styled(s.clone(), *style));
                                     lines.push(Line::from(current_line.clone()));
                                     s.clear();
                                     current_line.clear();
@@ -642,7 +638,7 @@ impl Component for TextViewer {
                             }
 
                             if !s.is_empty() {
-                                current_line.push(Span::styled(s.clone(), *color));
+                                current_line.push(Span::styled(s.clone(), *style));
                             }
                         }
                     }
@@ -655,7 +651,7 @@ impl Component for TextViewer {
                 }
                 false => vec![Line::from(
                     line.iter()
-                        .map(|(color, text)| Span::styled(text, *color))
+                        .map(|(style, text)| Span::styled(text, *style))
                         .collect::<Vec<Span>>(),
                 )],
             })

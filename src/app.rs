@@ -1,7 +1,7 @@
 use std::{io, path::Path, thread};
 
 use anyhow::Result;
-use crossbeam_channel::{select, unbounded, Receiver, Sender};
+use crossbeam_channel::{select, Receiver, Sender};
 use ratatui::{prelude::*, widgets::*};
 use termion::{event::*, input::TermRead};
 
@@ -16,7 +16,7 @@ use crate::{
     dlg_error::{DialogType, DlgError},
     dlg_goto::{DlgGoto, GotoType},
     dlg_text_search::{DlgTextSearch, TextSearch},
-    text_viewer::TextViewer,
+    file_viewer::FileViewer,
     top_bar::TopBar,
 };
 
@@ -64,7 +64,7 @@ pub struct App {
     pubsub_tx: Sender<PubSub>,
     pubsub_rx: Receiver<PubSub>,
     top_bar: TopBar,
-    text_viewer: TextViewer,
+    viewer: FileViewer,
     button_bar: ButtonBar,
     dialog: Option<Box<dyn Component>>,
 }
@@ -74,7 +74,7 @@ impl App {
         let config = load_config()?;
 
         let (_events_tx, events_rx) = init_events()?;
-        let (pubsub_tx, pubsub_rx) = unbounded();
+        let (pubsub_tx, pubsub_rx) = crossbeam_channel::unbounded();
 
         Ok(App {
             config,
@@ -82,7 +82,7 @@ impl App {
             pubsub_tx: pubsub_tx.clone(),
             pubsub_rx,
             top_bar: TopBar::new(&config)?,
-            text_viewer: TextViewer::new(&config, pubsub_tx.clone(), filename, tabsize)?,
+            viewer: FileViewer::new(&config, pubsub_tx.clone(), filename, tabsize)?,
             button_bar: ButtonBar::new(&config)?,
             dialog: None,
         })
@@ -95,7 +95,7 @@ impl App {
                     Event::Key(key) => {
                         let key_handled = match &mut self.dialog {
                             Some(dlg) => dlg.handle_key(&key)?,
-                            None => self.text_viewer.handle_key(&key)?,
+                            None => self.viewer.handle_key(&key)?,
                         };
 
                         if !key_handled {
@@ -118,7 +118,7 @@ impl App {
 
                         match &mut self.dialog {
                             Some(dlg) => dlg.handle_mouse(&mouse)?,
-                            None => self.text_viewer.handle_mouse(&mouse)?,
+                            None => self.viewer.handle_mouse(&mouse)?,
                         };
 
                         self.button_bar.handle_mouse(&mouse)?;
@@ -137,7 +137,7 @@ impl App {
                 let event = pubsub?;
 
                 self.top_bar.handle_pubsub(&event)?;
-                self.text_viewer.handle_pubsub(&event)?;
+                self.viewer.handle_pubsub(&event)?;
                 self.button_bar.handle_pubsub(&event)?;
 
                 if let Some(dlg) = &mut self.dialog {
@@ -188,18 +188,15 @@ impl App {
     pub fn render(&mut self, f: &mut Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints(
-                [
-                    Constraint::Length(1),
-                    Constraint::Min(1),
-                    Constraint::Length(1),
-                ]
-                .as_ref(),
-            )
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(1),
+            ])
             .split(f.size());
 
         self.top_bar.render(f, &chunks[0], Focus::Normal);
-        self.text_viewer.render(f, &chunks[1], Focus::Normal);
+        self.viewer.render(f, &chunks[1], Focus::Normal);
         self.button_bar.render(f, &chunks[2], Focus::Normal);
 
         if let Some(dlg) = &mut self.dialog {
@@ -209,9 +206,9 @@ impl App {
 }
 
 fn init_events() -> Result<(Sender<Events>, Receiver<Events>)> {
-    let (s, r) = unbounded();
-    let input_tx = s.clone();
-    let signals_tx = s.clone();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let input_tx = tx.clone();
+    let signals_tx = tx.clone();
 
     thread::spawn(move || {
         let stdin = io::stdin();
@@ -234,7 +231,7 @@ fn init_events() -> Result<(Sender<Events>, Receiver<Events>)> {
         }
     });
 
-    Ok((s, r))
+    Ok((tx, rx))
 }
 
 pub fn centered_rect(width: u16, height: u16, r: &Rect) -> Rect {
