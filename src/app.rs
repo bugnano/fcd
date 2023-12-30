@@ -33,9 +33,16 @@ pub enum PubSub {
     Warning(String, String),
     CloseDialog,
 
+    // File viewer events
+    FileInfo(String, String, String),
+    ToggleHex,
+
     // Text viewer events
     Highlight(Vec<Vec<(Style, String)>>),
-    FileInfo(String, String, String),
+
+    // Hex viewer events
+    FromHexOffset(u64),
+    ToHexOffset(u64),
 
     // Dialog goto events
     DlgGoto(GotoType),

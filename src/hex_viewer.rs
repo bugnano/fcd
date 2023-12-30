@@ -185,6 +185,12 @@ impl Component for HexViewer {
 
                 //self.search_pos = self.offset;
             }
+            Key::Char('h') | Key::F(4) => {
+                self.pubsub_tx.send(PubSub::ToggleHex).unwrap();
+                self.pubsub_tx
+                    .send(PubSub::FromHexOffset(self.offset))
+                    .unwrap();
+            }
             Key::Char(':') | Key::F(5) => {
                 // TODO: Don't show the dialog if the file size is 0
                 self.pubsub_tx
@@ -255,6 +261,17 @@ impl Component for HexViewer {
                             .unwrap();
                     }
                 }
+            }
+            PubSub::ToHexOffset(offset) => {
+                self.offset = offset.saturating_sub(match self.line_width {
+                    0 => 0,
+                    w => offset % (w as u64),
+                });
+                self.clamp_offset();
+
+                self.send_updated_position();
+
+                //self.search_pos = self.offset;
             }
             _ => (),
         }

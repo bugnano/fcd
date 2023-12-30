@@ -51,6 +51,7 @@ pub struct TextViewer {
     filename_str: String,
     tabsize: u8,
     data: Vec<u8>,
+    line_offset: Vec<usize>,
     lines: Vec<String>,
     styled_lines: Vec<Vec<(Style, String)>>,
     first_line: usize,
@@ -104,6 +105,14 @@ impl TextViewer {
             })
             .collect();
 
+        let mut total_offset = 0;
+        let line_offset: Vec<usize> = std::iter::once(total_offset)
+            .chain(data.split_inclusive(|&c| c == 0x0A).map(|line| {
+                total_offset += line.len();
+                total_offset
+            }))
+            .collect();
+
         let mut viewer = TextViewer {
             config: *config,
             pubsub_tx,
@@ -112,6 +121,7 @@ impl TextViewer {
             filename_str: String::from(filename_str),
             tabsize: tab_size,
             data,
+            line_offset,
             lines,
             styled_lines,
             first_line: 0,
@@ -366,6 +376,14 @@ impl Component for TextViewer {
 
                 self.search_pos = self.first_line;
             }
+            Key::Char('h') | Key::F(4) => {
+                self.pubsub_tx.send(PubSub::ToggleHex).unwrap();
+                self.pubsub_tx
+                    .send(PubSub::ToHexOffset(
+                        self.line_offset[self.first_line] as u64,
+                    ))
+                    .unwrap();
+            }
             Key::Char(':') | Key::F(5) => {
                 // TODO: Don't show the dialog if the file size is 0
                 self.pubsub_tx
@@ -432,6 +450,17 @@ impl Component for TextViewer {
                             .unwrap();
                     }
                 }
+            }
+            PubSub::FromHexOffset(offset) => {
+                self.first_line = match self.line_offset.binary_search(&(*offset as usize)) {
+                    Ok(line_number) => line_number,
+                    Err(line_number) => line_number,
+                };
+                self.clamp_first_line();
+
+                self.send_updated_position();
+
+                self.search_pos = self.first_line;
             }
             PubSub::TextSearch(search) => {
                 if search.search_string.is_empty() {

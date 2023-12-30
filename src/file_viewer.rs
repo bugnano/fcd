@@ -91,7 +91,7 @@ impl FileViewer {
             pubsub_tx: pubsub_tx.clone(),
             main_viewer,
             hex_viewer,
-            hex_mode: true, // TODO: It should default to false
+            hex_mode: false,
         })
     }
 }
@@ -109,6 +109,15 @@ impl Component for FileViewer {
 
         if let Some(hex_viewer) = &mut self.hex_viewer {
             hex_viewer.handle_pubsub(event)?;
+        }
+
+        match event {
+            PubSub::ToggleHex => {
+                if let Some(hex_viewer) = &mut self.hex_viewer {
+                    self.hex_mode = !self.hex_mode;
+                }
+            }
+            _ => (),
         }
 
         Ok(())
