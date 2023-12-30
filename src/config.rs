@@ -66,9 +66,21 @@ pub struct Dialog {
     pub input_bg: Color,
 }
 
+#[serde_as]
 #[derive(Deserialize, Debug, Copy, Clone)]
 pub struct Viewer {
     pub tab_size: u8,
+
+    #[serde_as(as = "DisplayFromStr")]
+    pub lineno_fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub hex_even_fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub hex_odd_fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub hex_text_even_fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub hex_text_odd_fg: Color,
 }
 
 #[serde_as]

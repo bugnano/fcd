@@ -112,11 +112,7 @@ impl Component for FileViewer {
         }
 
         match event {
-            PubSub::ToggleHex => {
-                if let Some(hex_viewer) = &mut self.hex_viewer {
-                    self.hex_mode = !self.hex_mode;
-                }
-            }
+            PubSub::ToggleHex => self.hex_mode = !self.hex_mode,
             _ => (),
         }
 

@@ -32,6 +32,12 @@ input_bg = "cyan"
 [viewer]
 tab_size = 4
 
+lineno_fg = "white"
+hex_even_fg = "cyan"
+hex_odd_fg = "gray"
+hex_text_even_fg = "cyan"
+hex_text_odd_fg = "gray"
+
 [highlight]
 # Default Background
 base00 = "blue"

@@ -697,7 +697,7 @@ impl Component for TextViewer {
                             self.first_line + i + 1,
                             width = line_number_width
                         ),
-                        Style::default().fg(Color::White),
+                        Style::default().fg(self.config.viewer.lineno_fg),
                     )),
                     Cell::from(e.clone()),
                 ])

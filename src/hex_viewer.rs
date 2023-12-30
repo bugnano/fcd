@@ -332,12 +332,20 @@ impl Component for HexViewer {
                             self.offset + ((self.line_width * i) as u64),
                             width = self.len_address
                         ),
-                        Style::default(),
+                        Style::default().fg(self.config.viewer.lineno_fg),
                     )),
-                    Cell::from(Span::styled(hex_string(line), Style::default())),
-                    Cell::from(Span::styled(
-                        format!(" \u{2502}{}\u{2502}", masked_string(line)),
-                        Style::default(),
+                    Cell::from(Line::from(hex_string(&self.config, line))),
+                    Cell::from(Line::from(
+                        std::iter::once(Span::styled(
+                            " \u{2502}",
+                            Style::default().fg(self.config.viewer.lineno_fg),
+                        ))
+                        .chain(masked_string(&self.config, line))
+                        .chain(std::iter::once(Span::styled(
+                            "\u{2502}",
+                            Style::default().fg(self.config.viewer.lineno_fg),
+                        )))
+                        .collect::<Vec<Span>>(),
                     )),
                 ])
             })
@@ -351,21 +359,38 @@ impl Component for HexViewer {
     }
 }
 
-fn hex_string(line: &[u8]) -> String {
+fn hex_string<'a>(config: &Config, line: &'a [u8]) -> Vec<Span<'a>> {
     line.iter()
         .enumerate()
-        .map(|(i, e)| format!("{}{:02X} ", if (i % 4) == 0 { " " } else { "" }, e))
+        .map(|(i, e)| {
+            Span::styled(
+                format!("{}{:02X} ", if (i % 4) == 0 { " " } else { "" }, e),
+                Style::default().fg(if (i % 8) < 4 {
+                    config.viewer.hex_even_fg
+                } else {
+                    config.viewer.hex_odd_fg
+                }),
+            )
+        })
         .collect()
 }
 
-fn masked_string(line: &[u8]) -> String {
+fn masked_string<'a>(config: &Config, line: &'a [u8]) -> Vec<Span<'a>> {
     line.iter()
-        .map(|&c| {
-            if (0x20..0x7F).contains(&c) {
-                char::from_u32(c.into()).unwrap()
-            } else {
-                '\u{00B7}'
-            }
+        .enumerate()
+        .map(|(i, &c)| {
+            Span::styled(
+                String::from(if (0x20..0x7F).contains(&c) {
+                    char::from_u32(c.into()).unwrap()
+                } else {
+                    '\u{00B7}'
+                }),
+                Style::default().fg(if (i % 8) < 4 {
+                    config.viewer.hex_text_even_fg
+                } else {
+                    config.viewer.hex_text_odd_fg
+                }),
+            )
         })
         .collect()
 }
