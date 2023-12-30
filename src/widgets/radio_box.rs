@@ -78,7 +78,7 @@ impl Component for RadioBox {
                     ListItem::new(format!(
                         "({}) {}",
                         if i == self.selected_button {
-                            symbols::DOT
+                            "\u{2022}"
                         } else {
                             " "
                         },

@@ -25,9 +25,9 @@ impl TopBar {
     pub fn new(config: &Config) -> Result<TopBar> {
         Ok(TopBar {
             config: *config,
-            filename: String::from(""),
-            position: String::from(""),
-            percent: String::from(""),
+            filename: String::new(),
+            position: String::new(),
+            percent: String::new(),
         })
     }
 }

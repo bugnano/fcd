@@ -51,11 +51,7 @@ impl FileViewer {
                     let bytes_read = f.read(&mut buffer)?;
                     buffer.resize(bytes_read, 0);
 
-                    if buffer.contains(&0) {
-                        false
-                    } else {
-                        true
-                    }
+                    !buffer.contains(&0)
                 };
 
                 match is_text_file {

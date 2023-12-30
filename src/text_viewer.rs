@@ -376,7 +376,7 @@ impl Component for TextViewer {
                 // TODO: Don't show the dialog if the file size is 0
                 self.pubsub_tx
                     .send(PubSub::DlgTextSearch(TextSearch {
-                        search_string: String::from(""),
+                        search_string: String::new(),
                         search_type: match key {
                             Key::Char('/') | Key::Char('?') => SearchType::Regex,
                             _ => SearchType::Normal,
@@ -622,7 +622,7 @@ impl Component for TextViewer {
                             current_line.push(Span::styled(text, *style));
                             current_width += text.width();
                         } else {
-                            let mut s = String::from("");
+                            let mut s = String::new();
 
                             for c in text.chars() {
                                 if current_width + c.width().unwrap_or(0) > text_width.into() {

@@ -17,7 +17,7 @@ pub struct Input {
 impl Input {
     pub fn new(style: &Style) -> Result<Input> {
         Ok(Input {
-            input: String::from(""),
+            input: String::new(),
             style: *style,
             cursor_position: 0,
             scroll_offset: 0,
@@ -25,7 +25,7 @@ impl Input {
     }
 
     pub fn reset(&mut self) {
-        self.input = String::from("");
+        self.input = String::new();
         self.cursor_position = 0;
         self.scroll_offset = 0;
     }
