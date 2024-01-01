@@ -16,6 +16,7 @@ use crate::{
     component::{Component, Focus},
     config::Config,
     dlg_goto::GotoType,
+    dlg_hex_search::HexSearch,
 };
 
 #[derive(Debug)]
@@ -29,6 +30,96 @@ pub struct HexViewer {
     offset: u64,
     len_address: usize,
     line_width: usize,
+
+    expression: Option<Vec<u8>>,
+    backwards: bool,
+    search_pos: u64,
+}
+
+pub fn search_next_from_pos(
+    expression: &[u8],
+    reader: &mut BufReader<File>,
+    file_length: u64,
+    pos: u64,
+) -> Option<u64> {
+    let mut search_pos = pos;
+
+    loop {
+        let mut buffer: Vec<u8> = vec![0; 122880];
+
+        let stream_position = reader.stream_position().unwrap() as i64;
+        reader
+            .seek_relative((search_pos as i64) - stream_position)
+            .unwrap();
+
+        let bytes_read = reader.read(&mut buffer).unwrap();
+        buffer.resize(bytes_read, 0);
+
+        match buffer
+            .windows(expression.len())
+            .position(|window| window == expression)
+        {
+            Some(pos) => {
+                search_pos += pos as u64;
+                return Some(search_pos);
+            }
+            None => {
+                search_pos += buffer.len() as u64;
+
+                if search_pos >= file_length {
+                    break;
+                }
+
+                search_pos = search_pos.saturating_sub(expression.len() as u64);
+            }
+        }
+    }
+
+    None
+}
+
+pub fn search_prev_from_pos(
+    expression: &[u8],
+    reader: &mut BufReader<File>,
+    _file_length: u64,
+    pos: u64,
+) -> Option<u64> {
+    let mut search_pos = pos;
+
+    loop {
+        let size = min(122880, search_pos);
+
+        search_pos = search_pos.saturating_sub(size);
+
+        let mut buffer: Vec<u8> = vec![0; size as usize];
+
+        let stream_position = reader.stream_position().unwrap() as i64;
+        reader
+            .seek_relative((search_pos as i64) - stream_position)
+            .unwrap();
+
+        let bytes_read = reader.read(&mut buffer).unwrap();
+        buffer.resize(bytes_read, 0);
+
+        match buffer
+            .windows(expression.len())
+            .rposition(|window| window == expression)
+        {
+            Some(pos) => {
+                search_pos += pos as u64;
+                return Some(search_pos);
+            }
+            None => {
+                if search_pos == 0 {
+                    break;
+                }
+
+                search_pos += expression.len() as u64;
+            }
+        }
+    }
+
+    None
 }
 
 impl HexViewer {
@@ -54,6 +145,10 @@ impl HexViewer {
             offset: 0,
             len_address: max(len_address + (len_address % 2), 8),
             line_width: 0,
+
+            expression: None,
+            backwards: false,
+            search_pos: 0,
         };
 
         viewer.send_updated_position();
@@ -103,6 +198,61 @@ impl HexViewer {
             ))
             .unwrap();
     }
+
+    pub fn search_next(&mut self) -> bool {
+        if let Some(e) = &self.expression {
+            match search_next_from_pos(e, &mut self.reader, self.file_length, self.search_pos)
+                .or_else(|| search_next_from_pos(e, &mut self.reader, self.file_length, 0))
+            {
+                Some(pos) => {
+                    let old_offset = self.offset;
+
+                    self.offset = pos.saturating_sub(match self.line_width {
+                        0 => 0,
+                        w => pos % (w as u64),
+                    });
+                    self.clamp_offset();
+
+                    if self.offset != old_offset {
+                        self.send_updated_position();
+                    }
+
+                    self.search_pos = self.offset;
+                }
+                None => return false,
+            }
+        }
+
+        true
+    }
+
+    pub fn search_prev(&mut self) -> bool {
+        if let Some(e) = &self.expression {
+            match search_prev_from_pos(e, &mut self.reader, self.file_length, self.search_pos)
+                .or_else(|| {
+                    search_prev_from_pos(e, &mut self.reader, self.file_length, self.file_length)
+                }) {
+                Some(pos) => {
+                    let old_offset = self.offset;
+
+                    self.offset = pos.saturating_sub(match self.line_width {
+                        0 => 0,
+                        w => pos % (w as u64),
+                    });
+                    self.clamp_offset();
+
+                    if self.offset != old_offset {
+                        self.send_updated_position();
+                    }
+
+                    self.search_pos = self.offset;
+                }
+                None => return false,
+            }
+        }
+
+        true
+    }
 }
 
 impl Component for HexViewer {
@@ -120,7 +270,7 @@ impl Component for HexViewer {
                     self.send_updated_position();
                 }
 
-                //self.search_pos = self.offset;
+                self.search_pos = self.offset;
             }
             Key::Down | Key::Char('j') => {
                 let old_offset = self.offset;
@@ -132,7 +282,7 @@ impl Component for HexViewer {
                     self.send_updated_position();
                 }
 
-                //self.search_pos = self.offset;
+                self.search_pos = self.offset;
             }
             Key::Home | Key::Char('g') => {
                 let old_offset = self.offset;
@@ -144,7 +294,7 @@ impl Component for HexViewer {
                     self.send_updated_position();
                 }
 
-                //self.search_pos = self.offset;
+                self.search_pos = self.offset;
             }
             Key::End | Key::Char('G') => {
                 let old_offset = self.offset;
@@ -156,7 +306,7 @@ impl Component for HexViewer {
                     self.send_updated_position();
                 }
 
-                //self.search_pos = self.offset;
+                self.search_pos = self.offset;
             }
             Key::PageUp | Key::Ctrl('b') => {
                 let old_offset = self.offset;
@@ -170,7 +320,7 @@ impl Component for HexViewer {
                     self.send_updated_position();
                 }
 
-                //self.search_pos = self.offset;
+                self.search_pos = self.offset;
             }
             Key::PageDown | Key::Ctrl('f') => {
                 let old_offset = self.offset;
@@ -183,7 +333,7 @@ impl Component for HexViewer {
                     self.send_updated_position();
                 }
 
-                //self.search_pos = self.offset;
+                self.search_pos = self.offset;
             }
             Key::Char('h') | Key::F(4) => {
                 self.pubsub_tx.send(PubSub::ToggleHex).unwrap();
@@ -197,22 +347,17 @@ impl Component for HexViewer {
                     .send(PubSub::DlgGoto(GotoType::HexOffset))
                     .unwrap();
             }
-            /*
             Key::Char('/') | Key::Char('?') | Key::Char('f') | Key::Char('F') | Key::F(7) => {
                 // TODO: Don't show the dialog if the file size is 0
                 self.pubsub_tx
-                    .send(PubSub::DlgTextSearch(TextSearch {
+                    .send(PubSub::DlgHexSearch(HexSearch {
                         search_string: String::new(),
-                        search_type: match key {
-                            Key::Char('/') | Key::Char('?') => SearchType::Regex,
-                            _ => SearchType::Normal,
-                        },
-                        case_sensitive: false,
+                        hexadecimal: true,
                         backwards: matches!(key, Key::Char('?') | Key::Char('F')),
-                        whole_words: false,
                     }))
                     .unwrap();
             }
+            /*
             Key::Char('n') => match self.backwards {
                 true => self.search_prev(),
                 false => self.search_next(),
@@ -233,7 +378,7 @@ impl Component for HexViewer {
         match event {
             PubSub::Goto(GotoType::HexOffset, str_offset) => {
                 match u64::from_str_radix(
-                    if str_offset.to_lowercase().starts_with("0x") {
+                    if str_offset.starts_with("0x") || str_offset.starts_with("0X") {
                         &str_offset[2..]
                     } else {
                         str_offset
@@ -253,7 +398,7 @@ impl Component for HexViewer {
                             self.send_updated_position();
                         }
 
-                        //self.search_pos = self.offset;
+                        self.search_pos = self.offset;
                     }
                     Err(_) => {
                         self.pubsub_tx
@@ -271,8 +416,121 @@ impl Component for HexViewer {
 
                 self.send_updated_position();
 
-                //self.search_pos = self.offset;
+                self.search_pos = self.offset;
             }
+            PubSub::HexSearch(search) => {
+                if search.search_string.is_empty() {
+                    self.expression = None;
+                    return Ok(());
+                }
+
+                self.backwards = search.backwards;
+
+                self.expression = match search.hexadecimal {
+                    true => {
+                        let mut use_hex_value = true;
+
+                        search
+                            .search_string
+                            .split('"')
+                            .try_fold(Vec::new(), |mut acc, part| {
+                                match use_hex_value {
+                                    true => {
+                                        for hex_part in part.split_whitespace() {
+                                            let mut hex_value = String::from(
+                                                if hex_part.starts_with("0x")
+                                                    || hex_part.starts_with("0X")
+                                                {
+                                                    &hex_part[2..]
+                                                } else {
+                                                    hex_part
+                                                },
+                                            );
+
+                                            if (hex_value.len() % 2) != 0 {
+                                                hex_value.insert(0, '0');
+                                            }
+
+                                            for chunk in hex_value.as_bytes().chunks(2) {
+                                                match str::from_utf8(chunk) {
+                                                    Ok(s) => match u8::from_str_radix(s, 16) {
+                                                        Ok(value) => acc.push(value),
+                                                        Err(_) => return None,
+                                                    },
+                                                    Err(_) => return None,
+                                                }
+                                            }
+                                        }
+                                    }
+                                    false => acc.extend(part.as_bytes()),
+                                }
+
+                                use_hex_value = !use_hex_value;
+
+                                Some(acc)
+                            })
+                    }
+                    false => Some(search.search_string.as_bytes().to_vec()),
+                };
+
+                match &self.expression {
+                    Some(e) => match e.is_empty() {
+                        true => self.expression = None,
+                        false => {
+                            self.pubsub_tx
+                                .send(PubSub::Info(
+                                    String::from("Search"),
+                                    String::from("Searching..."),
+                                ))
+                                .unwrap();
+
+                            self.pubsub_tx.send(PubSub::HVStartSearch).unwrap();
+                        }
+                    },
+                    None => {
+                        self.pubsub_tx
+                            .send(PubSub::Warning(
+                                String::from("Search"),
+                                format!("Hex pattern error: {}", search.search_string),
+                            ))
+                            .unwrap();
+                    }
+                }
+            }
+            PubSub::HVStartSearch => match &self.expression {
+                Some(e) => {
+                    let found = match self.backwards {
+                        true => {
+                            self.search_pos = min(
+                                (self.offset + (e.len() as u64)).saturating_sub(1),
+                                self.file_length,
+                            );
+                            self.search_prev()
+                        }
+                        false => {
+                            self.search_pos = min(
+                                (self.offset + 1).saturating_sub(e.len() as u64),
+                                self.file_length,
+                            );
+                            self.search_next()
+                        }
+                    };
+
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                    if !found {
+                        self.expression = None;
+
+                        self.pubsub_tx
+                            .send(PubSub::Warning(
+                                String::from("Search"),
+                                String::from("Search string not found"),
+                            ))
+                            .unwrap();
+                    }
+                }
+                None => self.pubsub_tx.send(PubSub::CloseDialog).unwrap(),
+            },
             _ => (),
         }
 

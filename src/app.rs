@@ -15,6 +15,7 @@ use crate::{
     config::Config,
     dlg_error::{DialogType, DlgError},
     dlg_goto::{DlgGoto, GotoType},
+    dlg_hex_search::{DlgHexSearch, HexSearch},
     dlg_text_search::{DlgTextSearch, TextSearch},
     file_viewer::FileViewer,
     top_bar::TopBar,
@@ -31,6 +32,7 @@ pub enum PubSub {
     // App-wide events
     Error(String),
     Warning(String, String),
+    Info(String, String),
     CloseDialog,
 
     // File viewer events
@@ -43,6 +45,7 @@ pub enum PubSub {
     // Hex viewer events
     FromHexOffset(u64),
     ToHexOffset(u64),
+    HVStartSearch,
 
     // Dialog goto events
     DlgGoto(GotoType),
@@ -51,6 +54,10 @@ pub enum PubSub {
     // Dialog text search events
     DlgTextSearch(TextSearch),
     TextSearch(TextSearch),
+
+    // Dialog hex search events
+    DlgHexSearch(HexSearch),
+    HexSearch(HexSearch),
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -170,6 +177,15 @@ impl App {
                             DialogType::Warning,
                         )?));
                     },
+                    PubSub::Info(title, msg) => {
+                        self.dialog = Some(Box::new(DlgError::new(
+                            &self.config,
+                            self.pubsub_tx.clone(),
+                            &msg,
+                            &title,
+                            DialogType::Info,
+                        )?));
+                    },
                     PubSub::CloseDialog => self.dialog = None,
                     PubSub::DlgGoto(goto_type) => {
                         self.dialog = Some(Box::new(DlgGoto::new(
@@ -183,6 +199,13 @@ impl App {
                             &self.config,
                             self.pubsub_tx.clone(),
                             &text_search,
+                        )?));
+                    },
+                    PubSub::DlgHexSearch(hex_search) => {
+                        self.dialog = Some(Box::new(DlgHexSearch::new(
+                            &self.config,
+                            self.pubsub_tx.clone(),
+                            &hex_search,
                         )?));
                     },
                     _ => (),

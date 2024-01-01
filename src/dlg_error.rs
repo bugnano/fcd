@@ -22,6 +22,7 @@ use crate::{
 pub enum DialogType {
     Error,
     Warning,
+    Info,
 }
 
 #[derive(Debug)]
@@ -52,10 +53,20 @@ impl DlgError {
 }
 
 impl Component for DlgError {
-    fn handle_key(&mut self, _key: &Key) -> Result<bool> {
-        self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+        let mut key_handled = true;
 
-        Ok(true)
+        match self.dialog_type {
+            DialogType::Error | DialogType::Warning => {
+                self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+            }
+            DialogType::Info => match key {
+                Key::Char(_) | Key::F(_) => (),
+                _ => key_handled = false,
+            },
+        }
+
+        Ok(key_handled)
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
@@ -70,7 +81,7 @@ impl Component for DlgError {
                     .fg(self.config.error.title_fg)
                     .bg(self.config.error.bg),
             ),
-            DialogType::Warning => (
+            DialogType::Warning | DialogType::Info => (
                 Style::default()
                     .fg(self.config.dialog.fg)
                     .bg(self.config.dialog.bg),
