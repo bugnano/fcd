@@ -28,3 +28,8 @@ libc = "*"
 unicode-width = "*"
 unicode-normalization = "*"
 regex = "*"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
