@@ -46,6 +46,8 @@ pub enum PubSub {
     FromHexOffset(u64),
     ToHexOffset(u64),
     HVStartSearch,
+    HVSearchNext,
+    HVSearchPrev,
 
     // Dialog goto events
     DlgGoto(GotoType),
