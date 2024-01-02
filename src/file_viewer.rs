@@ -13,14 +13,12 @@ use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
-    hex_viewer::HexViewer,
+    hex_viewer::{HexViewer, ViewerType},
     text_viewer::TextViewer,
 };
 
 #[derive(Debug)]
 pub struct FileViewer {
-    config: Config,
-    pubsub_tx: Sender<PubSub>,
     main_viewer: Box<dyn Component>,
     hex_viewer: Option<HexViewer>,
     hex_mode: bool,
@@ -65,12 +63,16 @@ impl FileViewer {
                             &filename_str,
                             tabsize,
                             buffer,
-                        )?)
+                        )?) as Box<dyn Component>
                     }
-                    false => {
-                        // TODO: Dump viewer -- reuse `reader`
-                        todo!();
-                    }
+                    false => Box::new(HexViewer::new(
+                        config,
+                        pubsub_tx.clone(),
+                        filename,
+                        &filename_str,
+                        attr.len(),
+                        ViewerType::Dump,
+                    )?) as Box<dyn Component>,
                 }
             }
         };
@@ -83,12 +85,11 @@ impl FileViewer {
                 filename,
                 &filename_str,
                 attr.len(),
+                ViewerType::Hex,
             )?),
         };
 
         Ok(FileViewer {
-            config: *config,
-            pubsub_tx: pubsub_tx.clone(),
             main_viewer,
             hex_viewer,
             hex_mode: false,
@@ -105,10 +106,9 @@ impl Component for FileViewer {
     }
 
     fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
-        self.main_viewer.handle_pubsub(event)?;
-
-        if let Some(hex_viewer) = &mut self.hex_viewer {
-            hex_viewer.handle_pubsub(event)?;
+        match (self.hex_mode, &mut self.hex_viewer) {
+            (true, Some(hex_viewer)) => hex_viewer.handle_pubsub(event)?,
+            _ => self.main_viewer.handle_pubsub(event)?,
         }
 
         match event {

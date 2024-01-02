@@ -19,70 +19,6 @@ use crate::{
     dlg_hex_search::HexSearch,
 };
 
-#[derive(Debug)]
-pub struct HexViewer {
-    config: Config,
-    pubsub_tx: Sender<PubSub>,
-    rect: Rect,
-    filename_str: String,
-    file_length: u64,
-    reader: BufReader<File>,
-    offset: u64,
-    len_address: usize,
-    line_width: usize,
-
-    expression: Option<Vec<u8>>,
-    backwards: bool,
-    search_pos: u64,
-}
-
-pub fn expression_from_hex_search(search: &HexSearch) -> Option<Vec<u8>> {
-    match search.hexadecimal {
-        true => {
-            let mut use_hex_value = true;
-
-            search
-                .search_string
-                .split('"')
-                .try_fold(Vec::new(), |mut acc, part| {
-                    match use_hex_value {
-                        true => {
-                            for hex_part in part.split_whitespace() {
-                                let mut hex_value = String::from(
-                                    if hex_part.starts_with("0x") || hex_part.starts_with("0X") {
-                                        &hex_part[2..]
-                                    } else {
-                                        hex_part
-                                    },
-                                );
-
-                                if (hex_value.len() % 2) != 0 {
-                                    hex_value.insert(0, '0');
-                                }
-
-                                for chunk in hex_value.as_bytes().chunks(2) {
-                                    match str::from_utf8(chunk) {
-                                        Ok(s) => match u8::from_str_radix(s, 16) {
-                                            Ok(value) => acc.push(value),
-                                            Err(_) => return None,
-                                        },
-                                        Err(_) => return None,
-                                    }
-                                }
-                            }
-                        }
-                        false => acc.extend(part.as_bytes()),
-                    }
-
-                    use_hex_value = !use_hex_value;
-
-                    Some(acc)
-                })
-        }
-        false => Some(search.search_string.as_bytes().to_vec()),
-    }
-}
-
 pub fn search_next_from_pos(
     expression: &[u8],
     reader: &mut BufReader<File>,
@@ -90,17 +26,21 @@ pub fn search_next_from_pos(
     pos: u64,
 ) -> Option<u64> {
     let mut search_pos = pos;
+    let mut buffer: Vec<u8> = Vec::new();
 
     loop {
-        let mut buffer: Vec<u8> = vec![0; 122880];
+        let buf_size = min(file_length.saturating_sub(search_pos), 131072);
+        if buffer.len() != (buf_size as usize) {
+            buffer.resize(buf_size as usize, 0);
+        }
 
         let stream_position = reader.stream_position().unwrap() as i64;
+
         reader
             .seek_relative((search_pos as i64) - stream_position)
             .unwrap();
 
-        let bytes_read = reader.read(&mut buffer).unwrap();
-        buffer.resize(bytes_read, 0);
+        reader.read_exact(&mut buffer).unwrap();
 
         match buffer
             .windows(expression.len())
@@ -108,6 +48,7 @@ pub fn search_next_from_pos(
         {
             Some(pos) => {
                 search_pos += pos as u64;
+
                 return Some(search_pos);
             }
             None => {
@@ -132,21 +73,24 @@ pub fn search_prev_from_pos(
     pos: u64,
 ) -> Option<u64> {
     let mut search_pos = pos;
+    let mut buffer: Vec<u8> = Vec::new();
 
     loop {
-        let size = min(122880, search_pos);
+        let size = min(131072, search_pos);
 
         search_pos = search_pos.saturating_sub(size);
 
-        let mut buffer: Vec<u8> = vec![0; size as usize];
+        let buf_size = min(file_length.saturating_sub(size), 131072);
+        if buffer.len() != (buf_size as usize) {
+            buffer.resize(buf_size as usize, 0);
+        }
 
         let stream_position = reader.stream_position().unwrap() as i64;
         reader
             .seek_relative((search_pos as i64) - stream_position)
             .unwrap();
 
-        let bytes_read = reader.read(&mut buffer).unwrap();
-        buffer.resize(bytes_read, 0);
+        reader.read_exact(&mut buffer).unwrap();
 
         match buffer
             .windows(expression.len())
@@ -169,6 +113,30 @@ pub fn search_prev_from_pos(
     None
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum ViewerType {
+    Hex,
+    Dump,
+}
+
+#[derive(Debug)]
+pub struct HexViewer {
+    config: Config,
+    pubsub_tx: Sender<PubSub>,
+    rect: Rect,
+    filename_str: String,
+    file_length: u64,
+    viewer_type: ViewerType,
+    reader: BufReader<File>,
+    offset: u64,
+    len_address: usize,
+    line_width: usize,
+
+    expression: Option<Vec<u8>>,
+    backwards: bool,
+    search_pos: u64,
+}
+
 impl HexViewer {
     pub fn new(
         config: &Config,
@@ -176,6 +144,7 @@ impl HexViewer {
         filename: &Path,
         filename_str: &str,
         file_length: u64,
+        viewer_type: ViewerType,
     ) -> Result<HexViewer> {
         let f = File::open(filename)?;
         let reader = BufReader::with_capacity(131072, f);
@@ -188,6 +157,7 @@ impl HexViewer {
             rect: Rect::default(),
             filename_str: String::from(filename_str),
             file_length,
+            viewer_type,
             reader,
             offset: 0,
             len_address: max(len_address + (len_address % 2), 8),
@@ -219,10 +189,19 @@ impl HexViewer {
     }
 
     pub fn send_updated_position(&mut self) {
-        let width = (self.rect.width as usize).saturating_sub(self.len_address + 4);
-        let num_dwords = max(width / 17, 1);
+        match self.viewer_type {
+            ViewerType::Hex => {
+                let width = (self.rect.width as usize).saturating_sub(self.len_address + 4);
+                let num_dwords = max(width / 17, 1);
 
-        self.line_width = num_dwords * 4;
+                self.line_width = num_dwords * 4;
+            }
+            ViewerType::Dump => {
+                let width = (self.rect.width as usize).saturating_sub(self.len_address + 1);
+
+                self.line_width = max(width.saturating_sub(width % 16), 16);
+            }
+        }
 
         let offset = self.offset + ((self.rect.height as u64) * (self.line_width as u64));
 
@@ -384,9 +363,19 @@ impl Component for HexViewer {
             }
             Key::Char('h') | Key::F(4) => {
                 self.pubsub_tx.send(PubSub::ToggleHex).unwrap();
-                self.pubsub_tx
-                    .send(PubSub::FromHexOffset(self.offset))
-                    .unwrap();
+
+                match self.viewer_type {
+                    ViewerType::Hex => {
+                        self.pubsub_tx
+                            .send(PubSub::FromHexOffset(self.offset))
+                            .unwrap();
+                    }
+                    ViewerType::Dump => {
+                        self.pubsub_tx
+                            .send(PubSub::ToHexOffset(self.offset))
+                            .unwrap();
+                    }
+                }
             }
             Key::Char(':') | Key::F(5) => {
                 // TODO: Don't show the dialog if the file size is 0
@@ -399,7 +388,7 @@ impl Component for HexViewer {
                 self.pubsub_tx
                     .send(PubSub::DlgHexSearch(HexSearch {
                         search_string: String::new(),
-                        hexadecimal: true,
+                        hexadecimal: matches!(self.viewer_type, ViewerType::Hex),
                         backwards: matches!(key, Key::Char('?') | Key::Char('F')),
                     }))
                     .unwrap();
@@ -474,16 +463,31 @@ impl Component for HexViewer {
                     }
                 }
             }
+            PubSub::FromHexOffset(offset) => {
+                if let ViewerType::Dump = self.viewer_type {
+                    self.offset = offset.saturating_sub(match self.line_width {
+                        0 => 0,
+                        w => offset % (w as u64),
+                    });
+                    self.clamp_offset();
+
+                    self.send_updated_position();
+
+                    self.search_pos = self.offset;
+                }
+            }
             PubSub::ToHexOffset(offset) => {
-                self.offset = offset.saturating_sub(match self.line_width {
-                    0 => 0,
-                    w => offset % (w as u64),
-                });
-                self.clamp_offset();
+                if let ViewerType::Hex = self.viewer_type {
+                    self.offset = offset.saturating_sub(match self.line_width {
+                        0 => 0,
+                        w => offset % (w as u64),
+                    });
+                    self.clamp_offset();
 
-                self.send_updated_position();
+                    self.send_updated_position();
 
-                self.search_pos = self.offset;
+                    self.search_pos = self.offset;
+                }
             }
             PubSub::HexSearch(search) => {
                 if search.search_string.is_empty() {
@@ -493,7 +497,52 @@ impl Component for HexViewer {
 
                 self.backwards = search.backwards;
 
-                self.expression = expression_from_hex_search(&search);
+                self.expression = match search.hexadecimal {
+                    true => {
+                        let mut use_hex_value = true;
+
+                        search
+                            .search_string
+                            .split('"')
+                            .try_fold(Vec::new(), |mut acc, part| {
+                                match use_hex_value {
+                                    true => {
+                                        for hex_part in part.split_whitespace() {
+                                            let mut hex_value = String::from(
+                                                if hex_part.starts_with("0x")
+                                                    || hex_part.starts_with("0X")
+                                                {
+                                                    &hex_part[2..]
+                                                } else {
+                                                    hex_part
+                                                },
+                                            );
+
+                                            if (hex_value.len() % 2) != 0 {
+                                                hex_value.insert(0, '0');
+                                            }
+
+                                            for chunk in hex_value.as_bytes().chunks(2) {
+                                                match str::from_utf8(chunk) {
+                                                    Ok(s) => match u8::from_str_radix(s, 16) {
+                                                        Ok(value) => acc.push(value),
+                                                        Err(_) => return None,
+                                                    },
+                                                    Err(_) => return None,
+                                                }
+                                            }
+                                        }
+                                    }
+                                    false => acc.extend(part.as_bytes()),
+                                }
+
+                                use_hex_value = !use_hex_value;
+
+                                Some(acc)
+                            })
+                    }
+                    false => Some(search.search_string.as_bytes().to_vec()),
+                };
 
                 match &self.expression {
                     Some(e) => match e.is_empty() {
@@ -585,11 +634,17 @@ impl Component for HexViewer {
 
         let hex_width = (self.line_width / 4) * 13;
 
-        let widths = [
-            Constraint::Length((self.len_address + 1) as u16),
-            Constraint::Length(hex_width as u16),
-            Constraint::Length((self.line_width + 3) as u16),
-        ];
+        let widths = match self.viewer_type {
+            ViewerType::Hex => vec![
+                Constraint::Length((self.len_address + 1) as u16),
+                Constraint::Length(hex_width as u16),
+                Constraint::Length((self.line_width + 3) as u16),
+            ],
+            ViewerType::Dump => vec![
+                Constraint::Length((self.len_address + 1) as u16),
+                Constraint::Length(self.line_width as u16),
+            ],
+        };
 
         let expression_len = match &self.expression {
             Some(e) => e.len(),
@@ -603,11 +658,13 @@ impl Component for HexViewer {
             .seek_relative((buf_start as i64) - stream_position)
             .unwrap();
 
-        let mut buffer: Vec<u8> =
-            vec![0; (self.line_width * (chunk.height as usize)) + (expression_len * 2)];
+        let buf_size = min(
+            (self.line_width * (chunk.height as usize)) + (expression_len * 2),
+            self.file_length.saturating_sub(buf_start) as usize,
+        );
+        let mut buffer: Vec<u8> = vec![0; buf_size];
 
-        let bytes_read = self.reader.read(&mut buffer).unwrap();
-        buffer.resize(bytes_read, 0);
+        self.reader.read_exact(&mut buffer).unwrap();
 
         let mut bytes_remaining = 0;
         let buffer_with_matches: Vec<(bool, u8)> = buffer
@@ -646,6 +703,12 @@ impl Component for HexViewer {
             .copied()
             .collect();
 
+        let style_hex_even = Style::default().fg(self.config.viewer.hex_even_fg);
+        let style_hex_odd = Style::default().fg(self.config.viewer.hex_odd_fg);
+        let style_even = Style::default().fg(self.config.viewer.hex_text_even_fg);
+        let style_odd = Style::default().fg(self.config.viewer.hex_text_odd_fg);
+        let style_dump = Style::default().fg(self.config.highlight.base05);
+
         let items: Vec<Row> = buffer_with_matches[self.offset.saturating_sub(buf_start) as usize..]
             .chunks(self.line_width)
             .enumerate()
@@ -658,29 +721,64 @@ impl Component for HexViewer {
                     }
                 };
 
-                Row::new(vec![
-                    Cell::from(Span::styled(
-                        format!(
-                            "{:0width$X} ",
-                            self.offset + ((self.line_width * i) as u64),
-                            width = self.len_address
-                        ),
-                        Style::default().fg(self.config.viewer.lineno_fg),
-                    )),
-                    Cell::from(Line::from(hex_string(&self.config, line, highlight))),
-                    Cell::from(Line::from(
-                        std::iter::once(Span::styled(
-                            " \u{2502}",
+                let style_highlighted = Style::default()
+                    .fg(match highlight {
+                        true => self.config.ui.markselect_fg,
+                        false => self.config.ui.selected_fg,
+                    })
+                    .bg(self.config.ui.selected_bg);
+
+                match self.viewer_type {
+                    ViewerType::Hex => Row::new(vec![
+                        Cell::from(Span::styled(
+                            format!(
+                                "{:0width$X} ",
+                                self.offset + ((self.line_width * i) as u64),
+                                width = self.len_address
+                            ),
                             Style::default().fg(self.config.viewer.lineno_fg),
-                        ))
-                        .chain(masked_string(&self.config, line, highlight))
-                        .chain(std::iter::once(Span::styled(
-                            "\u{2502}",
+                        )),
+                        Cell::from(Line::from(hex_string(
+                            line,
+                            &style_hex_even,
+                            &style_hex_odd,
+                            &style_highlighted,
+                        ))),
+                        Cell::from(Line::from(
+                            std::iter::once(Span::styled(
+                                " \u{2502}",
+                                Style::default().fg(self.config.viewer.lineno_fg),
+                            ))
+                            .chain(masked_string(
+                                line,
+                                &style_even,
+                                &style_odd,
+                                &style_highlighted,
+                            ))
+                            .chain(std::iter::once(Span::styled(
+                                "\u{2502}",
+                                Style::default().fg(self.config.viewer.lineno_fg),
+                            )))
+                            .collect::<Vec<Span>>(),
+                        )),
+                    ]),
+                    ViewerType::Dump => Row::new(vec![
+                        Cell::from(Span::styled(
+                            format!(
+                                "{:0width$X} ",
+                                self.offset + ((self.line_width * i) as u64),
+                                width = self.len_address
+                            ),
                             Style::default().fg(self.config.viewer.lineno_fg),
-                        )))
-                        .collect::<Vec<Span>>(),
-                    )),
-                ])
+                        )),
+                        Cell::from(Line::from(masked_string(
+                            line,
+                            &style_dump,
+                            &style_dump,
+                            &style_highlighted,
+                        ))),
+                    ]),
+                }
             })
             .collect();
 
@@ -692,16 +790,12 @@ impl Component for HexViewer {
     }
 }
 
-fn hex_string<'a>(config: &Config, line: &'a [(bool, u8)], highlight: bool) -> Vec<Span<'a>> {
-    let style_even = Style::default().fg(config.viewer.hex_even_fg);
-    let style_odd = Style::default().fg(config.viewer.hex_odd_fg);
-    let style_highlighted = Style::default()
-        .fg(match highlight {
-            true => config.ui.markselect_fg,
-            false => config.ui.selected_fg,
-        })
-        .bg(config.ui.selected_bg);
-
+pub fn hex_string<'a>(
+    line: &'a [(bool, u8)],
+    style_even: &Style,
+    style_odd: &Style,
+    style_highlighted: &Style,
+) -> Vec<Span<'a>> {
     line.iter()
         .enumerate()
         .flat_map(|(i, &(highlited, c))| {
@@ -710,24 +804,24 @@ fn hex_string<'a>(config: &Config, line: &'a [(bool, u8)], highlight: bool) -> V
             if (i % 4) == 0 {
                 line.push(Span::styled(
                     " ",
-                    if (i % 8) < 4 { style_even } else { style_odd },
+                    if (i % 8) < 4 { *style_even } else { *style_odd },
                 ));
             }
 
             line.push(Span::styled(
                 format!("{:02X}", c),
                 if highlited {
-                    style_highlighted
+                    *style_highlighted
                 } else if (i % 8) < 4 {
-                    style_even
+                    *style_even
                 } else {
-                    style_odd
+                    *style_odd
                 },
             ));
 
             line.push(Span::styled(
                 " ",
-                if (i % 8) < 4 { style_even } else { style_odd },
+                if (i % 8) < 4 { *style_even } else { *style_odd },
             ));
 
             line
@@ -735,16 +829,12 @@ fn hex_string<'a>(config: &Config, line: &'a [(bool, u8)], highlight: bool) -> V
         .collect()
 }
 
-fn masked_string<'a>(config: &Config, line: &'a [(bool, u8)], highlight: bool) -> Vec<Span<'a>> {
-    let style_even = Style::default().fg(config.viewer.hex_text_even_fg);
-    let style_odd = Style::default().fg(config.viewer.hex_text_odd_fg);
-    let style_highlighted = Style::default()
-        .fg(match highlight {
-            true => config.ui.markselect_fg,
-            false => config.ui.selected_fg,
-        })
-        .bg(config.ui.selected_bg);
-
+pub fn masked_string<'a>(
+    line: &'a [(bool, u8)],
+    style_even: &Style,
+    style_odd: &Style,
+    style_highlighted: &Style,
+) -> Vec<Span<'a>> {
     line.iter()
         .enumerate()
         .map(|(i, &(highlited, c))| {
@@ -755,11 +845,11 @@ fn masked_string<'a>(config: &Config, line: &'a [(bool, u8)], highlight: bool) -
                     '\u{00B7}'
                 }),
                 if highlited {
-                    style_highlighted
+                    *style_highlighted
                 } else if (i % 8) < 4 {
-                    style_even
+                    *style_even
                 } else {
-                    style_odd
+                    *style_odd
                 },
             )
         })
