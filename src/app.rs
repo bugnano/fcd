@@ -1,25 +1,14 @@
-use std::{io, path::Path, thread};
+use std::{io, thread};
 
 use anyhow::Result;
-use crossbeam_channel::{select, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender};
 use ratatui::{prelude::*, widgets::*};
 use termion::{event::*, input::TermRead};
 
 use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
 
-use crate::{
-    button_bar::ButtonBar,
-    component::{Component, Focus},
-    config::load_config,
-    config::Config,
-    dlg_error::{DialogType, DlgError},
-    dlg_goto::{DlgGoto, GotoType},
-    dlg_hex_search::{DlgHexSearch, HexSearch},
-    dlg_text_search::{DlgTextSearch, TextSearch},
-    file_viewer::FileViewer,
-    top_bar::TopBar,
-};
+use crate::viewer::{dlg_goto::GotoType, dlg_hex_search::HexSearch, dlg_text_search::TextSearch};
 
 #[derive(Debug, Clone)]
 pub enum Events {
@@ -73,171 +62,12 @@ pub enum Action {
     SigCont,
 }
 
-#[derive(Debug)]
-pub struct App {
-    config: Config,
-    events_rx: Receiver<Events>,
-    pubsub_tx: Sender<PubSub>,
-    pubsub_rx: Receiver<PubSub>,
-    top_bar: TopBar,
-    viewer: FileViewer,
-    button_bar: ButtonBar,
-    dialog: Option<Box<dyn Component>>,
+pub trait App {
+    fn handle_events(&mut self) -> Result<Action>;
+    fn render(&mut self, f: &mut Frame);
 }
 
-impl App {
-    pub fn new(filename: &Path, tabsize: u8) -> Result<App> {
-        let config = load_config()?;
-
-        let (_events_tx, events_rx) = init_events()?;
-        let (pubsub_tx, pubsub_rx) = crossbeam_channel::unbounded();
-
-        Ok(App {
-            config,
-            events_rx,
-            pubsub_tx: pubsub_tx.clone(),
-            pubsub_rx,
-            top_bar: TopBar::new(&config)?,
-            viewer: FileViewer::new(&config, pubsub_tx.clone(), filename, tabsize)?,
-            button_bar: ButtonBar::new(&config)?,
-            dialog: None,
-        })
-    }
-
-    pub fn handle_events(&mut self) -> Result<Action> {
-        select! {
-            recv(self.events_rx) -> events => match events? {
-                Events::Input(event) => match event {
-                    Event::Key(key) => {
-                        let key_handled = match &mut self.dialog {
-                            Some(dlg) => dlg.handle_key(&key)?,
-                            None => self.viewer.handle_key(&key)?,
-                        };
-
-                        if !key_handled {
-                            match key {
-                                Key::Char('q')
-                                | Key::Char('Q')
-                                | Key::Char('v')
-                                | Key::F(3)
-                                | Key::F(10) => return Ok(Action::Quit),
-                                //Key::Char('p') => panic!("at the disco"),
-                                Key::Ctrl('c') => return Ok(Action::CtrlC),
-                                Key::Ctrl('l') => return Ok(Action::Redraw),
-                                Key::Ctrl('z') => return Ok(Action::CtrlZ),
-                                _ => log::debug!("{:?}", key),
-                            }
-                        }
-                    }
-                    Event::Mouse(mouse) => {
-                        self.top_bar.handle_mouse(&mouse)?;
-
-                        match &mut self.dialog {
-                            Some(dlg) => dlg.handle_mouse(&mouse)?,
-                            None => self.viewer.handle_mouse(&mouse)?,
-                        };
-
-                        self.button_bar.handle_mouse(&mouse)?;
-                    }
-                    Event::Unsupported(_) => (),
-                },
-                Events::Signal(signal) => match signal {
-                    SIGWINCH => return Ok(Action::Redraw),
-                    SIGINT => return Ok(Action::CtrlC),
-                    SIGTERM => return Ok(Action::SigTerm),
-                    SIGCONT => return Ok(Action::SigCont),
-                    _ => unreachable!(),
-                },
-            },
-            recv(self.pubsub_rx) -> pubsub => {
-                let event = pubsub?;
-
-                self.top_bar.handle_pubsub(&event)?;
-                self.viewer.handle_pubsub(&event)?;
-                self.button_bar.handle_pubsub(&event)?;
-
-                if let Some(dlg) = &mut self.dialog {
-                    dlg.handle_pubsub(&event)?;
-                }
-
-                match event {
-                    PubSub::Error(msg) => {
-                        self.dialog = Some(Box::new(DlgError::new(
-                            &self.config,
-                            self.pubsub_tx.clone(),
-                            &msg,
-                            "Error",
-                            DialogType::Error,
-                        )?));
-                    },
-                    PubSub::Warning(title, msg) => {
-                        self.dialog = Some(Box::new(DlgError::new(
-                            &self.config,
-                            self.pubsub_tx.clone(),
-                            &msg,
-                            &title,
-                            DialogType::Warning,
-                        )?));
-                    },
-                    PubSub::Info(title, msg) => {
-                        self.dialog = Some(Box::new(DlgError::new(
-                            &self.config,
-                            self.pubsub_tx.clone(),
-                            &msg,
-                            &title,
-                            DialogType::Info,
-                        )?));
-                    },
-                    PubSub::CloseDialog => self.dialog = None,
-                    PubSub::DlgGoto(goto_type) => {
-                        self.dialog = Some(Box::new(DlgGoto::new(
-                            &self.config,
-                            self.pubsub_tx.clone(),
-                            goto_type,
-                        )?));
-                    },
-                    PubSub::DlgTextSearch(text_search) => {
-                        self.dialog = Some(Box::new(DlgTextSearch::new(
-                            &self.config,
-                            self.pubsub_tx.clone(),
-                            &text_search,
-                        )?));
-                    },
-                    PubSub::DlgHexSearch(hex_search) => {
-                        self.dialog = Some(Box::new(DlgHexSearch::new(
-                            &self.config,
-                            self.pubsub_tx.clone(),
-                            &hex_search,
-                        )?));
-                    },
-                    _ => (),
-                }
-            },
-        }
-        Ok(Action::Continue)
-    }
-
-    pub fn render(&mut self, f: &mut Frame) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),
-                Constraint::Min(1),
-                Constraint::Length(1),
-            ])
-            .split(f.size());
-
-        self.top_bar.render(f, &chunks[0], Focus::Normal);
-        self.viewer.render(f, &chunks[1], Focus::Normal);
-        self.button_bar.render(f, &chunks[2], Focus::Normal);
-
-        if let Some(dlg) = &mut self.dialog {
-            dlg.render(f, &chunks[1], Focus::Normal);
-        }
-    }
-}
-
-fn init_events() -> Result<(Sender<Events>, Receiver<Events>)> {
+pub fn init_events() -> Result<(Sender<Events>, Receiver<Events>)> {
     let (tx, rx) = crossbeam_channel::unbounded();
     let input_tx = tx.clone();
     let signals_tx = tx.clone();

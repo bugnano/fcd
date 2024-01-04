@@ -19,9 +19,11 @@ use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
-    dlg_goto::GotoType,
-    dlg_text_search::{SearchType, TextSearch},
     fnmatch,
+    viewer::{
+        dlg_goto::GotoType,
+        dlg_text_search::{SearchType, TextSearch},
+    },
 };
 
 fn expand_tabs_for_line(line: &str, tabsize: usize) -> String {

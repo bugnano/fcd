@@ -1,6 +1,6 @@
 use std::fs;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use ratatui::prelude::*;
 
 use clap::crate_name;
@@ -126,17 +126,23 @@ pub struct Config {
 }
 
 pub fn load_config() -> Result<Config> {
-    let xdg_dirs = xdg::BaseDirectories::with_prefix(crate_name!())?;
+    let xdg_dirs = xdg::BaseDirectories::with_prefix(crate_name!())
+        .context("Config: failed to create directory")?;
     let config_file_name = format!("{}-config.toml", crate_name!());
 
     if let Some(filename) = xdg_dirs.find_config_file(&config_file_name) {
-        Ok(toml::from_str(&fs::read_to_string(filename)?)?)
+        Ok(toml::from_str(
+            &fs::read_to_string(filename).context("Config: failed to read config file")?,
+        )
+        .context("Config: failed to parse config file")?)
     } else {
         let default_config_str = include_str!("../config/config.toml");
-        let default_config: Config = toml::from_str(default_config_str)?;
+        let default_config: Config =
+            toml::from_str(default_config_str).context("Config: failed to parse config file")?;
 
         if let Ok(filename) = xdg_dirs.place_config_file(&config_file_name) {
-            fs::write(filename, default_config_str)?;
+            fs::write(filename, default_config_str)
+                .context("Config: failed to write config file")?;
         }
 
         Ok(default_config)

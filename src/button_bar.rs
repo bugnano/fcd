@@ -6,45 +6,43 @@ use crate::{
     config::Config,
 };
 
-const LABELS: &[&str] = &[
-    " ",      //"Help",
-    "UnWrap", //
-    "Quit",   //
-    "Hex",    //"Ascii",
-    "Goto",   //
-    " ",      //
-    "Search", //
-    " ",      //"Raw",
-    " ",      //"Format",
-    "Quit",   //
-];
-
 #[derive(Debug)]
 pub struct ButtonBar {
     config: Config,
+    labels: Vec<String>,
 }
 
 impl ButtonBar {
-    pub fn new(config: &Config) -> Result<ButtonBar> {
-        Ok(ButtonBar { config: *config })
+    pub fn new<T: IntoIterator<Item = U>, U: AsRef<str>>(
+        config: &Config,
+        labels: T,
+    ) -> Result<ButtonBar> {
+        Ok(ButtonBar {
+            config: *config,
+            labels: labels
+                .into_iter()
+                .map(|label| String::from(label.as_ref()))
+                .collect(),
+        })
     }
 }
 
 impl Component for ButtonBar {
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
         let label_width =
-            (chunk.width.saturating_sub(2 * LABELS.len() as u16)) / (LABELS.len() as u16);
+            (chunk.width.saturating_sub(2 * self.labels.len() as u16)) / (self.labels.len() as u16);
 
         let mut excess_width = chunk
             .width
-            .saturating_sub((label_width + 2) * LABELS.len() as u16);
+            .saturating_sub((label_width + 2) * self.labels.len() as u16);
 
         let nth = match excess_width {
             0 => 0,
-            w => LABELS.len() / (w as usize),
+            w => self.labels.len() / (w as usize),
         };
 
-        let widths = LABELS
+        let widths: Vec<Constraint> = self
+            .labels
             .iter()
             .enumerate()
             .flat_map(|(i, _)| {
@@ -61,9 +59,9 @@ impl Component for ButtonBar {
                     }),
                 ]
             })
-            .collect::<Vec<_>>();
+            .collect();
 
-        let items = Row::new(LABELS.iter().enumerate().flat_map(|(i, label)| {
+        let items = Row::new(self.labels.iter().enumerate().flat_map(|(i, label)| {
             [
                 Span::styled(
                     format!("{:2}", i + 1),
@@ -72,7 +70,7 @@ impl Component for ButtonBar {
                         .bg(self.config.ui.hotkey_bg),
                 ),
                 Span::styled(
-                    String::from(*label),
+                    label,
                     Style::default()
                         .fg(self.config.ui.selected_fg)
                         .bg(self.config.ui.selected_bg),
@@ -80,10 +78,10 @@ impl Component for ButtonBar {
             ]
         }));
 
-        let items = Table::new([items], &widths)
+        let table = Table::new([items], &widths)
             .block(Block::default().style(Style::default().bg(self.config.ui.selected_bg)))
             .column_spacing(0);
 
-        f.render_widget(items, *chunk);
+        f.render_widget(table, *chunk);
     }
 }

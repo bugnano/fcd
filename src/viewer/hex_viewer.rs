@@ -15,8 +15,7 @@ use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
-    dlg_goto::GotoType,
-    dlg_hex_search::HexSearch,
+    viewer::{dlg_goto::GotoType, dlg_hex_search::HexSearch},
 };
 
 pub fn search_next_from_pos(

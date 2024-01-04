@@ -13,8 +13,10 @@ use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
-    hex_viewer::{HexViewer, ViewerType},
-    text_viewer::TextViewer,
+    viewer::{
+        hex_viewer::{HexViewer, ViewerType},
+        text_viewer::TextViewer,
+    },
 };
 
 #[derive(Debug)]

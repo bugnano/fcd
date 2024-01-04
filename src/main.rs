@@ -8,22 +8,17 @@ use anyhow::{Context, Result};
 use ratatui::prelude::*;
 use termion::{input::MouseTerminal, raw::IntoRawMode, screen::IntoAlternateScreen};
 
-use clap::Parser;
+use clap::{crate_name, ArgAction, Parser};
 
 mod app;
 mod button_bar;
 mod component;
 mod config;
 mod dlg_error;
-mod dlg_goto;
-mod dlg_hex_search;
-mod dlg_text_search;
-mod file_viewer;
+mod fm;
 mod fnmatch;
-mod hex_viewer;
-mod text_viewer;
 mod tilde_layout;
-mod top_bar;
+mod viewer;
 mod widgets;
 
 use crate::app::{Action, App};
@@ -31,12 +26,25 @@ use crate::app::{Action, App};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    /// set tab size
+    /// Print last working directory to specified file
+    #[arg(short = 'P', long, value_name = "FILE")]
+    printwd: Option<PathBuf>,
+
+    /// Specify database file to use
+    #[arg(short = 'D', long, value_name = "FILE")]
+    database: Option<PathBuf>,
+
+    /// Do not use database
+    #[arg(short = 'n', long = "nodb", action = ArgAction::SetFalse)]
+    use_db: bool,
+
+    /// file viewer
+    #[arg(short, long, value_name = "FILE")]
+    view: Option<PathBuf>,
+
+    /// set tab size for the file viewer
     #[arg(short, long, default_value_t = 0)]
     tabsize: u8,
-
-    /// the file to view
-    file: PathBuf,
 }
 
 pub fn initialize_panic_handler() {
@@ -66,7 +74,7 @@ fn main() -> Result<()> {
     #[cfg(debug_assertions)]
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
         .target(env_logger::Target::Pipe(Box::new(std::fs::File::create(
-            "fcv.log",
+            format!("{}.log", crate_name!()),
         )?)))
         .init();
 
@@ -84,7 +92,15 @@ fn main() -> Result<()> {
     let mut terminal =
         Terminal::new(TermionBackend::new(stdout)).context("creating terminal failed")?;
 
-    let mut app = App::new(&cli.file, cli.tabsize)?;
+    let mut app = match cli.view {
+        Some(file) => Box::new(viewer::app::App::new(&file, cli.tabsize)?) as Box<dyn App>,
+        None => Box::new(fm::app::App::new(
+            cli.printwd.as_deref(),
+            cli.database.as_deref(),
+            cli.use_db,
+            cli.tabsize,
+        )?) as Box<dyn App>,
+    };
 
     loop {
         terminal.draw(|f| app.render(f))?;
