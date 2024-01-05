@@ -41,10 +41,10 @@ pub struct DlgTextSearch {
     check_boxes: Vec<CheckBox>,
     btn_ok: Button,
     btn_cancel: Button,
-    section_focus_position: u16,
-    middle_focus_position: u16,
-    check_focus_position: u16,
-    button_focus_position: u16,
+    section_focus_position: usize,
+    middle_focus_position: usize,
+    check_focus_position: usize,
+    button_focus_position: usize,
 }
 
 impl DlgTextSearch {
@@ -135,7 +135,7 @@ impl Component for DlgTextSearch {
             0 => self.input.handle_key(key)?,
             1 => match self.middle_focus_position {
                 0 => self.radio.handle_key(key)?,
-                1 => self.check_boxes[self.check_focus_position as usize].handle_key(key)?,
+                1 => self.check_boxes[self.check_focus_position].handle_key(key)?,
                 _ => unreachable!(),
             },
             2 => false,
@@ -169,7 +169,7 @@ impl Component for DlgTextSearch {
                 }
                 Key::BackTab => {
                     self.section_focus_position =
-                        ((self.section_focus_position as isize) - 1).rem_euclid(3) as u16;
+                        ((self.section_focus_position as isize) - 1).rem_euclid(3) as usize;
                 }
                 Key::Char('\t') => {
                     self.section_focus_position = (self.section_focus_position + 1) % 3;
@@ -193,7 +193,7 @@ impl Component for DlgTextSearch {
                 Key::Down | Key::Char('j') => {
                     match (self.section_focus_position, self.middle_focus_position) {
                         (1, 1) => {
-                            if (self.check_focus_position + 1) < (self.check_boxes.len() as u16) {
+                            if (self.check_focus_position + 1) < self.check_boxes.len() {
                                 self.check_focus_position += 1;
                             } else {
                                 self.section_focus_position += 1;
@@ -298,10 +298,9 @@ impl Component for DlgTextSearch {
         self.input.render(
             f,
             &upper_area[1],
-            if self.section_focus_position == 0 {
-                Focus::Focused
-            } else {
-                Focus::Normal
+            match self.section_focus_position {
+                0 => Focus::Focused,
+                _ => Focus::Normal,
             },
         );
 
@@ -332,10 +331,9 @@ impl Component for DlgTextSearch {
         self.radio.render(
             f,
             &middle_sections[0],
-            if (self.section_focus_position == 1) && (self.middle_focus_position == 0) {
-                Focus::Focused
-            } else {
-                Focus::Normal
+            match (self.section_focus_position, self.middle_focus_position) {
+                (1, 0) => Focus::Focused,
+                _ => Focus::Normal,
             },
         );
 
@@ -348,7 +346,7 @@ impl Component for DlgTextSearch {
                     &check_sections[i],
                     if (self.section_focus_position == 1)
                         && (self.middle_focus_position == 1)
-                        && (self.check_focus_position == (i as u16))
+                        && (self.check_focus_position == i)
                     {
                         Focus::Focused
                     } else {
@@ -385,27 +383,19 @@ impl Component for DlgTextSearch {
         self.btn_ok.render(
             f,
             &lower_area[0],
-            if self.button_focus_position == 0 {
-                if self.section_focus_position == 2 {
-                    Focus::Focused
-                } else {
-                    Focus::Active
-                }
-            } else {
-                Focus::Normal
+            match (self.section_focus_position, self.button_focus_position) {
+                (2, 0) => Focus::Focused,
+                (_, 0) => Focus::Active,
+                _ => Focus::Normal,
             },
         );
         self.btn_cancel.render(
             f,
             &lower_area[2],
-            if self.button_focus_position == 1 {
-                if self.section_focus_position == 2 {
-                    Focus::Focused
-                } else {
-                    Focus::Active
-                }
-            } else {
-                Focus::Normal
+            match (self.section_focus_position, self.button_focus_position) {
+                (2, 1) => Focus::Focused,
+                (_, 1) => Focus::Active,
+                _ => Focus::Normal,
             },
         );
     }

@@ -32,8 +32,8 @@ pub struct DlgGoto {
     input: Input,
     btn_ok: Button,
     btn_cancel: Button,
-    section_focus_position: u16,
-    button_focus_position: u16,
+    section_focus_position: usize,
+    button_focus_position: usize,
 }
 
 impl DlgGoto {
@@ -195,10 +195,9 @@ impl Component for DlgGoto {
         self.input.render(
             f,
             &upper_area[1],
-            if self.section_focus_position == 0 {
-                Focus::Focused
-            } else {
-                Focus::Normal
+            match self.section_focus_position {
+                0 => Focus::Focused,
+                _ => Focus::Normal,
             },
         );
 
@@ -230,27 +229,19 @@ impl Component for DlgGoto {
         self.btn_ok.render(
             f,
             &lower_area[0],
-            if self.button_focus_position == 0 {
-                if self.section_focus_position == 1 {
-                    Focus::Focused
-                } else {
-                    Focus::Active
-                }
-            } else {
-                Focus::Normal
+            match (self.section_focus_position, self.button_focus_position) {
+                (1, 0) => Focus::Focused,
+                (_, 0) => Focus::Active,
+                _ => Focus::Normal,
             },
         );
         self.btn_cancel.render(
             f,
             &lower_area[2],
-            if self.button_focus_position == 1 {
-                if self.section_focus_position == 1 {
-                    Focus::Focused
-                } else {
-                    Focus::Active
-                }
-            } else {
-                Focus::Normal
+            match (self.section_focus_position, self.button_focus_position) {
+                (1, 1) => Focus::Focused,
+                (_, 1) => Focus::Active,
+                _ => Focus::Normal,
             },
         );
     }

@@ -31,9 +31,9 @@ pub struct DlgHexSearch {
     check_boxes: Vec<CheckBox>,
     btn_ok: Button,
     btn_cancel: Button,
-    section_focus_position: u16,
-    check_focus_position: u16,
-    button_focus_position: u16,
+    section_focus_position: usize,
+    check_focus_position: usize,
+    button_focus_position: usize,
 }
 
 impl DlgHexSearch {
@@ -101,7 +101,7 @@ impl Component for DlgHexSearch {
 
         let input_handled = match self.section_focus_position {
             0 => self.input.handle_key(key)?,
-            1 => self.check_boxes[self.check_focus_position as usize].handle_key(key)?,
+            1 => self.check_boxes[self.check_focus_position].handle_key(key)?,
             2 => false,
             _ => unreachable!(),
         };
@@ -126,7 +126,7 @@ impl Component for DlgHexSearch {
                 }
                 Key::BackTab => {
                     self.section_focus_position =
-                        ((self.section_focus_position as isize) - 1).rem_euclid(3) as u16;
+                        ((self.section_focus_position as isize) - 1).rem_euclid(3) as usize;
                 }
                 Key::Char('\t') => {
                     self.section_focus_position = (self.section_focus_position + 1) % 3;
@@ -233,10 +233,9 @@ impl Component for DlgHexSearch {
         self.input.render(
             f,
             &upper_area[1],
-            if self.section_focus_position == 0 {
-                Focus::Focused
-            } else {
-                Focus::Normal
+            match self.section_focus_position {
+                0 => Focus::Focused,
+                _ => Focus::Normal,
             },
         );
 
@@ -266,9 +265,7 @@ impl Component for DlgHexSearch {
                 check_box.render(
                     f,
                     &check_sections[i],
-                    if (self.section_focus_position == 1)
-                        && (self.check_focus_position == (i as u16))
-                    {
+                    if (self.section_focus_position == 1) && (self.check_focus_position == i) {
                         Focus::Focused
                     } else {
                         Focus::Normal
@@ -304,27 +301,19 @@ impl Component for DlgHexSearch {
         self.btn_ok.render(
             f,
             &lower_area[0],
-            if self.button_focus_position == 0 {
-                if self.section_focus_position == 2 {
-                    Focus::Focused
-                } else {
-                    Focus::Active
-                }
-            } else {
-                Focus::Normal
+            match (self.section_focus_position, self.button_focus_position) {
+                (2, 0) => Focus::Focused,
+                (_, 0) => Focus::Active,
+                _ => Focus::Normal,
             },
         );
         self.btn_cancel.render(
             f,
             &lower_area[2],
-            if self.button_focus_position == 1 {
-                if self.section_focus_position == 2 {
-                    Focus::Focused
-                } else {
-                    Focus::Active
-                }
-            } else {
-                Focus::Normal
+            match (self.section_focus_position, self.button_focus_position) {
+                (2, 1) => Focus::Focused,
+                (_, 1) => Focus::Active,
+                _ => Focus::Normal,
             },
         );
     }

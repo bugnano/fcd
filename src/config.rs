@@ -20,6 +20,8 @@ pub struct Ui {
     pub selected_bg: Color,
 
     #[serde_as(as = "DisplayFromStr")]
+    pub marked_fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
     pub markselect_fg: Color,
 
     pub use_shadows: bool,
@@ -28,6 +30,19 @@ pub struct Ui {
     pub shadow_fg: Color,
     #[serde_as(as = "DisplayFromStr")]
     pub shadow_bg: Color,
+}
+
+#[serde_as]
+#[derive(Deserialize, Debug, Copy, Clone)]
+pub struct Panel {
+    #[serde_as(as = "DisplayFromStr")]
+    pub fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub bg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub reverse_fg: Color,
+    #[serde_as(as = "DisplayFromStr")]
+    pub reverse_bg: Color,
 }
 
 #[serde_as]
@@ -119,6 +134,7 @@ pub struct Highlight {
 #[derive(Deserialize, Debug, Copy, Clone)]
 pub struct Config {
     pub ui: Ui,
+    pub panel: Panel,
     pub error: Error,
     pub dialog: Dialog,
     pub viewer: Viewer,

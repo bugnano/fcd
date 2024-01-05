@@ -5,11 +5,18 @@ selected_fg = "black"
 #selected_bg = { user = "cyan", root = "red" }
 selected_bg = "cyan"
 
+marked_fg = "lightyellow"
 markselect_fg = "lightyellow"
 
 use_shadows = true
 shadow_fg = "darkgray"
 shadow_bg = "black"
+
+[panel]
+fg = 'gray'
+bg = 'blue'
+reverse_fg = 'black'
+reverse_bg = 'gray'
 
 [error]
 fg = "white"
