@@ -74,7 +74,7 @@ fn main() -> Result<()> {
     #[cfg(debug_assertions)]
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
         .target(env_logger::Target::Pipe(Box::new(std::fs::File::create(
-            format!("{}.log", crate_name!()),
+            format!("{}/{}.log", std::env::var("HOME")?, crate_name!()),
         )?)))
         .init();
 

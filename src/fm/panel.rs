@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use anyhow::Result;
 use crossbeam_channel::Sender;
 use ratatui::{
@@ -12,19 +14,22 @@ use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
+    tilde_layout::tilde_layout,
 };
 
 #[derive(Debug)]
 pub struct Panel {
     config: Config,
     pubsub_tx: Sender<PubSub>,
+    cwd: PathBuf,
 }
 
 impl Panel {
-    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>) -> Result<Panel> {
+    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>, initial_path: &Path) -> Result<Panel> {
         Ok(Panel {
             config: *config,
             pubsub_tx,
+            cwd: initial_path.to_path_buf(),
         })
     }
 }
@@ -44,20 +49,28 @@ impl Component for Panel {
 
         let upper_block = Block::default()
             .title(
-                Title::from(Span::styled(
-                    " Panel ",
-                    match focus {
-                        Focus::Focused => Style::default()
-                            .fg(self.config.panel.reverse_fg)
-                            .bg(self.config.panel.reverse_bg),
-                        _ => Style::default().fg(self.config.panel.fg),
-                    },
-                ))
+                Title::from(Line::from(vec![
+                    Span::raw(symbols::line::NORMAL.horizontal),
+                    Span::styled(
+                        tilde_layout(
+                            &format!(" {} ", self.cwd.to_string_lossy()),
+                            chunk.width.saturating_sub(4).into(),
+                        ),
+                        match focus {
+                            Focus::Focused => Style::default()
+                                .fg(self.config.panel.reverse_fg)
+                                .bg(self.config.panel.reverse_bg),
+                            _ => Style::default()
+                                .fg(self.config.panel.fg)
+                                .bg(self.config.panel.bg),
+                        },
+                    ),
+                    Span::raw(symbols::line::NORMAL.horizontal),
+                ]))
                 .position(Position::Top)
-                .alignment(Alignment::Center),
+                .alignment(Alignment::Left),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-            .padding(Padding::horizontal(1))
             .style(
                 Style::default()
                     .fg(self.config.panel.fg)

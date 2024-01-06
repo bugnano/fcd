@@ -68,8 +68,8 @@ impl App {
             Events::Input(input) => match input {
                 Event::Key(key) => {
                     let key_handled = match &mut self.dialog {
-                        Some(dlg) => dlg.handle_key(&key)?,
-                        None => self.viewer.handle_key(&key)?,
+                        Some(dlg) => dlg.handle_key(key)?,
+                        None => self.viewer.handle_key(key)?,
                     };
 
                     if !key_handled {
@@ -88,14 +88,14 @@ impl App {
                     }
                 }
                 Event::Mouse(mouse) => {
-                    self.top_bar.handle_mouse(&mouse)?;
+                    self.top_bar.handle_mouse(mouse)?;
 
                     match &mut self.dialog {
-                        Some(dlg) => dlg.handle_mouse(&mouse)?,
-                        None => self.viewer.handle_mouse(&mouse)?,
+                        Some(dlg) => dlg.handle_mouse(mouse)?,
+                        None => self.viewer.handle_mouse(mouse)?,
                     };
 
-                    self.button_bar.handle_mouse(&mouse)?;
+                    self.button_bar.handle_mouse(mouse)?;
                 }
                 Event::Unsupported(_) => (),
             },
@@ -125,7 +125,7 @@ impl App {
                 self.dialog = Some(Box::new(DlgError::new(
                     &self.config,
                     self.pubsub_tx.clone(),
-                    &msg,
+                    msg,
                     "Error",
                     DialogType::Error,
                 )?));
@@ -134,8 +134,8 @@ impl App {
                 self.dialog = Some(Box::new(DlgError::new(
                     &self.config,
                     self.pubsub_tx.clone(),
-                    &msg,
-                    &title,
+                    msg,
+                    title,
                     DialogType::Warning,
                 )?));
             }
@@ -143,8 +143,8 @@ impl App {
                 self.dialog = Some(Box::new(DlgError::new(
                     &self.config,
                     self.pubsub_tx.clone(),
-                    &msg,
-                    &title,
+                    msg,
+                    title,
                     DialogType::Info,
                 )?));
             }
@@ -160,14 +160,14 @@ impl App {
                 self.dialog = Some(Box::new(DlgTextSearch::new(
                     &self.config,
                     self.pubsub_tx.clone(),
-                    &text_search,
+                    text_search,
                 )?));
             }
             PubSub::DlgHexSearch(hex_search) => {
                 self.dialog = Some(Box::new(DlgHexSearch::new(
                     &self.config,
                     self.pubsub_tx.clone(),
-                    &hex_search,
+                    hex_search,
                 )?));
             }
             _ => (),

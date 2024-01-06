@@ -1,6 +1,10 @@
-use std::path::Path;
+use std::{
+    env,
+    fs::read_dir,
+    path::{Path, PathBuf},
+};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossbeam_channel::{select, Receiver, Sender};
 use ratatui::prelude::*;
 use termion::event::*;
@@ -53,14 +57,25 @@ impl App {
         let (_events_tx, events_rx) = init_events()?;
         let (pubsub_tx, pubsub_rx) = crossbeam_channel::unbounded();
 
+        let initial_path = match env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(_) => {
+                PathBuf::from(env::var("PWD").context("failed to get current working directory")?)
+                    .ancestors()
+                    .find(|cwd| read_dir(cwd).is_ok())
+                    .unwrap()
+                    .to_path_buf()
+            }
+        };
+
         Ok(App {
             config,
             events_rx,
             pubsub_tx: pubsub_tx.clone(),
             pubsub_rx,
             panels: vec![
-                Box::new(Panel::new(&config, pubsub_tx.clone())?),
-                Box::new(Panel::new(&config, pubsub_tx.clone())?),
+                Box::new(Panel::new(&config, pubsub_tx.clone(), &initial_path)?),
+                Box::new(Panel::new(&config, pubsub_tx.clone(), &initial_path)?),
             ],
             button_bar: ButtonBar::new(&config, LABELS)?,
             dialog: None,
@@ -73,8 +88,8 @@ impl App {
             Events::Input(input) => match input {
                 Event::Key(key) => {
                     let key_handled = match &mut self.dialog {
-                        Some(dlg) => dlg.handle_key(&key)?,
-                        None => self.panels[self.panel_focus_position].handle_key(&key)?,
+                        Some(dlg) => dlg.handle_key(key)?,
+                        None => self.panels[self.panel_focus_position].handle_key(key)?,
                     };
 
                     if !key_handled {
@@ -92,11 +107,11 @@ impl App {
                 }
                 Event::Mouse(mouse) => {
                     match &mut self.dialog {
-                        Some(dlg) => dlg.handle_mouse(&mouse)?,
+                        Some(dlg) => dlg.handle_mouse(mouse)?,
                         None => (),
                     };
 
-                    self.button_bar.handle_mouse(&mouse)?;
+                    self.button_bar.handle_mouse(mouse)?;
                 }
                 Event::Unsupported(_) => (),
             },
@@ -128,7 +143,7 @@ impl App {
                 self.dialog = Some(Box::new(DlgError::new(
                     &self.config,
                     self.pubsub_tx.clone(),
-                    &msg,
+                    msg,
                     "Error",
                     DialogType::Error,
                 )?));
@@ -137,8 +152,8 @@ impl App {
                 self.dialog = Some(Box::new(DlgError::new(
                     &self.config,
                     self.pubsub_tx.clone(),
-                    &msg,
-                    &title,
+                    msg,
+                    title,
                     DialogType::Warning,
                 )?));
             }
@@ -146,8 +161,8 @@ impl App {
                 self.dialog = Some(Box::new(DlgError::new(
                     &self.config,
                     self.pubsub_tx.clone(),
-                    &msg,
-                    &title,
+                    msg,
+                    title,
                     DialogType::Info,
                 )?));
             }
