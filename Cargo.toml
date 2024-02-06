@@ -28,6 +28,9 @@ libc = "*"
 unicode-width = "*"
 unicode-normalization = "*"
 regex = "*"
+uzers = "*"
+path-clean = "*"
+caseless = "*"
 
 [profile.release]
 strip = true

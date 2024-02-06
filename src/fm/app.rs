@@ -1,4 +1,5 @@
 use std::{
+    cmp::max,
     env,
     fs::read_dir,
     path::{Path, PathBuf},
@@ -8,6 +9,7 @@ use anyhow::{Context, Result};
 use crossbeam_channel::{select, Receiver, Sender};
 use ratatui::prelude::*;
 use termion::event::*;
+use unicode_normalization::UnicodeNormalization;
 
 use signal_hook::consts::signal::*;
 
@@ -220,4 +222,55 @@ impl app::App for App {
             dlg.render(f, &chunks[0], Focus::Normal);
         }
     }
+}
+
+pub fn tar_stem(file: &str) -> String {
+    let parts: Vec<&str> = file.split('.').collect();
+
+    if (parts.len() > 2) && (parts[parts.len() - 2].to_lowercase() == "tar") {
+        parts[..parts.len() - 2].join(".")
+    } else if parts.len() > 1 {
+        parts[..parts.len() - 1].join(".")
+    } else {
+        String::from(file)
+    }
+}
+
+pub fn tar_suffix(file: &str) -> String {
+    let parts: Vec<&str> = file.split('.').collect();
+
+    if (parts.len() > 2) && (parts[parts.len() - 2].to_lowercase() == "tar") {
+        format!(".{}", parts[parts.len() - 2..].join("."))
+    } else if parts.len() > 1 {
+        format!(".{}", parts[parts.len() - 1..].join("."))
+    } else {
+        String::from(file)
+    }
+}
+
+pub fn human_readable_size(size: u64) -> String {
+    if size < 1024 {
+        return format!("{}B", size);
+    }
+
+    // Note: If size is greater than 2**53, then this function doesn't work
+    let mut size = size as f64;
+
+    for suffix in ['K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'] {
+        size /= 1024.0;
+        if size < 1024.0 {
+            return format!(
+                "{:.prec$}{}",
+                size,
+                suffix,
+                prec = max(4_usize.saturating_sub((size as u64).to_string().len()), 1)
+            );
+        }
+    }
+
+    unreachable!();
+}
+
+pub fn natsort_key(s: &str) -> String {
+    caseless::default_case_fold_str(s).nfkd().collect()
 }

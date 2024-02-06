@@ -17,6 +17,7 @@ mod config;
 mod dlg_error;
 mod fm;
 mod fnmatch;
+mod stat;
 mod tilde_layout;
 mod viewer;
 mod widgets;
