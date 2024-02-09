@@ -8,7 +8,7 @@ authors = ["Franco Bugnano <franco@bugnano.it>"]
 
 [dependencies]
 termion = "*"
-ratatui = { version = "*", default-features = false, features = ["termion"] }
+ratatui = { version = "*", default-features = false, features = ["termion", "serde"] }
 crossbeam-channel = "*"
 signal-hook = "*"
 anyhow = "*"
@@ -21,7 +21,6 @@ syntect = "*"
 #bat = { version = "*", default-features = false, features = ["regex-fancy"] }
 bat = { version = "*", default-features = false, features = ["regex-onig"] }
 serde = "*"
-serde_with = "*"
 toml = "*"
 xdg = "*"
 libc = "*"

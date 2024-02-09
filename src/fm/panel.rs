@@ -2,10 +2,11 @@ use std::{
     fs::{self, Metadata},
     os::unix::fs::{FileTypeExt, MetadataExt},
     path::{Path, PathBuf},
+    thread,
 };
 
 use anyhow::Result;
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Receiver, Sender};
 use libc::{S_IXGRP, S_IXOTH, S_IXUSR};
 use path_clean::PathClean;
 use ratatui::{
@@ -74,7 +75,13 @@ pub struct Entry {
     link_target: Option<PathBuf>,
 }
 
-pub fn get_file_list(cwd: &Path, count_directories: bool) -> Result<Vec<Entry>> {
+#[derive(Debug, Clone, Copy)]
+pub enum CountDirectories {
+    Yes,
+    No,
+}
+
+pub fn get_file_list(cwd: &Path, count_directories: CountDirectories) -> Result<Vec<Entry>> {
     let users_cache = UsersCache::new();
 
     Ok(fs::read_dir(cwd)?
@@ -163,17 +170,16 @@ pub fn get_file_list(cwd: &Path, count_directories: bool) -> Result<Vec<Entry>> 
             };
 
             let (length, size) = if stat.is_dir() {
-                if count_directories {
-                    match fs::read_dir(entry.path()) {
+                match count_directories {
+                    CountDirectories::Yes => match fs::read_dir(entry.path()) {
                         Ok(entries) => {
                             let num_entries = entries.count();
 
                             (num_entries as u64, num_entries.to_string())
                         }
                         Err(_) => (0, String::from("?")),
-                    }
-                } else {
-                    (0, String::from("DIR"))
+                    },
+                    CountDirectories::No => (0, String::from("DIR")),
                 }
             } else if metadata.file_type().is_char_device()
                 || metadata.file_type().is_block_device()
@@ -245,24 +251,86 @@ pub fn get_file_list(cwd: &Path, count_directories: bool) -> Result<Vec<Entry>> 
         .collect::<Vec<Entry>>())
 }
 
+#[derive(Debug, Clone)]
+enum ComponentPubSub {
+    FileList(Vec<Entry>),
+}
+
 #[derive(Debug)]
 pub struct Panel {
     config: Config,
     pubsub_tx: Sender<PubSub>,
+    component_pubsub_tx: Sender<ComponentPubSub>,
+    component_pubsub_rx: Receiver<ComponentPubSub>,
     cwd: PathBuf,
+    is_loading: bool,
+    file_list: Vec<Entry>,
 }
 
 impl Panel {
     pub fn new(config: &Config, pubsub_tx: Sender<PubSub>, initial_path: &Path) -> Result<Panel> {
-        Ok(Panel {
+        let (component_pubsub_tx, component_pubsub_rx) = crossbeam_channel::unbounded();
+
+        let mut panel = Panel {
             config: *config,
             pubsub_tx,
+            component_pubsub_tx,
+            component_pubsub_rx,
             cwd: initial_path.to_path_buf(),
-        })
+            is_loading: false,
+            file_list: Vec::new(),
+        };
+
+        panel.load_file_list();
+
+        Ok(panel)
+    }
+
+    pub fn handle_component_pubsub(&mut self) -> Result<()> {
+        if let Ok(event) = self.component_pubsub_rx.try_recv() {
+            match event {
+                ComponentPubSub::FileList(file_list) => {
+                    self.is_loading = false;
+
+                    self.file_list = file_list;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn load_file_list(&mut self) {
+        self.is_loading = true;
+
+        let cwd = self.cwd.clone();
+        let component_pubsub_tx = self.component_pubsub_tx.clone();
+        let pubsub_tx = self.pubsub_tx.clone();
+
+        thread::spawn(move || {
+            let file_list = get_file_list(&cwd, CountDirectories::Yes).unwrap_or(Vec::new());
+
+            // First send the component event
+            component_pubsub_tx
+                .send(ComponentPubSub::FileList(file_list))
+                .unwrap();
+
+            // Then notify the app that there is an component event
+            pubsub_tx.send(PubSub::ComponentThreadEvent).unwrap();
+        });
     }
 }
 
 impl Component for Panel {
+    fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
+        match event {
+            PubSub::ComponentThreadEvent => self.handle_component_pubsub()?,
+            _ => (),
+        }
+
+        Ok(())
+    }
+
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {
         let middle_border_set = symbols::border::Set {
             top_left: symbols::line::NORMAL.vertical_right,

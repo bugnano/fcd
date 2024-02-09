@@ -23,13 +23,11 @@ pub enum PubSub {
     Warning(String, String),
     Info(String, String),
     CloseDialog,
+    ComponentThreadEvent,
 
     // File viewer events
     FileInfo(String, String, String),
     ToggleHex,
-
-    // Text viewer events
-    Highlight(Vec<Vec<(Style, String)>>),
 
     // Hex viewer events
     FromHexOffset(u64),

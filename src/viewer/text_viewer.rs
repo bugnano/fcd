@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Result;
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Receiver, Sender};
 use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
@@ -44,10 +44,17 @@ fn expand_tabs_for_line(line: &str, tabsize: usize) -> String {
     expanded
 }
 
+#[derive(Debug, Clone)]
+enum ComponentPubSub {
+    Highlight(Vec<Vec<(Style, String)>>),
+}
+
 #[derive(Debug)]
 pub struct TextViewer {
     config: Config,
     pubsub_tx: Sender<PubSub>,
+    component_pubsub_tx: Sender<ComponentPubSub>,
+    component_pubsub_rx: Receiver<ComponentPubSub>,
     rect: Rect,
     filename: PathBuf,
     filename_str: String,
@@ -115,9 +122,13 @@ impl TextViewer {
             }))
             .collect();
 
+        let (component_pubsub_tx, component_pubsub_rx) = crossbeam_channel::unbounded();
+
         let mut viewer = TextViewer {
             config: *config,
             pubsub_tx,
+            component_pubsub_tx,
+            component_pubsub_rx,
             rect: Rect::default(),
             filename: filename.to_path_buf(),
             filename_str: String::from(filename_str),
@@ -141,10 +152,23 @@ impl TextViewer {
         Ok(viewer)
     }
 
+    pub fn handle_component_pubsub(&mut self) -> Result<()> {
+        if let Ok(event) = self.component_pubsub_rx.try_recv() {
+            match event {
+                ComponentPubSub::Highlight(styled_lines) => {
+                    self.styled_lines = styled_lines.to_vec();
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn highlight(&self) {
         let filename = self.filename.clone();
         let lines = self.lines.clone();
         let config = self.config;
+        let component_pubsub_tx = self.component_pubsub_tx.clone();
         let pubsub_tx = self.pubsub_tx.clone();
 
         // Do the highlighting in a separate thread
@@ -193,7 +217,13 @@ impl TextViewer {
                 })
                 .collect();
 
-            pubsub_tx.send(PubSub::Highlight(styled_lines)).unwrap();
+            // First send the component event
+            component_pubsub_tx
+                .send(ComponentPubSub::Highlight(styled_lines))
+                .unwrap();
+
+            // Then notify the app that there is an component event
+            pubsub_tx.send(PubSub::ComponentThreadEvent).unwrap();
         });
     }
 
@@ -428,7 +458,7 @@ impl Component for TextViewer {
 
     fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
         match event {
-            PubSub::Highlight(styled_lines) => self.styled_lines = styled_lines.to_vec(),
+            PubSub::ComponentThreadEvent => self.handle_component_pubsub()?,
             PubSub::Goto(GotoType::LineNumber, str_line_number) => {
                 match str_line_number.parse::<usize>() {
                     Ok(line_number) => {
