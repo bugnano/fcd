@@ -52,6 +52,18 @@ pub struct Dialog {
 }
 
 #[derive(Deserialize, Debug, Copy, Clone)]
+pub struct FileManager {
+    pub directory_fg: Color,
+    pub dir_symlink_fg: Color,
+    pub executable_fg: Color,
+    pub symlink_fg: Color,
+    pub stalelink_fg: Color,
+    pub device_fg: Color,
+    pub special_fg: Color,
+    pub archive_fg: Color,
+}
+
+#[derive(Deserialize, Debug, Copy, Clone)]
 pub struct Viewer {
     pub tab_size: u8,
 
@@ -89,6 +101,7 @@ pub struct Config {
     pub panel: Panel,
     pub error: Error,
     pub dialog: Dialog,
+    pub file_manager: FileManager,
     pub viewer: Viewer,
     pub highlight: Highlight,
 }

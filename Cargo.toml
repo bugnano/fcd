@@ -30,6 +30,7 @@ regex = "*"
 uzers = "*"
 path-clean = "*"
 caseless = "*"
+chrono = "*"
 
 [profile.release]
 strip = true

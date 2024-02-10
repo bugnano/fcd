@@ -5,23 +5,23 @@ selected_fg = "black"
 #selected_bg = { user = "cyan", root = "red" }
 selected_bg = "cyan"
 
-marked_fg = "lightyellow"
-markselect_fg = "lightyellow"
+marked_fg = "light yellow"
+markselect_fg = "light yellow"
 
 use_shadows = true
-shadow_fg = "darkgray"
+shadow_fg = "dark gray"
 shadow_bg = "black"
 
 [panel]
-fg = 'gray'
-bg = 'blue'
-reverse_fg = 'black'
-reverse_bg = 'gray'
+fg = "gray"
+bg = "blue"
+reverse_fg = "black"
+reverse_bg = "gray"
 
 [error]
 fg = "white"
 bg = "red"
-title_fg = "lightyellow"
+title_fg = "light yellow"
 focus_fg = "black"
 focus_bg = "gray"
 
@@ -32,9 +32,19 @@ title_fg = "blue"
 focus_fg = "black"
 focus_bg = "cyan"
 
-placeholder_fg = "darkgray"
+placeholder_fg = "dark gray"
 input_fg = "black"
 input_bg = "cyan"
+
+[file_manager]
+directory_fg = "white"
+dir_symlink_fg = "white"
+executable_fg = "light green"
+symlink_fg = "light gray"
+stalelink_fg = "light red"
+device_fg = "light magenta"
+special_fg = "black"
+archive_fg = "light magenta"
 
 [viewer]
 tab_size = 4
@@ -56,26 +66,26 @@ base03 = "cyan"
 base05 = "gray"
 
 # Variables, XML Tags, Markup Link Text, Markup Lists, Diff Deleted
-base08 = "lightyellow"
+base08 = "light yellow"
 
 # Integers, Boolean, Constants, XML Attributes, Markup Link Url
-base09 = "lightmagenta"
+base09 = "light magenta"
 
 # Classes, Markup Bold, Search Text Background
-base0A = "lightred"
+base0A = "light red"
 
 # Strings, Inherited Class, Markup Code, Diff Inserted
-base0B = "lightcyan"
+base0B = "light cyan"
 
 # Support, Regular Expressions, Escape Characters, Markup Quotes
 base0C = "white"
 
 # Functions, Methods, Attribute IDs, Headings
-base0D = "lightred"
+base0D = "light red"
 
 # Keywords, Storage, Selector, Markup Italic, Diff Changed
-base0E = "lightyellow"
+base0E = "light yellow"
 
 # Deprecated, Opening/Closing Embedded Language Tags, e.g. `<?php ?>`
-base0F = "lightyellow"
+base0F = "light yellow"
 

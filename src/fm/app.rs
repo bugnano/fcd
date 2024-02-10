@@ -3,9 +3,11 @@ use std::{
     env,
     fs::read_dir,
     path::{Path, PathBuf},
+    time::SystemTime,
 };
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, Datelike, Local};
 use crossbeam_channel::{select, Receiver, Sender};
 use ratatui::prelude::*;
 use termion::event::*;
@@ -269,6 +271,19 @@ pub fn human_readable_size(size: u64) -> String {
     }
 
     unreachable!();
+}
+
+pub fn format_date(d: SystemTime) -> String {
+    let d: DateTime<Local> = DateTime::from(d);
+    let today = Local::now();
+
+    if d.date_naive() == today.date_naive() {
+        format!("{:^7}", d.format("%H:%M"))
+    } else if d.year() == today.year() {
+        format!("{:^7}", d.format("%b %d"))
+    } else {
+        format!("{:^7}", d.format("%Y-%m"))
+    }
 }
 
 pub fn natsort_key(s: &str) -> String {

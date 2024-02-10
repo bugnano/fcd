@@ -218,12 +218,10 @@ impl TextViewer {
                 .collect();
 
             // First send the component event
-            component_pubsub_tx
-                .send(ComponentPubSub::Highlight(styled_lines))
-                .unwrap();
+            let _ = component_pubsub_tx.send(ComponentPubSub::Highlight(styled_lines));
 
             // Then notify the app that there is an component event
-            pubsub_tx.send(PubSub::ComponentThreadEvent).unwrap();
+            let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
         });
     }
 
