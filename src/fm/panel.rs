@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     fs::{self, Metadata},
     os::unix::fs::{FileTypeExt, MetadataExt},
     path::{Path, PathBuf},
@@ -7,6 +8,7 @@ use std::{
 
 use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender};
+use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use libc::{S_IXGRP, S_IXOTH, S_IXUSR};
 use path_clean::PathClean;
 use ratatui::{
@@ -74,33 +76,38 @@ pub enum Palette {
     Panel,
 }
 
+pub fn color_from_palette(config: &Config, palette: Palette) -> Color {
+    match palette {
+        Palette::DirSymlink => config.file_manager.dir_symlink_fg,
+        Palette::Archive => config.file_manager.archive_fg,
+        Palette::Symlink => config.file_manager.symlink_fg,
+        Palette::Stalelink => config.file_manager.stalelink_fg,
+        Palette::Directory => config.file_manager.directory_fg,
+        Palette::Device => config.file_manager.device_fg,
+        Palette::Special => config.file_manager.special_fg,
+        Palette::Executable => config.file_manager.executable_fg,
+        Palette::Panel => config.panel.fg,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Entry {
     file: PathBuf,
+    file_name: String,
     key: String,
     extension: String,
     label: String,
     palette: Palette,
     lstat: Metadata,
     stat: Metadata,
-    mtime: String,
-    length: u64,
-    size: String,
+    shown_mtime: String,
+    size: Option<u64>,
+    shown_size: String,
     details: String,
     link_target: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum CountDirectories {
-    Yes,
-    No,
-}
-
-pub fn get_file_list(
-    cwd: &Path,
-    count_directories: CountDirectories,
-    file_list_rx: Option<Receiver<PathBuf>>,
-) -> Result<Vec<Entry>> {
+pub fn get_file_list(cwd: &Path, file_list_rx: Option<Receiver<PathBuf>>) -> Result<Vec<Entry>> {
     let users_cache = UsersCache::new();
 
     Ok(fs::read_dir(cwd)?
@@ -187,18 +194,8 @@ pub fn get_file_list(
                 )
             };
 
-            let (length, size) = if stat.is_dir() {
-                match count_directories {
-                    CountDirectories::Yes => match fs::read_dir(entry.path()) {
-                        Ok(entries) => {
-                            let num_entries = entries.count();
-
-                            (num_entries as u64, num_entries.to_string())
-                        }
-                        Err(_) => (0, String::from("?")),
-                    },
-                    CountDirectories::No => (0, String::from("DIR")),
-                }
+            let (size, shown_size) = if stat.is_dir() {
+                (None, String::from("DIR"))
             } else if metadata.file_type().is_char_device()
                 || metadata.file_type().is_block_device()
             {
@@ -206,11 +203,15 @@ pub fn get_file_list(
                 let major = unsafe { libc::major(rdev) };
                 let minor = unsafe { libc::minor(rdev) };
 
-                (rdev, format!("{},{}", major, minor))
+                (
+                    // This works as long as size is u64 and major and minor are u32
+                    Some(((major as u64) << 32) | (minor as u64)),
+                    format!("{},{}", major, minor),
+                )
             } else {
-                let length = metadata.len();
+                let size = metadata.len();
 
-                (length, human_readable_size(length))
+                (Some(size), human_readable_size(size))
             };
 
             let uid = match users_cache.get_user_by_uid(metadata.uid()) {
@@ -252,7 +253,7 @@ pub fn get_file_list(
                 (format!("{} {}", details, file_name), None)
             };
 
-            let mtime = match metadata.modified() {
+            let shown_mtime = match metadata.modified() {
                 Ok(modified) => format_date(modified),
                 Err(_) => String::from("???????"),
             };
@@ -260,14 +261,15 @@ pub fn get_file_list(
             Some(Entry {
                 file: shown_file,
                 key: natsort_key(&file_name),
+                file_name,
                 extension,
                 label,
                 palette,
                 lstat: metadata,
                 stat,
-                mtime,
-                length,
+                shown_mtime,
                 size,
+                shown_size,
                 details,
                 link_target,
             })
@@ -275,17 +277,168 @@ pub fn get_file_list(
         .collect::<Vec<Entry>>())
 }
 
-pub fn color_from_palette(config: &Config, palette: Palette) -> Color {
-    match palette {
-        Palette::DirSymlink => config.file_manager.dir_symlink_fg,
-        Palette::Archive => config.file_manager.archive_fg,
-        Palette::Symlink => config.file_manager.symlink_fg,
-        Palette::Stalelink => config.file_manager.stalelink_fg,
-        Palette::Directory => config.file_manager.directory_fg,
-        Palette::Device => config.file_manager.device_fg,
-        Palette::Special => config.file_manager.special_fg,
-        Palette::Executable => config.file_manager.executable_fg,
-        Palette::Panel => config.panel.fg,
+pub fn count_directories(
+    file_list: &[Entry],
+    file_list_rx: Option<Receiver<PathBuf>>,
+) -> Vec<Entry> {
+    file_list
+        .iter()
+        .map_while(|entry| {
+            if let Some(rx) = &file_list_rx {
+                // Stop processing the current file list if a new file listing request arrived in the meantime
+                if !rx.is_empty() {
+                    return None;
+                }
+            }
+
+            match entry.stat.is_dir() {
+                true => {
+                    let (size, shown_size) = match fs::read_dir(&entry.file) {
+                        Ok(entries) => {
+                            let num_entries = entries.count();
+
+                            (Some(num_entries as u64), num_entries.to_string())
+                        }
+                        Err(_) => (None, String::from("?")),
+                    };
+
+                    Some(Entry {
+                        size,
+                        shown_size,
+                        ..entry.clone()
+                    })
+                }
+                false => Some(entry.clone()),
+            }
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum HiddenFiles {
+    Show,
+    Hide,
+}
+
+pub fn filter_file_list(
+    file_list: &[Entry],
+    hidden_files: HiddenFiles,
+    file_filter: &str,
+) -> Vec<Entry> {
+    let file_filter = natsort_key(file_filter);
+    let matcher = SkimMatcherV2::default();
+
+    file_list
+        .iter()
+        .filter(|entry| {
+            if matches!(hidden_files, HiddenFiles::Hide) && entry.key.starts_with('.') {
+                return false;
+            }
+
+            if file_filter.is_empty() {
+                return true;
+            }
+
+            matcher.fuzzy_match(&entry.key, &file_filter).is_some()
+        })
+        .cloned()
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum SortOrder {
+    Normal,
+    Reverse,
+}
+
+pub fn sort_by_name(a: &Entry, b: &Entry, sort_order: SortOrder) -> Ordering {
+    match (a.stat.is_dir(), b.stat.is_dir()) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        _ => {
+            let o = natord::compare(&a.key, &b.key)
+                .then_with(|| natord::compare(&a.file_name, &b.file_name));
+
+            match sort_order {
+                SortOrder::Normal => o,
+                SortOrder::Reverse => o.reverse(),
+            }
+        }
+    }
+}
+
+pub fn sort_by_extension(a: &Entry, b: &Entry, sort_order: SortOrder) -> Ordering {
+    match (a.stat.is_dir(), b.stat.is_dir()) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        _ => {
+            let o = natord::compare(&a.extension, &b.extension)
+                .then_with(|| sort_by_name(a, b, SortOrder::Normal));
+
+            match sort_order {
+                SortOrder::Normal => o,
+                SortOrder::Reverse => o.reverse(),
+            }
+        }
+    }
+}
+
+pub fn sort_by_date(a: &Entry, b: &Entry, sort_order: SortOrder) -> Ordering {
+    match (a.stat.is_dir(), b.stat.is_dir()) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        _ => {
+            let o = match (a.lstat.modified(), b.lstat.modified()) {
+                (Ok(a_modified), Ok(b_modified)) => a_modified.cmp(&b_modified),
+                (Err(_), Ok(_)) => Ordering::Less,
+                (Ok(_), Err(_)) => Ordering::Greater,
+                _ => Ordering::Equal,
+            }
+            .then_with(|| sort_by_name(a, b, SortOrder::Normal));
+
+            match sort_order {
+                SortOrder::Normal => o,
+                SortOrder::Reverse => o.reverse(),
+            }
+        }
+    }
+}
+
+pub fn sort_by_size(a: &Entry, b: &Entry, sort_order: SortOrder) -> Ordering {
+    match (a.stat.is_dir(), b.stat.is_dir()) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        _ => {
+            let o = match (a.size, b.size) {
+                (Some(a_size), Some(b_size)) => a_size.cmp(&b_size),
+                (None, Some(_)) => Ordering::Less,
+                (Some(_), None) => Ordering::Greater,
+                _ => Ordering::Equal,
+            }
+            .then_with(|| sort_by_name(a, b, SortOrder::Normal));
+
+            match sort_order {
+                SortOrder::Normal => o,
+                SortOrder::Reverse => o.reverse(),
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum SortBy {
+    Name,
+    Extension,
+    Date,
+    Size,
+}
+
+pub fn sort_by_function(sort_by: SortBy) -> fn(&Entry, &Entry, SortOrder) -> Ordering {
+    match sort_by {
+        SortBy::Name => sort_by_name,
+        SortBy::Extension => sort_by_extension,
+        SortBy::Date => sort_by_date,
+        SortBy::Size => sort_by_size,
     }
 }
 
@@ -306,6 +459,10 @@ pub struct Panel {
     is_loading: bool,
     file_list: Vec<Entry>,
     shown_file_list: Vec<Entry>,
+    hidden_files: HiddenFiles,
+    file_filter: String,
+    sort_method: SortBy,
+    sort_order: SortOrder,
 }
 
 impl Panel {
@@ -324,6 +481,10 @@ impl Panel {
             is_loading: false,
             file_list: Vec::new(),
             shown_file_list: Vec::new(),
+            hidden_files: HiddenFiles::Hide,
+            file_filter: String::from(""),
+            sort_method: SortBy::Name,
+            sort_order: SortOrder::Normal,
         };
 
         panel.file_list_thread();
@@ -338,8 +499,13 @@ impl Panel {
                 ComponentPubSub::FileList(file_list) => {
                     self.is_loading = false;
 
-                    self.shown_file_list = file_list.clone();
                     self.file_list = file_list;
+
+                    self.shown_file_list =
+                        filter_file_list(&self.file_list, self.hidden_files, &self.file_filter);
+
+                    self.shown_file_list
+                        .sort_by(|a, b| sort_by_function(self.sort_method)(a, b, self.sort_order));
                 }
             }
         }
@@ -368,23 +534,19 @@ impl Panel {
                 };
 
                 // Step 1: Get the current file list without counting the directories
-                let file_list =
-                    get_file_list(&cwd, CountDirectories::No, Some(file_list_rx.clone()))
-                        .unwrap_or_default();
+                let file_list = get_file_list(&cwd, Some(file_list_rx.clone())).unwrap_or_default();
 
                 // Send the current result only if there are no newer file list requests in the queue,
                 // otherwise discard the current result
                 if file_list_rx.is_empty() {
                     // First send the component event
-                    let _ = component_pubsub_tx.send(ComponentPubSub::FileList(file_list));
+                    let _ = component_pubsub_tx.send(ComponentPubSub::FileList(file_list.clone()));
 
                     // Then notify the app that there is an component event
                     let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
 
                     // Step 2: Get the current file list counting the directories
-                    let file_list =
-                        get_file_list(&cwd, CountDirectories::Yes, Some(file_list_rx.clone()))
-                            .unwrap_or_default();
+                    let file_list = count_directories(&file_list, Some(file_list_rx.clone()));
 
                     // Send the current result only if there are no newer file list requests in the queue,
                     // otherwise discard the current result
@@ -479,7 +641,7 @@ impl Component for Panel {
                     .iter()
                     .map(|entry| {
                         let filename_width = (upper_inner.width as usize)
-                            .saturating_sub(entry.size.width())
+                            .saturating_sub(entry.shown_size.width())
                             .saturating_sub(9);
 
                         let filename = tilde_layout(&entry.label, filename_width);
@@ -493,8 +655,8 @@ impl Component for Panel {
                                 "{}{:width$} {} {}",
                                 &filename,
                                 "",
-                                &entry.size,
-                                &entry.mtime,
+                                &entry.shown_size,
+                                &entry.shown_mtime,
                                 width = filename_width.saturating_sub(filename.width())
                             ),
                             Style::default().fg(color_from_palette(&self.config, entry.palette)),

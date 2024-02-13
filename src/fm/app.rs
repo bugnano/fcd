@@ -246,7 +246,7 @@ pub fn tar_suffix(file: &str) -> String {
     } else if parts.len() > 1 {
         format!(".{}", parts[parts.len() - 1..].join("."))
     } else {
-        String::from(file)
+        String::from("")
     }
 }
 

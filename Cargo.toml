@@ -31,6 +31,8 @@ uzers = "*"
 path-clean = "*"
 caseless = "*"
 chrono = "*"
+fuzzy-matcher = "*"
+natord = "*"
 
 [profile.release]
 strip = true
