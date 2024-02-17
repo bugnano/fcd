@@ -1,5 +1,7 @@
 use std::cmp::max;
 
+use ratatui::prelude::*;
+
 use unicode_normalization::UnicodeNormalization;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -67,4 +69,9 @@ pub fn tilde_layout(text: &str, max_width: usize) -> String {
             }
         })
         .collect()
+}
+
+pub fn tilde_layout_styled(text: &[(String, Style)], max_width: usize) -> Vec<(String, Style)> {
+    // TODO
+    Vec::from(text)
 }

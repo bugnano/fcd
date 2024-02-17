@@ -13,7 +13,9 @@ use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
+    fm::panel::{get_file_list, sort_by_function, SortBy, SortOrder},
     viewer::{
+        dir_viewer::DirViewer,
         hex_viewer::{HexViewer, ViewerType},
         text_viewer::TextViewer,
     },
@@ -38,8 +40,19 @@ impl FileViewer {
 
         let main_viewer = match attr.is_dir() {
             true => {
-                // TODO: Show directory contents
-                todo!();
+                let mut file_list = get_file_list(filename, None)?;
+
+                // TODO: It would be nice to use the same hidden file filter, sort method and sort
+                // order of the other panel when using the file viewer as a quick preview
+                file_list.sort_by(|a, b| sort_by_function(SortBy::Name)(a, b, SortOrder::Normal));
+
+                Box::new(DirViewer::new(
+                    config,
+                    pubsub_tx.clone(),
+                    filename,
+                    &filename_str,
+                    file_list,
+                )?) as Box<dyn Component>
             }
             false => {
                 let mut f = File::open(filename)?;

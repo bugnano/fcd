@@ -229,9 +229,14 @@ impl app::App for App {
 pub fn tar_stem(file: &str) -> String {
     let parts: Vec<&str> = file.split('.').collect();
 
-    if (parts.len() > 2) && (parts[parts.len() - 2].to_lowercase() == "tar") {
+    let min_parts = match file.starts_with('.') {
+        true => 2,
+        false => 1,
+    };
+
+    if (parts.len() > (min_parts + 1)) && (parts[parts.len() - 2].to_lowercase() == "tar") {
         parts[..parts.len() - 2].join(".")
-    } else if parts.len() > 1 {
+    } else if parts.len() > min_parts {
         parts[..parts.len() - 1].join(".")
     } else {
         String::from(file)
@@ -241,9 +246,14 @@ pub fn tar_stem(file: &str) -> String {
 pub fn tar_suffix(file: &str) -> String {
     let parts: Vec<&str> = file.split('.').collect();
 
-    if (parts.len() > 2) && (parts[parts.len() - 2].to_lowercase() == "tar") {
+    let min_parts = match file.starts_with('.') {
+        true => 2,
+        false => 1,
+    };
+
+    if (parts.len() > (min_parts + 1)) && (parts[parts.len() - 2].to_lowercase() == "tar") {
         format!(".{}", parts[parts.len() - 2..].join("."))
-    } else if parts.len() > 1 {
+    } else if parts.len() > min_parts {
         format!(".{}", parts[parts.len() - 1..].join("."))
     } else {
         String::from("")
@@ -278,11 +288,11 @@ pub fn format_date(d: SystemTime) -> String {
     let today = Local::now();
 
     if d.date_naive() == today.date_naive() {
-        format!("{:^7}", d.format("%H:%M"))
+        format!("{}", d.format(" %H:%M "))
     } else if d.year() == today.year() {
-        format!("{:^7}", d.format("%b %d"))
+        format!("{}", d.format(" %b %d"))
     } else {
-        format!("{:^7}", d.format("%Y-%m"))
+        format!("{}", d.format("%Y-%m"))
     }
 }
 

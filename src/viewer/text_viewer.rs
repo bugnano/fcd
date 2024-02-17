@@ -46,7 +46,7 @@ fn expand_tabs_for_line(line: &str, tabsize: usize) -> String {
 
 #[derive(Debug, Clone)]
 enum ComponentPubSub {
-    Highlight(Vec<Vec<(Style, String)>>),
+    Highlight(Vec<Vec<(String, Style)>>),
 }
 
 #[derive(Debug)]
@@ -62,7 +62,7 @@ pub struct TextViewer {
     data: Vec<u8>,
     line_offset: Vec<usize>,
     lines: Vec<String>,
-    styled_lines: Vec<Vec<(Style, String)>>,
+    styled_lines: Vec<Vec<(String, Style)>>,
     first_line: usize,
     wrap: bool,
 
@@ -104,12 +104,12 @@ impl TextViewer {
             .collect();
 
         // Default to unstyled text
-        let styled_lines: Vec<Vec<(Style, String)>> = lines
+        let styled_lines: Vec<Vec<(String, Style)>> = lines
             .iter()
             .map(|line| {
                 vec![(
-                    Style::default().fg(config.highlight.base05),
                     String::from(line),
+                    Style::default().fg(config.highlight.base05),
                 )]
             })
             .collect();
@@ -184,7 +184,7 @@ impl TextViewer {
             };
 
             let mut highlighter = HighlightLines::new(syntax, theme);
-            let styled_lines: Vec<Vec<(Style, String)>> = lines
+            let styled_lines: Vec<Vec<(String, Style)>> = lines
                 .iter()
                 .map(|line| {
                     highlighter
@@ -193,6 +193,7 @@ impl TextViewer {
                         .iter()
                         .map(|(style, text)| {
                             (
+                                String::from(text.trim_end_matches('\n')),
                                 Style::default().fg(match style.foreground.r {
                                     0x00 => config.highlight.base00,
                                     0x01 => config.highlight.base08,
@@ -210,7 +211,6 @@ impl TextViewer {
                                         config.highlight.base05
                                     }
                                 }),
-                                String::from(text.trim_end_matches('\n')),
                             )
                         })
                         .collect()
@@ -584,13 +584,21 @@ impl Component for TextViewer {
             Constraint::Length(text_width),
         ];
 
-        let highlighted_lines: Vec<Vec<(Style, String)>> = self
+        let highlighted_lines: Vec<Vec<(String, Style)>> = self
             .styled_lines
             .iter()
             .skip(self.first_line)
             .take(chunk.height.into())
             .enumerate()
             .map(|(i, e)| {
+                let highlighted_style = Style::default()
+                    .fg(if (self.first_line + i) == self.search_pos {
+                        self.config.ui.markselect_fg
+                    } else {
+                        self.config.ui.selected_fg
+                    })
+                    .bg(self.config.ui.selected_bg);
+
                 match (
                     &self.expression,
                     self.lines_with_matches.get(self.first_line + i),
@@ -604,35 +612,26 @@ impl Component for TextViewer {
                         let mut i_text = 0;
                         for m in re.find_iter(line) {
                             while bytes_written < m.start() {
-                                let (style, text) = &e[i_e];
+                                let (text, style) = &e[i_e];
 
                                 if (bytes_written + (text.len() - i_text)) <= m.start() {
-                                    v.push((*style, String::from(&text[i_text..])));
+                                    v.push((String::from(&text[i_text..]), *style));
                                     bytes_written += text.len() - i_text;
                                     i_e += 1;
                                     i_text = 0;
                                 } else {
                                     let end = i_text + (m.start() - bytes_written);
 
-                                    v.push((*style, String::from(&text[i_text..end])));
+                                    v.push((String::from(&text[i_text..end]), *style));
                                     i_text = end;
                                     bytes_written = m.start();
                                 }
                             }
 
-                            v.push((
-                                Style::default()
-                                    .fg(if (self.first_line + i) == self.search_pos {
-                                        self.config.ui.markselect_fg
-                                    } else {
-                                        self.config.ui.selected_fg
-                                    })
-                                    .bg(self.config.ui.selected_bg),
-                                String::from(m.as_str()),
-                            ));
+                            v.push((String::from(m.as_str()), highlighted_style));
 
                             while bytes_written < m.end() {
-                                let (_color, text) = &e[i_e];
+                                let (text, _style) = &e[i_e];
 
                                 if (bytes_written + (text.len() - i_text)) <= m.end() {
                                     bytes_written += text.len() - i_text;
@@ -646,17 +645,17 @@ impl Component for TextViewer {
                         }
 
                         while bytes_written < line.len() {
-                            let (style, text) = &e[i_e];
+                            let (text, style) = &e[i_e];
 
                             if (bytes_written + (text.len() - i_text)) <= line.len() {
-                                v.push((*style, String::from(&text[i_text..])));
+                                v.push((String::from(&text[i_text..]), *style));
                                 bytes_written += text.len() - i_text;
                                 i_e += 1;
                                 i_text = 0;
                             } else {
                                 let end = i_text + (line.len() - bytes_written);
 
-                                v.push((*style, String::from(&text[i_text..end])));
+                                v.push((String::from(&text[i_text..end]), *style));
                                 i_text = end;
                                 bytes_written = line.len();
                             }
@@ -676,7 +675,7 @@ impl Component for TextViewer {
                     let mut lines = Vec::new();
                     let mut current_line = Vec::new();
                     let mut current_width = 0;
-                    for (style, text) in line {
+                    for (text, style) in line {
                         if (current_width + text.width()) <= text_width.into() {
                             current_line.push(Span::styled(text, *style));
                             current_width += text.width();
@@ -710,7 +709,7 @@ impl Component for TextViewer {
                 }
                 false => vec![Line::from(
                     line.iter()
-                        .map(|(style, text)| Span::styled(text, *style))
+                        .map(|(text, style)| Span::styled(text, *style))
                         .collect::<Vec<Span>>(),
                 )],
             })

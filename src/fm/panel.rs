@@ -76,8 +76,8 @@ pub enum Palette {
     Panel,
 }
 
-pub fn color_from_palette(config: &Config, palette: Palette) -> Color {
-    match palette {
+pub fn style_from_palette(config: &Config, palette: Palette) -> Style {
+    Style::default().fg(match palette {
         Palette::DirSymlink => config.file_manager.dir_symlink_fg,
         Palette::Archive => config.file_manager.archive_fg,
         Palette::Symlink => config.file_manager.symlink_fg,
@@ -87,24 +87,24 @@ pub fn color_from_palette(config: &Config, palette: Palette) -> Color {
         Palette::Special => config.file_manager.special_fg,
         Palette::Executable => config.file_manager.executable_fg,
         Palette::Panel => config.panel.fg,
-    }
+    })
 }
 
 #[derive(Debug, Clone)]
 pub struct Entry {
-    file: PathBuf,
-    file_name: String,
-    key: String,
-    extension: String,
-    label: String,
-    palette: Palette,
-    lstat: Metadata,
-    stat: Metadata,
-    shown_mtime: String,
-    size: Option<u64>,
-    shown_size: String,
-    details: String,
-    link_target: Option<PathBuf>,
+    pub file: PathBuf,
+    pub file_name: String,
+    pub key: String,
+    pub extension: String,
+    pub label: String,
+    pub palette: Palette,
+    pub lstat: Metadata,
+    pub stat: Metadata,
+    pub shown_mtime: String,
+    pub size: Option<u64>,
+    pub shown_size: String,
+    pub details: String,
+    pub link_target: Option<PathBuf>,
 }
 
 pub fn get_file_list(cwd: &Path, file_list_rx: Option<Receiver<PathBuf>>) -> Result<Vec<Entry>> {
@@ -640,11 +640,12 @@ impl Component for Panel {
                     .shown_file_list
                     .iter()
                     .map(|entry| {
-                        let filename_width = (upper_inner.width as usize)
+                        let filename_max_width = (upper_inner.width as usize)
                             .saturating_sub(entry.shown_size.width())
                             .saturating_sub(9);
 
-                        let filename = tilde_layout(&entry.label, filename_width);
+                        let filename = tilde_layout(&entry.label, filename_max_width);
+                        let filename_width = filename.width();
 
                         // The reason why I add {:width$} whitespaces after the
                         // filename instead of putting the filename directly
@@ -657,9 +658,9 @@ impl Component for Panel {
                                 "",
                                 &entry.shown_size,
                                 &entry.shown_mtime,
-                                width = filename_width.saturating_sub(filename.width())
+                                width = filename_max_width.saturating_sub(filename_width)
                             ),
-                            Style::default().fg(color_from_palette(&self.config, entry.palette)),
+                            style_from_palette(&self.config, entry.palette),
                         )
                         .into()
                     })

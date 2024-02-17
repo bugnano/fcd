@@ -1,4 +1,5 @@
 pub mod app;
+pub mod dir_viewer;
 pub mod dlg_goto;
 pub mod dlg_hex_search;
 pub mod dlg_text_search;
