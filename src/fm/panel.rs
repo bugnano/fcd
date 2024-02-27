@@ -8,9 +8,6 @@ use std::{
 
 use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender};
-use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
-use libc::{S_IXGRP, S_IXOTH, S_IXUSR};
-use path_clean::PathClean;
 use ratatui::{
     prelude::*,
     widgets::{
@@ -18,6 +15,11 @@ use ratatui::{
         *,
     },
 };
+use termion::event::*;
+
+use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+use libc::{S_IXGRP, S_IXOTH, S_IXUSR};
+use path_clean::PathClean;
 use unicode_width::UnicodeWidthStr;
 use uzers::{Groups, Users, UsersCache};
 
@@ -26,6 +28,7 @@ use crate::{
     component::{Component, Focus},
     config::Config,
     fm::app::{format_date, human_readable_size, natsort_key, tar_suffix},
+    shutil::disk_usage,
     stat::filemode,
     tilde_layout::tilde_layout,
 };
@@ -451,14 +454,18 @@ enum ComponentPubSub {
 pub struct Panel {
     config: Config,
     pubsub_tx: Sender<PubSub>,
+    rect: Rect,
     component_pubsub_tx: Sender<ComponentPubSub>,
     component_pubsub_rx: Receiver<ComponentPubSub>,
     file_list_tx: Sender<PathBuf>,
     file_list_rx: Receiver<PathBuf>,
     cwd: PathBuf,
+    free: u64,
     is_loading: bool,
     file_list: Vec<Entry>,
     shown_file_list: Vec<Entry>,
+    cursor_position: usize,
+    first_line: usize,
     hidden_files: HiddenFiles,
     file_filter: String,
     sort_method: SortBy,
@@ -473,14 +480,18 @@ impl Panel {
         let mut panel = Panel {
             config: *config,
             pubsub_tx,
+            rect: Rect::default(),
             component_pubsub_tx,
             component_pubsub_rx,
             file_list_tx,
             file_list_rx,
             cwd: initial_path.to_path_buf(),
+            free: 0,
             is_loading: false,
             file_list: Vec::new(),
             shown_file_list: Vec::new(),
+            cursor_position: 0,
+            first_line: 0,
             hidden_files: HiddenFiles::Hide,
             file_filter: String::from(""),
             sort_method: SortBy::Name,
@@ -563,14 +574,69 @@ impl Panel {
     }
 
     pub fn load_file_list(&mut self) -> Result<()> {
+        self.free = disk_usage(&self.cwd)?.free;
+
         self.is_loading = true;
         self.file_list_tx.send(self.cwd.clone())?;
 
         Ok(())
     }
+
+    fn clamp_cursor(&self, new_cursor_pos: usize) -> usize {
+        new_cursor_pos.clamp(0, self.shown_file_list.len().saturating_sub(1))
+    }
+
+    pub fn clamp_first_line(&mut self) {
+        if (self.first_line + (self.rect.height as usize)) > self.shown_file_list.len() {
+            self.first_line = self
+                .shown_file_list
+                .len()
+                .saturating_sub(self.rect.height as usize);
+        }
+    }
 }
 
 impl Component for Panel {
+    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+        let mut key_handled = true;
+
+        match key {
+            Key::Up | Key::Char('k') => {
+                self.cursor_position = self.clamp_cursor(self.cursor_position.saturating_sub(1));
+            }
+            Key::Down | Key::Char('j') => {
+                self.cursor_position = self.clamp_cursor(self.cursor_position.saturating_add(1));
+            }
+            Key::Home | Key::Char('g') => {
+                self.cursor_position = 0;
+            }
+            Key::End | Key::Char('G') => {
+                self.cursor_position = self.clamp_cursor(self.shown_file_list.len());
+            }
+            Key::PageUp | Key::Ctrl('b') => {
+                let rect_height = (self.rect.height as usize).saturating_sub(1);
+
+                self.cursor_position =
+                    self.clamp_cursor(self.cursor_position.saturating_sub(rect_height));
+
+                self.first_line = self.first_line.saturating_sub(rect_height);
+                self.clamp_first_line();
+            }
+            Key::PageDown | Key::Ctrl('f') => {
+                let rect_height = (self.rect.height as usize).saturating_sub(1);
+
+                self.cursor_position =
+                    self.clamp_cursor(self.cursor_position.saturating_add(rect_height));
+
+                self.first_line = self.first_line.saturating_add(rect_height);
+                self.clamp_first_line();
+            }
+            _ => key_handled = false,
+        }
+
+        Ok(key_handled)
+    }
+
     fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
         match event {
             PubSub::ComponentThreadEvent => self.handle_component_pubsub()?,
@@ -623,6 +689,18 @@ impl Component for Panel {
             );
 
         let upper_inner = upper_block.inner(sections[0]);
+        let upper_height = (upper_inner.height as usize).saturating_sub(1);
+
+        self.rect = upper_inner;
+        self.clamp_first_line();
+
+        if self.first_line > self.cursor_position {
+            self.first_line = self.cursor_position;
+        }
+
+        if (self.cursor_position - self.first_line) > upper_height {
+            self.first_line = self.cursor_position.saturating_sub(upper_height);
+        }
 
         f.render_widget(upper_block, sections[0]);
 
@@ -639,6 +717,8 @@ impl Component for Panel {
                 let items: Vec<ListItem> = self
                     .shown_file_list
                     .iter()
+                    .skip(self.first_line)
+                    .take(upper_inner.height.into())
                     .map(|entry| {
                         let filename_max_width = (upper_inner.width as usize)
                             .saturating_sub(entry.shown_size.width())
@@ -666,13 +746,33 @@ impl Component for Panel {
                     })
                     .collect();
 
-                let items = List::new(items);
+                let items = List::new(items).highlight_style(match focus {
+                    Focus::Focused => Style::default()
+                        .fg(self.config.ui.selected_fg)
+                        .bg(self.config.ui.selected_bg),
+                    _ => Style::default(),
+                });
 
-                f.render_widget(items, upper_inner);
+                let mut state = ListState::default();
+                state.select(Some(self.cursor_position - self.first_line));
+
+                f.render_stateful_widget(items, upper_inner, &mut state);
             }
         }
 
         let lower_block = Block::default()
+            .title(
+                Title::from(Line::from(vec![
+                    Span::raw(symbols::line::NORMAL.horizontal),
+                    Span::raw(tilde_layout(
+                        &format!(" Free: {} ", human_readable_size(self.free)),
+                        chunk.width.saturating_sub(4).into(),
+                    )),
+                    Span::raw(symbols::line::NORMAL.horizontal),
+                ]))
+                .position(Position::Bottom)
+                .alignment(Alignment::Right),
+            )
             .borders(Borders::ALL)
             .border_set(middle_border_set)
             .style(
@@ -681,6 +781,24 @@ impl Component for Panel {
                     .bg(self.config.panel.bg),
             );
 
+        let lower_inner = lower_block.inner(sections[1]);
+
         f.render_widget(lower_block, sections[1]);
+
+        if (!self.is_loading) && (!self.shown_file_list.is_empty()) {
+            f.render_widget(
+                Block::new()
+                    .title(tilde_layout(
+                        &self.shown_file_list[self.cursor_position].details,
+                        lower_inner.width.into(),
+                    ))
+                    .style(
+                        Style::default()
+                            .fg(self.config.panel.fg)
+                            .bg(self.config.panel.bg),
+                    ),
+                lower_inner,
+            );
+        }
     }
 }

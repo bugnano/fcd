@@ -7,13 +7,13 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Datelike, Local};
 use crossbeam_channel::{select, Receiver, Sender};
 use ratatui::prelude::*;
 use termion::event::*;
-use unicode_normalization::UnicodeNormalization;
 
+use chrono::{DateTime, Datelike, Local};
 use signal_hook::consts::signal::*;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::{
     app::{self, init_events, Action, Events, PubSub},
@@ -105,6 +105,16 @@ impl App {
                             Key::Ctrl('c') => return Ok(Action::CtrlC),
                             Key::Ctrl('l') => return Ok(Action::Redraw),
                             Key::Ctrl('z') => return Ok(Action::CtrlZ),
+                            Key::BackTab => {
+                                self.panel_focus_position = ((self.panel_focus_position as isize)
+                                    - 1)
+                                .rem_euclid(self.panels.len() as isize)
+                                    as usize;
+                            }
+                            Key::Char('\t') => {
+                                self.panel_focus_position =
+                                    (self.panel_focus_position + 1) % self.panels.len();
+                            }
                             _ => log::debug!("{:?}", key),
                         }
                     }
