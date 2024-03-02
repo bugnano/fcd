@@ -451,7 +451,7 @@ enum ComponentPubSub {
 }
 
 #[derive(Debug)]
-pub struct Panel {
+pub struct FilePanel {
     config: Config,
     pubsub_tx: Sender<PubSub>,
     rect: Rect,
@@ -472,12 +472,12 @@ pub struct Panel {
     sort_order: SortOrder,
 }
 
-impl Panel {
-    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>, initial_path: &Path) -> Result<Panel> {
+impl FilePanel {
+    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>, initial_path: &Path) -> Result<FilePanel> {
         let (component_pubsub_tx, component_pubsub_rx) = crossbeam_channel::unbounded();
         let (file_list_tx, file_list_rx) = crossbeam_channel::unbounded();
 
-        let mut panel = Panel {
+        let mut panel = FilePanel {
             config: *config,
             pubsub_tx,
             rect: Rect::default(),
@@ -504,7 +504,7 @@ impl Panel {
         Ok(panel)
     }
 
-    pub fn handle_component_pubsub(&mut self) -> Result<()> {
+    fn handle_component_pubsub(&mut self) -> Result<()> {
         if let Ok(event) = self.component_pubsub_rx.try_recv() {
             match event {
                 ComponentPubSub::FileList(file_list) => {
@@ -524,7 +524,7 @@ impl Panel {
         Ok(())
     }
 
-    pub fn file_list_thread(&mut self) {
+    fn file_list_thread(&mut self) {
         let file_list_rx = self.file_list_rx.clone();
         let component_pubsub_tx = self.component_pubsub_tx.clone();
         let pubsub_tx = self.pubsub_tx.clone();
@@ -573,7 +573,7 @@ impl Panel {
         });
     }
 
-    pub fn load_file_list(&mut self) -> Result<()> {
+    fn load_file_list(&mut self) -> Result<()> {
         self.free = disk_usage(&self.cwd)?.free;
 
         self.is_loading = true;
@@ -586,7 +586,7 @@ impl Panel {
         new_cursor_pos.clamp(0, self.shown_file_list.len().saturating_sub(1))
     }
 
-    pub fn clamp_first_line(&mut self) {
+    fn clamp_first_line(&mut self) {
         if (self.first_line + (self.rect.height as usize)) > self.shown_file_list.len() {
             self.first_line = self
                 .shown_file_list
@@ -596,7 +596,7 @@ impl Panel {
     }
 }
 
-impl Component for Panel {
+impl Component for FilePanel {
     fn handle_key(&mut self, key: &Key) -> Result<bool> {
         let mut key_handled = true;
 
