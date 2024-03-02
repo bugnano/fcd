@@ -13,7 +13,7 @@ use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
-    fm::panel::{get_file_list, sort_by_function, SortBy, SortOrder},
+    fm::file_panel::{get_file_list, sort_by_function, SortBy, SortOrder},
     viewer::{
         dir_viewer::DirViewer,
         hex_viewer::{HexViewer, ViewerType},

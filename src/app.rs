@@ -1,4 +1,4 @@
-use std::{io, thread};
+use std::{io, path::PathBuf, thread};
 
 use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender};
@@ -47,6 +47,10 @@ pub enum PubSub {
     // Dialog hex search events
     DlgHexSearch(HexSearch),
     HexSearch(HexSearch),
+
+    // Quick view events
+    ToggleQuickView(Option<PathBuf>),
+    UpdateQuickView(Option<PathBuf>),
 }
 
 #[derive(Debug, Copy, Clone)]

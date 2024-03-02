@@ -27,7 +27,10 @@ use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
-    fm::app::{format_date, human_readable_size, natsort_key, tar_suffix},
+    fm::{
+        app::{format_date, human_readable_size, natsort_key, tar_suffix},
+        panel::{Panel, PanelComponent},
+    },
     shutil::disk_usage,
     stat::filemode,
     tilde_layout::tilde_layout,
@@ -473,7 +476,11 @@ pub struct FilePanel {
 }
 
 impl FilePanel {
-    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>, initial_path: &Path) -> Result<FilePanel> {
+    pub fn new(
+        config: &Config,
+        pubsub_tx: Sender<PubSub>,
+        initial_path: &Path,
+    ) -> Result<FilePanel> {
         let (component_pubsub_tx, component_pubsub_rx) = crossbeam_channel::unbounded();
         let (file_list_tx, file_list_rx) = crossbeam_channel::unbounded();
 
@@ -602,34 +609,80 @@ impl Component for FilePanel {
 
         match key {
             Key::Up | Key::Char('k') => {
+                let old_cursor_position = self.cursor_position;
+
                 self.cursor_position = self.clamp_cursor(self.cursor_position.saturating_sub(1));
+
+                if (self.cursor_position != old_cursor_position) {
+                    self.pubsub_tx
+                        .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                        .unwrap();
+                }
             }
             Key::Down | Key::Char('j') => {
+                let old_cursor_position = self.cursor_position;
+
                 self.cursor_position = self.clamp_cursor(self.cursor_position.saturating_add(1));
+
+                if (self.cursor_position != old_cursor_position) {
+                    self.pubsub_tx
+                        .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                        .unwrap();
+                }
             }
             Key::Home | Key::Char('g') => {
+                let old_cursor_position = self.cursor_position;
+
                 self.cursor_position = 0;
+
+                if (self.cursor_position != old_cursor_position) {
+                    self.pubsub_tx
+                        .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                        .unwrap();
+                }
             }
             Key::End | Key::Char('G') => {
+                let old_cursor_position = self.cursor_position;
+
                 self.cursor_position = self.clamp_cursor(self.shown_file_list.len());
+
+                if (self.cursor_position != old_cursor_position) {
+                    self.pubsub_tx
+                        .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                        .unwrap();
+                }
             }
             Key::PageUp | Key::Ctrl('b') => {
                 let rect_height = (self.rect.height as usize).saturating_sub(1);
+                let old_cursor_position = self.cursor_position;
 
                 self.cursor_position =
                     self.clamp_cursor(self.cursor_position.saturating_sub(rect_height));
 
                 self.first_line = self.first_line.saturating_sub(rect_height);
                 self.clamp_first_line();
+
+                if (self.cursor_position != old_cursor_position) {
+                    self.pubsub_tx
+                        .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                        .unwrap();
+                }
             }
             Key::PageDown | Key::Ctrl('f') => {
                 let rect_height = (self.rect.height as usize).saturating_sub(1);
+                let old_cursor_position = self.cursor_position;
 
                 self.cursor_position =
                     self.clamp_cursor(self.cursor_position.saturating_add(rect_height));
 
                 self.first_line = self.first_line.saturating_add(rect_height);
                 self.clamp_first_line();
+
+                if (self.cursor_position != old_cursor_position) {
+                    self.pubsub_tx
+                        .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                        .unwrap();
+                }
             }
             _ => key_handled = false,
         }
@@ -802,3 +855,14 @@ impl Component for FilePanel {
         }
     }
 }
+
+impl Panel for FilePanel {
+    fn get_selected_file(&self) -> Option<PathBuf> {
+        match self.shown_file_list.is_empty() {
+            true => None,
+            false => Some(self.shown_file_list[self.cursor_position].file.clone()),
+        }
+    }
+}
+
+impl PanelComponent for FilePanel {}

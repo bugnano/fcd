@@ -18,7 +18,7 @@ use crate::{
     viewer::{dlg_goto::GotoType, dlg_hex_search::HexSearch},
 };
 
-pub fn search_next_from_pos(
+fn search_next_from_pos(
     expression: &[u8],
     reader: &mut BufReader<File>,
     file_length: u64,
@@ -65,7 +65,7 @@ pub fn search_next_from_pos(
     None
 }
 
-pub fn search_prev_from_pos(
+fn search_prev_from_pos(
     expression: &[u8],
     reader: &mut BufReader<File>,
     file_length: u64,
@@ -172,7 +172,7 @@ impl HexViewer {
         Ok(viewer)
     }
 
-    pub fn clamp_offset(&mut self) {
+    fn clamp_offset(&mut self) {
         let last_line = match self.line_width {
             0 => self.file_length,
             w => match self.file_length % (w as u64) {
@@ -187,7 +187,7 @@ impl HexViewer {
         }
     }
 
-    pub fn send_updated_position(&mut self) {
+    fn send_updated_position(&mut self) {
         match self.viewer_type {
             ViewerType::Hex => {
                 let width = (self.rect.width as usize).saturating_sub(self.len_address + 4);
@@ -224,7 +224,7 @@ impl HexViewer {
             .unwrap();
     }
 
-    pub fn search_next(&mut self) -> bool {
+    fn search_next(&mut self) -> bool {
         if let Some(e) = &self.expression {
             match search_next_from_pos(e, &mut self.reader, self.file_length, self.search_pos)
                 .or_else(|| search_next_from_pos(e, &mut self.reader, self.file_length, 0))
@@ -251,7 +251,7 @@ impl HexViewer {
         true
     }
 
-    pub fn search_prev(&mut self) -> bool {
+    fn search_prev(&mut self) -> bool {
         if let Some(e) = &self.expression {
             match search_prev_from_pos(e, &mut self.reader, self.file_length, self.search_pos)
                 .or_else(|| {
@@ -789,7 +789,7 @@ impl Component for HexViewer {
     }
 }
 
-pub fn hex_string<'a>(
+fn hex_string<'a>(
     line: &'a [(bool, u8)],
     style_even: &Style,
     style_odd: &Style,
@@ -828,7 +828,7 @@ pub fn hex_string<'a>(
         .collect()
 }
 
-pub fn masked_string<'a>(
+fn masked_string<'a>(
     line: &'a [(bool, u8)],
     style_even: &Style,
     style_odd: &Style,

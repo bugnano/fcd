@@ -152,7 +152,7 @@ impl TextViewer {
         Ok(viewer)
     }
 
-    pub fn handle_component_pubsub(&mut self) -> Result<()> {
+    fn handle_component_pubsub(&mut self) -> Result<()> {
         if let Ok(event) = self.component_pubsub_rx.try_recv() {
             match event {
                 ComponentPubSub::Highlight(styled_lines) => {
@@ -225,7 +225,7 @@ impl TextViewer {
         });
     }
 
-    pub fn clamp_first_line(&mut self) {
+    fn clamp_first_line(&mut self) {
         match self.wrap {
             true => {
                 if (self.first_line + 1) > self.lines.len() {
@@ -240,7 +240,7 @@ impl TextViewer {
         }
     }
 
-    pub fn send_updated_position(&mut self) {
+    fn send_updated_position(&mut self) {
         let current_line = match self.wrap {
             true => self.first_line + 1,
             false => self.first_line + (self.rect.height as usize),
@@ -265,7 +265,7 @@ impl TextViewer {
             .unwrap();
     }
 
-    pub fn search_next(&mut self) {
+    fn search_next(&mut self) {
         if let Some(_re) = &self.expression {
             self.search_pos = match self
                 .lines_with_matches
@@ -292,7 +292,7 @@ impl TextViewer {
         }
     }
 
-    pub fn search_prev(&mut self) {
+    fn search_prev(&mut self) {
         if let Some(_re) = &self.expression {
             self.search_pos = match self
                 .lines_with_matches

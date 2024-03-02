@@ -196,11 +196,11 @@ impl app::App for App {
             .split(f.size());
 
         self.top_bar.render(f, &chunks[0], Focus::Normal);
-        self.viewer.render(f, &chunks[1], Focus::Normal);
+        self.viewer.render(f, &chunks[1], Focus::Focused);
         self.button_bar.render(f, &chunks[2], Focus::Normal);
 
         if let Some(dlg) = &mut self.dialog {
-            dlg.render(f, &chunks[1], Focus::Normal);
+            dlg.render(f, &chunks[1], Focus::Focused);
         }
     }
 }

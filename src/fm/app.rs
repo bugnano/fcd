@@ -21,7 +21,7 @@ use crate::{
     component::{Component, Focus},
     config::{load_config, Config},
     dlg_error::{DialogType, DlgError},
-    fm::panel::Panel,
+    fm::{file_panel::FilePanel, panel::PanelComponent, quickview::QuickView},
 };
 
 const LABELS: &[&str] = &[
@@ -43,10 +43,11 @@ pub struct App {
     events_rx: Receiver<Events>,
     pubsub_tx: Sender<PubSub>,
     pubsub_rx: Receiver<PubSub>,
-    panels: Vec<Box<dyn Component>>,
+    panels: Vec<Box<dyn PanelComponent>>,
     button_bar: ButtonBar,
     dialog: Option<Box<dyn Component>>,
     panel_focus_position: usize,
+    quickviewer_position: usize,
 }
 
 impl App {
@@ -78,12 +79,14 @@ impl App {
             pubsub_tx: pubsub_tx.clone(),
             pubsub_rx,
             panels: vec![
-                Box::new(Panel::new(&config, pubsub_tx.clone(), &initial_path)?),
-                Box::new(Panel::new(&config, pubsub_tx.clone(), &initial_path)?),
+                Box::new(FilePanel::new(&config, pubsub_tx.clone(), &initial_path)?),
+                Box::new(FilePanel::new(&config, pubsub_tx.clone(), &initial_path)?),
+                Box::new(QuickView::new(&config, pubsub_tx.clone(), tabsize)?),
             ],
             button_bar: ButtonBar::new(&config, LABELS)?,
             dialog: None,
             panel_focus_position: 0,
+            quickviewer_position: 2,
         })
     }
 
@@ -106,14 +109,39 @@ impl App {
                             Key::Ctrl('l') => return Ok(Action::Redraw),
                             Key::Ctrl('z') => return Ok(Action::CtrlZ),
                             Key::BackTab => {
-                                self.panel_focus_position = ((self.panel_focus_position as isize)
-                                    - 1)
-                                .rem_euclid(self.panels.len() as isize)
-                                    as usize;
+                                // This assumes that there are always 2 panels visible
+                                self.panel_focus_position ^= 1;
                             }
                             Key::Char('\t') => {
-                                self.panel_focus_position =
-                                    (self.panel_focus_position + 1) % self.panels.len();
+                                // This assumes that there are always 2 panels visible
+                                self.panel_focus_position ^= 1;
+                            }
+                            Key::Ctrl('u') => {
+                                // This assumes that there are always 2 panels visible
+                                self.panels.swap(0, 1);
+                                self.panel_focus_position ^= 1;
+
+                                if self.quickviewer_position < 2 {
+                                    self.quickviewer_position ^= 1;
+                                }
+                            }
+                            Key::Alt('q') => {
+                                // This assumes that there are always 2 panels visible
+                                if self.quickviewer_position < 2 {
+                                    self.panels.swap(self.quickviewer_position, 2);
+
+                                    self.quickviewer_position = 2;
+                                } else {
+                                    self.quickviewer_position = self.panel_focus_position ^ 1;
+
+                                    self.panels.swap(self.quickviewer_position, 2);
+                                }
+
+                                self.pubsub_tx
+                                    .send(PubSub::ToggleQuickView(
+                                        self.panels[self.panel_focus_position].get_selected_file(),
+                                    ))
+                                    .unwrap();
                             }
                             _ => log::debug!("{:?}", key),
                         }
@@ -231,7 +259,7 @@ impl app::App for App {
         self.button_bar.render(f, &chunks[2], Focus::Normal);
 
         if let Some(dlg) = &mut self.dialog {
-            dlg.render(f, &chunks[0], Focus::Normal);
+            dlg.render(f, &chunks[0], Focus::Focused);
         }
     }
 }

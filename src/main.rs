@@ -49,7 +49,7 @@ struct Cli {
     tabsize: u8,
 }
 
-pub fn initialize_panic_handler() {
+fn initialize_panic_handler() {
     let panic_hook = panic::take_hook();
     panic::set_hook(Box::new(move |panic| {
         let panic_cleanup = || -> Result<()> {
