@@ -1,4 +1,4 @@
-use std::{io, path::PathBuf, thread};
+use std::{fmt, io, path::PathBuf, thread};
 
 use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender};
@@ -48,6 +48,9 @@ pub enum PubSub {
     DlgHexSearch(HexSearch),
     HexSearch(HexSearch),
 
+    // File panel events
+    ViewFile(PathBuf),
+
     // Quick view events
     ToggleQuickView(Option<PathBuf>),
     UpdateQuickView(Option<PathBuf>),
@@ -65,8 +68,14 @@ pub enum Action {
 }
 
 pub trait App {
-    fn handle_events(&mut self) -> Result<Action>;
+    fn handle_events(&mut self, events_rx: &mut Receiver<Events>) -> Result<Action>;
     fn render(&mut self, f: &mut Frame);
+}
+
+impl fmt::Debug for dyn App + '_ {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "dyn App")
+    }
 }
 
 pub fn init_events() -> Result<(Sender<Events>, Receiver<Events>)> {

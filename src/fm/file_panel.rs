@@ -613,7 +613,7 @@ impl Component for FilePanel {
 
                 self.cursor_position = self.clamp_cursor(self.cursor_position.saturating_sub(1));
 
-                if (self.cursor_position != old_cursor_position) {
+                if self.cursor_position != old_cursor_position {
                     self.pubsub_tx
                         .send(PubSub::UpdateQuickView(self.get_selected_file()))
                         .unwrap();
@@ -624,7 +624,7 @@ impl Component for FilePanel {
 
                 self.cursor_position = self.clamp_cursor(self.cursor_position.saturating_add(1));
 
-                if (self.cursor_position != old_cursor_position) {
+                if self.cursor_position != old_cursor_position {
                     self.pubsub_tx
                         .send(PubSub::UpdateQuickView(self.get_selected_file()))
                         .unwrap();
@@ -635,7 +635,7 @@ impl Component for FilePanel {
 
                 self.cursor_position = 0;
 
-                if (self.cursor_position != old_cursor_position) {
+                if self.cursor_position != old_cursor_position {
                     self.pubsub_tx
                         .send(PubSub::UpdateQuickView(self.get_selected_file()))
                         .unwrap();
@@ -646,7 +646,7 @@ impl Component for FilePanel {
 
                 self.cursor_position = self.clamp_cursor(self.shown_file_list.len());
 
-                if (self.cursor_position != old_cursor_position) {
+                if self.cursor_position != old_cursor_position {
                     self.pubsub_tx
                         .send(PubSub::UpdateQuickView(self.get_selected_file()))
                         .unwrap();
@@ -662,7 +662,7 @@ impl Component for FilePanel {
                 self.first_line = self.first_line.saturating_sub(rect_height);
                 self.clamp_first_line();
 
-                if (self.cursor_position != old_cursor_position) {
+                if self.cursor_position != old_cursor_position {
                     self.pubsub_tx
                         .send(PubSub::UpdateQuickView(self.get_selected_file()))
                         .unwrap();
@@ -678,9 +678,19 @@ impl Component for FilePanel {
                 self.first_line = self.first_line.saturating_add(rect_height);
                 self.clamp_first_line();
 
-                if (self.cursor_position != old_cursor_position) {
+                if self.cursor_position != old_cursor_position {
                     self.pubsub_tx
                         .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                        .unwrap();
+                }
+            }
+            Key::Char('v') | Key::F(3) => {
+                if !self.shown_file_list.is_empty() {
+                    // TODO: If it's a directory, then enter that directory
+                    self.pubsub_tx
+                        .send(PubSub::ViewFile(
+                            self.shown_file_list[self.cursor_position].file.clone(),
+                        ))
                         .unwrap();
                 }
             }
@@ -772,12 +782,25 @@ impl Component for FilePanel {
                     .iter()
                     .skip(self.first_line)
                     .take(upper_inner.height.into())
-                    .map(|entry| {
+                    .enumerate()
+                    .map(|(i, entry)| {
                         let filename_max_width = (upper_inner.width as usize)
                             .saturating_sub(entry.shown_size.width())
                             .saturating_sub(9);
 
-                        let filename = tilde_layout(&entry.label, filename_max_width);
+                        let filename = if !matches!(focus, Focus::Focused)
+                            && self.first_line + i == self.cursor_position
+                        {
+                            tilde_layout(
+                                &std::iter::once('\u{2192}')
+                                    .chain(entry.label.chars().skip(1))
+                                    .collect::<String>(),
+                                filename_max_width,
+                            )
+                        } else {
+                            tilde_layout(&entry.label, filename_max_width)
+                        };
+
                         let filename_width = filename.width();
 
                         // The reason why I add {:width$} whitespaces after the

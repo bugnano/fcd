@@ -23,7 +23,10 @@ mod tilde_layout;
 mod viewer;
 mod widgets;
 
-use crate::app::{Action, App};
+use crate::{
+    app::{init_events, Action, App},
+    config::load_config,
+};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -73,6 +76,8 @@ fn initialize_panic_handler() {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    let config = load_config().context("failed to load config")?;
+
     #[cfg(debug_assertions)]
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
         .target(env_logger::Target::Pipe(Box::new(std::fs::File::create(
@@ -94,9 +99,12 @@ fn main() -> Result<()> {
     let mut terminal =
         Terminal::new(TermionBackend::new(stdout)).context("creating terminal failed")?;
 
+    let (_events_tx, mut events_rx) = init_events().context("initializing events failed")?;
+
     let mut app = match cli.view {
-        Some(file) => Box::new(viewer::app::App::new(&file, cli.tabsize)?) as Box<dyn App>,
+        Some(file) => Box::new(viewer::app::App::new(&config, &file, cli.tabsize)?) as Box<dyn App>,
         None => Box::new(fm::app::App::new(
+            &config,
             cli.printwd.as_deref(),
             cli.database.as_deref(),
             cli.use_db,
@@ -107,7 +115,7 @@ fn main() -> Result<()> {
     loop {
         terminal.draw(|f| app.render(f))?;
 
-        match app.handle_events()? {
+        match app.handle_events(&mut events_rx)? {
             Action::Continue => (),
             Action::Redraw => {
                 terminal.clear()?;

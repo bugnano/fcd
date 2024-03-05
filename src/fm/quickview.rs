@@ -41,16 +41,28 @@ impl QuickView {
             tabsize,
         })
     }
+
     fn update_quickview(&mut self, filename: Option<&Path>) {
-        (self.filename, self.viewer) = match (&self.enabled, filename) {
-            (true, Some(name)) => (
-                name.file_name()
+        match (&self.enabled, filename) {
+            (true, Some(name)) => {
+                let file_name = name
+                    .file_name()
                     .unwrap_or_default()
                     .to_string_lossy()
-                    .to_string(),
-                FileViewer::new(&self.config, self.pubsub_tx.clone(), name, self.tabsize).ok(),
-            ),
-            _ => (String::from(""), None),
+                    .to_string();
+
+                if file_name != self.filename {
+                    self.filename = file_name;
+
+                    self.viewer =
+                        FileViewer::new(&self.config, self.pubsub_tx.clone(), name, self.tabsize)
+                            .ok();
+                }
+            }
+            _ => {
+                self.filename = String::from("");
+                self.viewer = None;
+            }
         };
     }
 }

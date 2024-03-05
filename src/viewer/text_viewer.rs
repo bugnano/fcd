@@ -55,6 +55,8 @@ pub struct TextViewer {
     pubsub_tx: Sender<PubSub>,
     component_pubsub_tx: Sender<ComponentPubSub>,
     component_pubsub_rx: Receiver<ComponentPubSub>,
+    highlight_tx: Sender<()>,
+    highlight_rx: Receiver<()>,
     rect: Rect,
     filename: PathBuf,
     filename_str: String,
@@ -123,12 +125,15 @@ impl TextViewer {
             .collect();
 
         let (component_pubsub_tx, component_pubsub_rx) = crossbeam_channel::unbounded();
+        let (highlight_tx, highlight_rx) = crossbeam_channel::unbounded();
 
         let mut viewer = TextViewer {
             config: *config,
             pubsub_tx,
             component_pubsub_tx,
             component_pubsub_rx,
+            highlight_tx,
+            highlight_rx,
             rect: Rect::default(),
             filename: filename.to_path_buf(),
             filename_str: String::from(filename_str),
@@ -170,6 +175,7 @@ impl TextViewer {
         let config = self.config;
         let component_pubsub_tx = self.component_pubsub_tx.clone();
         let pubsub_tx = self.pubsub_tx.clone();
+        let highlight_rx = self.highlight_rx.clone();
 
         // Do the highlighting in a separate thread
         thread::spawn(move || {
@@ -186,42 +192,50 @@ impl TextViewer {
             let mut highlighter = HighlightLines::new(syntax, theme);
             let styled_lines: Vec<Vec<(String, Style)>> = lines
                 .iter()
-                .map(|line| {
-                    highlighter
-                        .highlight_line(line, syntax_set)
-                        .unwrap()
-                        .iter()
-                        .map(|(style, text)| {
-                            (
-                                String::from(text.trim_end_matches('\n')),
-                                Style::default().fg(match style.foreground.r {
-                                    0x00 => config.highlight.base00,
-                                    0x01 => config.highlight.base08,
-                                    0x02 => config.highlight.base0b,
-                                    0x03 => config.highlight.base0a,
-                                    0x04 => config.highlight.base0d,
-                                    0x05 => config.highlight.base0e,
-                                    0x06 => config.highlight.base0c,
-                                    0x07 => config.highlight.base05,
-                                    0x08 => config.highlight.base03,
-                                    0x09 => config.highlight.base09,
-                                    0x0F => config.highlight.base0f,
-                                    _ => {
-                                        log::debug!("{:?}", style);
-                                        config.highlight.base05
-                                    }
-                                }),
-                            )
-                        })
-                        .collect()
+                .map_while(|line| {
+                    if !highlight_rx.is_empty() {
+                        return None;
+                    }
+
+                    Some(
+                        highlighter
+                            .highlight_line(line, syntax_set)
+                            .unwrap()
+                            .iter()
+                            .map(|(style, text)| {
+                                (
+                                    String::from(text.trim_end_matches('\n')),
+                                    Style::default().fg(match style.foreground.r {
+                                        0x00 => config.highlight.base00,
+                                        0x01 => config.highlight.base08,
+                                        0x02 => config.highlight.base0b,
+                                        0x03 => config.highlight.base0a,
+                                        0x04 => config.highlight.base0d,
+                                        0x05 => config.highlight.base0e,
+                                        0x06 => config.highlight.base0c,
+                                        0x07 => config.highlight.base05,
+                                        0x08 => config.highlight.base03,
+                                        0x09 => config.highlight.base09,
+                                        0x0F => config.highlight.base0f,
+                                        _ => {
+                                            log::debug!("{:?}", style);
+                                            config.highlight.base05
+                                        }
+                                    }),
+                                )
+                            })
+                            .collect(),
+                    )
                 })
                 .collect();
 
-            // First send the component event
-            let _ = component_pubsub_tx.send(ComponentPubSub::Highlight(styled_lines));
+            if highlight_rx.is_empty() {
+                // First send the component event
+                let _ = component_pubsub_tx.send(ComponentPubSub::Highlight(styled_lines));
 
-            // Then notify the app that there is an component event
-            let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
+                // Then notify the app that there is an component event
+                let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
+            }
         });
     }
 
@@ -739,5 +753,11 @@ impl Component for TextViewer {
             .column_spacing(0);
 
         f.render_widget(table, *chunk);
+    }
+}
+
+impl Drop for TextViewer {
+    fn drop(&mut self) {
+        let _ = self.highlight_tx.send(());
     }
 }

@@ -16,12 +16,15 @@ use signal_hook::consts::signal::*;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::{
-    app::{self, init_events, Action, Events, PubSub},
+    app::{self, Action, Events, PubSub},
     button_bar::ButtonBar,
     component::{Component, Focus},
-    config::{load_config, Config},
+    config::Config,
     dlg_error::{DialogType, DlgError},
     fm::{file_panel::FilePanel, panel::PanelComponent, quickview::QuickView},
+    viewer::{
+        self, dlg_goto::DlgGoto, dlg_hex_search::DlgHexSearch, dlg_text_search::DlgTextSearch,
+    },
 };
 
 const LABELS: &[&str] = &[
@@ -40,26 +43,25 @@ const LABELS: &[&str] = &[
 #[derive(Debug)]
 pub struct App {
     config: Config,
-    events_rx: Receiver<Events>,
     pubsub_tx: Sender<PubSub>,
     pubsub_rx: Receiver<PubSub>,
     panels: Vec<Box<dyn PanelComponent>>,
     button_bar: ButtonBar,
     dialog: Option<Box<dyn Component>>,
+    fg_app: Option<Box<dyn app::App>>,
     panel_focus_position: usize,
     quickviewer_position: usize,
+    tabsize: u8,
 }
 
 impl App {
     pub fn new(
+        config: &Config,
         printwd: Option<&Path>,
         database: Option<&Path>,
         use_db: bool,
         tabsize: u8,
     ) -> Result<App> {
-        let config = load_config()?;
-
-        let (_events_tx, events_rx) = init_events()?;
         let (pubsub_tx, pubsub_rx) = crossbeam_channel::unbounded();
 
         let initial_path = match env::current_dir() {
@@ -74,19 +76,20 @@ impl App {
         };
 
         Ok(App {
-            config,
-            events_rx,
+            config: *config,
             pubsub_tx: pubsub_tx.clone(),
             pubsub_rx,
             panels: vec![
-                Box::new(FilePanel::new(&config, pubsub_tx.clone(), &initial_path)?),
-                Box::new(FilePanel::new(&config, pubsub_tx.clone(), &initial_path)?),
-                Box::new(QuickView::new(&config, pubsub_tx.clone(), tabsize)?),
+                Box::new(FilePanel::new(config, pubsub_tx.clone(), &initial_path)?),
+                Box::new(FilePanel::new(config, pubsub_tx.clone(), &initial_path)?),
+                Box::new(QuickView::new(config, pubsub_tx.clone(), tabsize)?),
             ],
-            button_bar: ButtonBar::new(&config, LABELS)?,
+            button_bar: ButtonBar::new(config, LABELS)?,
             dialog: None,
+            fg_app: None,
             panel_focus_position: 0,
             quickviewer_position: 2,
+            tabsize,
         })
     }
 
@@ -209,6 +212,33 @@ impl App {
                 )?));
             }
             PubSub::CloseDialog => self.dialog = None,
+            PubSub::DlgGoto(goto_type) => {
+                self.dialog = Some(Box::new(DlgGoto::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    *goto_type,
+                )?));
+            }
+            PubSub::DlgTextSearch(text_search) => {
+                self.dialog = Some(Box::new(DlgTextSearch::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    text_search,
+                )?));
+            }
+            PubSub::DlgHexSearch(hex_search) => {
+                self.dialog = Some(Box::new(DlgHexSearch::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    hex_search,
+                )?));
+            }
+            PubSub::ViewFile(file) => {
+                // TODO: If there's an external viewer configured, run that viewer
+                if let Ok(app) = viewer::app::App::new(&self.config, file, self.tabsize) {
+                    self.fg_app = Some(Box::new(app));
+                }
+            }
             _ => (),
         }
 
@@ -217,14 +247,43 @@ impl App {
 }
 
 impl app::App for App {
-    fn handle_events(&mut self) -> Result<Action> {
-        select! {
-            recv(self.events_rx) -> event => self.handle_event(&event?),
-            recv(self.pubsub_rx) -> pubsub => self.handle_pubsub(&pubsub?),
+    fn handle_events(&mut self, events_rx: &mut Receiver<Events>) -> Result<Action> {
+        if let Some(app) = &mut self.fg_app {
+            let mut action = app.handle_events(events_rx)?;
+
+            if let Action::Quit = action {
+                self.fg_app = None;
+                action = Action::Continue;
+            }
+
+            return Ok(action);
         }
+
+        let mut action = select! {
+            recv(events_rx) -> event => self.handle_event(&event?)?,
+            recv(self.pubsub_rx) -> pubsub => self.handle_pubsub(&pubsub?)?,
+        };
+
+        // Key handlers may generate multiple pubsub events.
+        // Let's handle them all here, so that there's only 1 redraw per keypress
+        if let Action::Continue = action {
+            while let Ok(pubsub) = self.pubsub_rx.try_recv() {
+                action = self.handle_pubsub(&pubsub)?;
+                if !matches!(action, Action::Continue) {
+                    break;
+                }
+            }
+        }
+
+        Ok(action)
     }
 
     fn render(&mut self, f: &mut Frame) {
+        if let Some(app) = &mut self.fg_app {
+            app.render(f);
+            return;
+        }
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
