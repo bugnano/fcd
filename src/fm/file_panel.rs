@@ -113,6 +113,13 @@ pub struct Entry {
     pub link_target: Option<PathBuf>,
 }
 
+impl PartialEq for Entry {
+    fn eq(&self, other: &Entry) -> bool {
+        // TODO: Is the `.file` member still the one to compare when using unarchive_path?
+        self.file == other.file
+    }
+}
+
 pub fn get_file_list(cwd: &Path, file_list_rx: Option<Receiver<PathBuf>>) -> Result<Vec<Entry>> {
     let users_cache = UsersCache::new();
 
@@ -467,6 +474,7 @@ pub struct FilePanel {
     is_loading: bool,
     file_list: Vec<Entry>,
     shown_file_list: Vec<Entry>,
+    tagged_files: Vec<Entry>,
     cursor_position: usize,
     first_line: usize,
     hidden_files: HiddenFiles,
@@ -497,6 +505,7 @@ impl FilePanel {
             is_loading: false,
             file_list: Vec::new(),
             shown_file_list: Vec::new(),
+            tagged_files: Vec::new(),
             cursor_position: 0,
             first_line: 0,
             hidden_files: HiddenFiles::Hide,
@@ -524,6 +533,9 @@ impl FilePanel {
 
                     self.shown_file_list
                         .sort_by(|a, b| sort_by_function(self.sort_method)(a, b, self.sort_order));
+
+                    self.tagged_files
+                        .retain(|entry| self.file_list.contains(entry));
                 }
             }
         }
@@ -601,6 +613,30 @@ impl FilePanel {
                 .saturating_sub(self.rect.height as usize);
         }
     }
+
+    fn handle_up(&mut self) {
+        let old_cursor_position = self.cursor_position;
+
+        self.cursor_position = self.clamp_cursor(self.cursor_position.saturating_sub(1));
+
+        if self.cursor_position != old_cursor_position {
+            self.pubsub_tx
+                .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                .unwrap();
+        }
+    }
+
+    fn handle_down(&mut self) {
+        let old_cursor_position = self.cursor_position;
+
+        self.cursor_position = self.clamp_cursor(self.cursor_position.saturating_add(1));
+
+        if self.cursor_position != old_cursor_position {
+            self.pubsub_tx
+                .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                .unwrap();
+        }
+    }
 }
 
 impl Component for FilePanel {
@@ -609,26 +645,10 @@ impl Component for FilePanel {
 
         match key {
             Key::Up | Key::Char('k') => {
-                let old_cursor_position = self.cursor_position;
-
-                self.cursor_position = self.clamp_cursor(self.cursor_position.saturating_sub(1));
-
-                if self.cursor_position != old_cursor_position {
-                    self.pubsub_tx
-                        .send(PubSub::UpdateQuickView(self.get_selected_file()))
-                        .unwrap();
-                }
+                self.handle_up();
             }
             Key::Down | Key::Char('j') => {
-                let old_cursor_position = self.cursor_position;
-
-                self.cursor_position = self.clamp_cursor(self.cursor_position.saturating_add(1));
-
-                if self.cursor_position != old_cursor_position {
-                    self.pubsub_tx
-                        .send(PubSub::UpdateQuickView(self.get_selected_file()))
-                        .unwrap();
-                }
+                self.handle_down();
             }
             Key::Home | Key::Char('g') => {
                 let old_cursor_position = self.cursor_position;
@@ -692,6 +712,70 @@ impl Component for FilePanel {
                             self.shown_file_list[self.cursor_position].file.clone(),
                         ))
                         .unwrap();
+                }
+            }
+            Key::Insert | Key::Char(' ') => {
+                if !self.shown_file_list.is_empty() {
+                    let entry = &self.shown_file_list[self.cursor_position];
+
+                    if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
+                        self.tagged_files.swap_remove(i);
+                    } else {
+                        self.tagged_files.push(entry.clone());
+                    }
+                }
+
+                self.handle_down();
+            }
+            Key::Char('t') => {
+                if !self.shown_file_list.is_empty() {
+                    let entry = &self.shown_file_list[self.cursor_position];
+
+                    if !self.tagged_files.contains(entry) {
+                        self.tagged_files.push(entry.clone());
+                    }
+                }
+
+                self.handle_down();
+            }
+            Key::Char('u') => {
+                if !self.shown_file_list.is_empty() {
+                    let entry = &self.shown_file_list[self.cursor_position];
+
+                    if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
+                        self.tagged_files.swap_remove(i);
+                    }
+                }
+
+                self.handle_down();
+            }
+            Key::Char('*') => {
+                if !self.shown_file_list.is_empty() {
+                    for entry in self.shown_file_list.iter() {
+                        if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
+                            self.tagged_files.swap_remove(i);
+                        } else {
+                            self.tagged_files.push(entry.clone());
+                        }
+                    }
+                }
+            }
+            Key::Char('T') => {
+                if !self.shown_file_list.is_empty() {
+                    for entry in self.shown_file_list.iter() {
+                        if !self.tagged_files.contains(entry) {
+                            self.tagged_files.push(entry.clone());
+                        }
+                    }
+                }
+            }
+            Key::Char('U') => {
+                if !self.shown_file_list.is_empty() {
+                    for entry in self.shown_file_list.iter() {
+                        if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
+                            self.tagged_files.swap_remove(i);
+                        }
+                    }
                 }
             }
             _ => key_handled = false,
@@ -788,9 +872,9 @@ impl Component for FilePanel {
                             .saturating_sub(entry.shown_size.width())
                             .saturating_sub(9);
 
-                        let filename = if !matches!(focus, Focus::Focused)
-                            && self.first_line + i == self.cursor_position
-                        {
+                        let is_selected = self.first_line + i == self.cursor_position;
+
+                        let filename = if is_selected && !matches!(focus, Focus::Focused) {
                             tilde_layout(
                                 &std::iter::once('\u{2192}')
                                     .chain(entry.label.chars().skip(1))
@@ -816,7 +900,11 @@ impl Component for FilePanel {
                                 &entry.shown_mtime,
                                 width = filename_max_width.saturating_sub(filename_width)
                             ),
-                            style_from_palette(&self.config, entry.palette),
+                            match (self.tagged_files.contains(entry), is_selected) {
+                                (true, true) => Style::default().fg(self.config.ui.markselect_fg),
+                                (true, false) => Style::default().fg(self.config.ui.marked_fg),
+                                _ => style_from_palette(&self.config, entry.palette),
+                            },
                         )
                         .into()
                     })
@@ -848,6 +936,39 @@ impl Component for FilePanel {
                 ]))
                 .position(Position::Bottom)
                 .alignment(Alignment::Right),
+            )
+            .title(
+                Title::from(match self.tagged_files.is_empty() {
+                    true => Span::raw(symbols::line::NORMAL.horizontal),
+                    false => Span::styled(
+                        tilde_layout(
+                            &format!(
+                                " {} in {} file{} ",
+                                human_readable_size(
+                                    self.tagged_files
+                                        .iter()
+                                        .map(|entry| {
+                                            match entry.lstat.is_dir() {
+                                                true => 0,
+                                                false => entry.lstat.len(),
+                                            }
+                                        })
+                                        .sum()
+                                ),
+                                self.tagged_files.len(),
+                                if self.tagged_files.len() == 1 {
+                                    ""
+                                } else {
+                                    "s"
+                                }
+                            ),
+                            chunk.width.saturating_sub(4).into(),
+                        ),
+                        Style::default().fg(self.config.ui.marked_fg),
+                    ),
+                })
+                .position(Position::Top)
+                .alignment(Alignment::Center),
             )
             .borders(Borders::ALL)
             .border_set(middle_border_set)
