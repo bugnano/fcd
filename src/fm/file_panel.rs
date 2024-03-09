@@ -1,12 +1,12 @@
 use std::{
     cmp::Ordering,
-    fs::{self, Metadata},
+    fs::{self, read_dir, Metadata},
     os::unix::fs::{FileTypeExt, MetadataExt},
     path::{Path, PathBuf},
     thread,
 };
 
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use crossbeam_channel::{Receiver, Sender};
 use ratatui::{
     prelude::*,
@@ -123,7 +123,7 @@ impl PartialEq for Entry {
 pub fn get_file_list(cwd: &Path, file_list_rx: Option<Receiver<PathBuf>>) -> Result<Vec<Entry>> {
     let users_cache = UsersCache::new();
 
-    Ok(fs::read_dir(cwd)?
+    Ok(read_dir(cwd)?
         .filter_map(|e| match e {
             Ok(entry) => match entry.metadata() {
                 Ok(metadata) => Some((entry, metadata)),
@@ -306,7 +306,7 @@ pub fn count_directories(
 
             match entry.stat.is_dir() {
                 true => {
-                    let (size, shown_size) = match fs::read_dir(&entry.file) {
+                    let (size, shown_size) = match read_dir(&entry.file) {
                         Ok(entries) => {
                             let num_entries = entries.count();
 
@@ -470,6 +470,7 @@ pub struct FilePanel {
     file_list_tx: Sender<PathBuf>,
     file_list_rx: Receiver<PathBuf>,
     cwd: PathBuf,
+    old_cwd: PathBuf,
     free: u64,
     is_loading: bool,
     file_list: Vec<Entry>,
@@ -500,7 +501,8 @@ impl FilePanel {
             component_pubsub_rx,
             file_list_tx,
             file_list_rx,
-            cwd: initial_path.to_path_buf(),
+            cwd: PathBuf::new(),
+            old_cwd: PathBuf::new(),
             free: 0,
             is_loading: false,
             file_list: Vec::new(),
@@ -515,7 +517,8 @@ impl FilePanel {
         };
 
         panel.file_list_thread();
-        panel.load_file_list()?;
+        panel.chdir(initial_path)?;
+        panel.old_cwd = panel.cwd.clone();
 
         Ok(panel)
     }
@@ -536,6 +539,12 @@ impl FilePanel {
 
                     self.tagged_files
                         .retain(|entry| self.file_list.contains(entry));
+
+                    if !self.shown_file_list.is_empty() {
+                        self.pubsub_tx
+                            .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                            .unwrap();
+                    }
                 }
             }
         }
@@ -592,6 +601,28 @@ impl FilePanel {
         });
     }
 
+    fn chdir(&mut self, cwd: &Path) -> Result<()> {
+        let new_cwd = cwd
+            .ancestors()
+            .find(|d| read_dir(d).is_ok())
+            .ok_or_else(|| anyhow!("failed to change directory"))?
+            .to_path_buf();
+
+        if new_cwd != self.cwd {
+            self.old_cwd = self.cwd.clone();
+            self.cwd = new_cwd;
+
+            self.file_filter.clear();
+            self.tagged_files.clear();
+            self.cursor_position = 0;
+            self.first_line = 0;
+
+            self.load_file_list()?;
+        }
+
+        Ok(())
+    }
+
     fn load_file_list(&mut self) -> Result<()> {
         self.free = disk_usage(&self.cwd)?.free;
 
@@ -644,6 +675,83 @@ impl Component for FilePanel {
         let mut key_handled = true;
 
         match key {
+            Key::Left | Key::Char('h') => {
+                let cwd = self.cwd.clone();
+
+                if let Some(new_cwd) = cwd.parent() {
+                    self.chdir(new_cwd)?
+                }
+            }
+            Key::Right | Key::Char('\n') | Key::Char('l') => {
+                if !self.shown_file_list.is_empty() {
+                    let entry = self.shown_file_list[self.cursor_position].clone();
+
+                    if entry.stat.is_dir() {
+                        self.chdir(&entry.file)?;
+                    } else if let Some(path) = &entry.link_target {
+                        let _ = path
+                            .try_exists()
+                            .map_err(anyhow::Error::new)
+                            .and_then(|exists| {
+                                if !exists {
+                                    bail!("!exists")
+                                }
+
+                                Ok(fs::metadata(path)?)
+                            })
+                            .and_then(|metadata| {
+                                match metadata.is_dir() {
+                                    true => {
+                                        // Change directory only if we can change to that exact directory
+                                        read_dir(path)?;
+
+                                        self.chdir(path)?
+                                    }
+                                    false => {
+                                        let parent = path.parent().ok_or_else(|| {
+                                            anyhow!("failed to read link target parent")
+                                        })?;
+
+                                        // Change directory only if we can change to that exact directory
+                                        read_dir(parent)?;
+
+                                        self.chdir(parent)?;
+
+                                        if self.cwd == parent {
+                                            let old_cursor_position = self.cursor_position;
+                                            let diff_cursor_first = self
+                                                .cursor_position
+                                                .saturating_sub(self.first_line);
+
+                                            self.cursor_position = self.clamp_cursor(
+                                                self.shown_file_list
+                                                    .iter()
+                                                    .position(|entry| &entry.file == path)
+                                                    .unwrap_or(old_cursor_position),
+                                            );
+
+                                            if self.cursor_position != old_cursor_position {
+                                                self.first_line = self
+                                                    .cursor_position
+                                                    .saturating_sub(diff_cursor_first);
+                                                self.clamp_first_line();
+
+                                                self.pubsub_tx
+                                                    .send(PubSub::UpdateQuickView(
+                                                        self.get_selected_file(),
+                                                    ))
+                                                    .unwrap();
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Ok(())
+                            });
+                    }
+                    // TODO: Handle archives and regular files
+                }
+            }
             Key::Up | Key::Char('k') => {
                 self.handle_up();
             }
@@ -706,12 +814,12 @@ impl Component for FilePanel {
             }
             Key::Char('v') | Key::F(3) => {
                 if !self.shown_file_list.is_empty() {
-                    // TODO: If it's a directory, then enter that directory
-                    self.pubsub_tx
-                        .send(PubSub::ViewFile(
-                            self.shown_file_list[self.cursor_position].file.clone(),
-                        ))
-                        .unwrap();
+                    let entry = self.shown_file_list[self.cursor_position].clone();
+
+                    match entry.stat.is_dir() {
+                        true => self.chdir(&entry.file)?,
+                        false => self.pubsub_tx.send(PubSub::ViewFile(entry.file)).unwrap(),
+                    }
                 }
             }
             Key::Insert | Key::Char(' ') => {
@@ -1006,6 +1114,10 @@ impl Panel for FilePanel {
             true => None,
             false => Some(self.shown_file_list[self.cursor_position].file.clone()),
         }
+    }
+
+    fn get_cwd(&self) -> Option<PathBuf> {
+        Some(self.cwd.clone())
     }
 }
 

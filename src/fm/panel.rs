@@ -6,6 +6,10 @@ pub trait Panel {
     fn get_selected_file(&self) -> Option<PathBuf> {
         None
     }
+
+    fn get_cwd(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 impl fmt::Debug for dyn Panel + '_ {

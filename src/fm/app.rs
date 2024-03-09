@@ -1,7 +1,6 @@
 use std::{
     cmp::max,
-    env,
-    fs::read_dir,
+    env, fs,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -12,6 +11,7 @@ use ratatui::prelude::*;
 use termion::event::*;
 
 use chrono::{DateTime, Datelike, Local};
+use path_clean::PathClean;
 use signal_hook::consts::signal::*;
 use unicode_normalization::UnicodeNormalization;
 
@@ -51,6 +51,7 @@ pub struct App {
     fg_app: Option<Box<dyn app::App>>,
     panel_focus_position: usize,
     quickviewer_position: usize,
+    printwd: Option<PathBuf>,
     tabsize: u8,
 }
 
@@ -64,15 +65,9 @@ impl App {
     ) -> Result<App> {
         let (pubsub_tx, pubsub_rx) = crossbeam_channel::unbounded();
 
-        let initial_path = match env::current_dir() {
-            Ok(cwd) => cwd,
-            Err(_) => {
-                PathBuf::from(env::var("PWD").context("failed to get current working directory")?)
-                    .ancestors()
-                    .find(|cwd| read_dir(cwd).is_ok())
-                    .unwrap()
-                    .to_path_buf()
-            }
+        let initial_path = match PathBuf::from(env::var("PWD").unwrap_or(String::from("."))) {
+            cwd if cwd.is_absolute() => cwd.clean(),
+            _ => env::current_dir().context("failed to get current working directory")?,
         };
 
         Ok(App {
@@ -89,6 +84,7 @@ impl App {
             fg_app: None,
             panel_focus_position: 0,
             quickviewer_position: 2,
+            printwd: printwd.map(PathBuf::from),
             tabsize,
         })
     }
@@ -106,7 +102,20 @@ impl App {
 
                     if !key_handled {
                         match key {
-                            Key::Char('q') | Key::Char('Q') | Key::F(10) => action = Action::Quit,
+                            Key::Char('q') | Key::Char('Q') | Key::F(10) => {
+                                action = Action::Quit;
+
+                                let cwd = if self.panel_focus_position == self.quickviewer_position
+                                {
+                                    self.panels[self.panel_focus_position ^ 1].get_cwd()
+                                } else {
+                                    self.panels[self.panel_focus_position].get_cwd()
+                                };
+
+                                if let (Some(pwd), Some(cwd)) = (&self.printwd, cwd) {
+                                    let _ = fs::write(pwd, cwd.as_os_str().as_encoded_bytes());
+                                }
+                            }
                             //Key::Char('p') => panic!("at the disco"),
                             Key::Ctrl('c') => action = Action::CtrlC,
                             Key::Ctrl('l') => action = Action::Redraw,
