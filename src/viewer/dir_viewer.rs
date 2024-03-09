@@ -12,7 +12,7 @@ use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
-    fm::file_panel::{style_from_palette, Entry},
+    fm::entry::{style_from_palette, Entry},
     fnmatch,
     tilde_layout::{tilde_layout, tilde_layout_styled},
     viewer::{
