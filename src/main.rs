@@ -117,6 +117,7 @@ fn main() -> Result<()> {
 
         match app.handle_events(&mut events_rx)? {
             Action::Continue => (),
+            Action::NextLoop => (),
             Action::Redraw => {
                 terminal.clear()?;
             }

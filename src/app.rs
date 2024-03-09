@@ -59,6 +59,7 @@ pub enum PubSub {
 #[derive(Debug, Copy, Clone)]
 pub enum Action {
     Continue,
+    NextLoop,
     Redraw,
     Quit,
     CtrlC,

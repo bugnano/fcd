@@ -94,6 +94,8 @@ impl App {
     }
 
     fn handle_event(&mut self, event: &Events) -> Result<Action> {
+        let mut action = Action::Continue;
+
         match event {
             Events::Input(input) => match input {
                 Event::Key(key) => {
@@ -104,13 +106,11 @@ impl App {
 
                     if !key_handled {
                         match key {
-                            Key::Char('q') | Key::Char('Q') | Key::F(10) => {
-                                return Ok(Action::Quit)
-                            }
+                            Key::Char('q') | Key::Char('Q') | Key::F(10) => action = Action::Quit,
                             //Key::Char('p') => panic!("at the disco"),
-                            Key::Ctrl('c') => return Ok(Action::CtrlC),
-                            Key::Ctrl('l') => return Ok(Action::Redraw),
-                            Key::Ctrl('z') => return Ok(Action::CtrlZ),
+                            Key::Ctrl('c') => action = Action::CtrlC,
+                            Key::Ctrl('l') => action = Action::Redraw,
+                            Key::Ctrl('z') => action = Action::CtrlZ,
                             Key::BackTab => {
                                 // This assumes that there are always 2 panels visible
                                 self.panel_focus_position ^= 1;
@@ -161,18 +161,20 @@ impl App {
                 Event::Unsupported(_) => (),
             },
             Events::Signal(signal) => match *signal {
-                SIGWINCH => return Ok(Action::Redraw),
-                SIGINT => return Ok(Action::CtrlC),
-                SIGTERM => return Ok(Action::SigTerm),
-                SIGCONT => return Ok(Action::SigCont),
+                SIGWINCH => (),
+                SIGINT => action = Action::CtrlC,
+                SIGTERM => action = Action::SigTerm,
+                SIGCONT => action = Action::SigCont,
                 _ => unreachable!(),
             },
         }
 
-        Ok(Action::Continue)
+        Ok(action)
     }
 
     fn handle_pubsub(&mut self, pubsub: &PubSub) -> Result<Action> {
+        let mut action = Action::Continue;
+
         for panel in &mut self.panels {
             panel.handle_pubsub(pubsub)?;
         }
@@ -210,6 +212,11 @@ impl App {
                     title,
                     DialogType::Info,
                 )?));
+
+                // Given that the Info dialog is used to show information,
+                // stop processing further PubSub events in this loop,
+                // in order to show the dialog
+                action = Action::NextLoop;
             }
             PubSub::CloseDialog => self.dialog = None,
             PubSub::DlgGoto(goto_type) => {
@@ -242,7 +249,7 @@ impl App {
             _ => (),
         }
 
-        Ok(Action::Continue)
+        Ok(action)
     }
 }
 
