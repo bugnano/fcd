@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     cmp::max,
     env, fs,
     path::{Path, PathBuf},
@@ -22,7 +23,9 @@ use crate::{
     component::{Component, Focus},
     config::Config,
     dlg_error::{DialogType, DlgError},
-    fm::{file_panel::FilePanel, panel::PanelComponent, quickview::QuickView},
+    fm::{
+        bookmarks::Bookmarks, file_panel::FilePanel, panel::PanelComponent, quickview::QuickView,
+    },
     viewer::{
         self, dlg_goto::DlgGoto, dlg_hex_search::DlgHexSearch, dlg_text_search::DlgTextSearch,
     },
@@ -59,6 +62,7 @@ pub struct App {
 impl App {
     pub fn new(
         config: &Rc<Config>,
+        bookmarks: &Rc<RefCell<Bookmarks>>,
         printwd: Option<&Path>,
         database: Option<&Path>,
         use_db: bool,
@@ -76,8 +80,18 @@ impl App {
             pubsub_tx: pubsub_tx.clone(),
             pubsub_rx,
             panels: vec![
-                Box::new(FilePanel::new(config, pubsub_tx.clone(), &initial_path)?),
-                Box::new(FilePanel::new(config, pubsub_tx.clone(), &initial_path)?),
+                Box::new(FilePanel::new(
+                    config,
+                    bookmarks,
+                    pubsub_tx.clone(),
+                    &initial_path,
+                )?),
+                Box::new(FilePanel::new(
+                    config,
+                    bookmarks,
+                    pubsub_tx.clone(),
+                    &initial_path,
+                )?),
                 Box::new(QuickView::new(config, pubsub_tx.clone(), tabsize)?),
             ],
             button_bar: ButtonBar::new(config, LABELS)?,

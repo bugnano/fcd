@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     fs::{self, read_dir},
     path::{Path, PathBuf},
     rc::Rc,
@@ -24,6 +25,7 @@ use crate::{
     config::Config,
     fm::{
         app::human_readable_size,
+        bookmarks::Bookmarks,
         entry::{
             count_directories, filter_file_list, get_file_list, sort_by_function,
             style_from_palette, Entry, HiddenFiles, SortBy, SortOrder,
@@ -42,6 +44,7 @@ enum ComponentPubSub {
 #[derive(Debug)]
 pub struct FilePanel {
     config: Rc<Config>,
+    bookmarks: Rc<RefCell<Bookmarks>>,
     pubsub_tx: Sender<PubSub>,
     rect: Rect,
     component_pubsub_tx: Sender<ComponentPubSub>,
@@ -66,6 +69,7 @@ pub struct FilePanel {
 impl FilePanel {
     pub fn new(
         config: &Rc<Config>,
+        bookmarks: &Rc<RefCell<Bookmarks>>,
         pubsub_tx: Sender<PubSub>,
         initial_path: &Path,
     ) -> Result<FilePanel> {
@@ -74,6 +78,7 @@ impl FilePanel {
 
         let mut panel = FilePanel {
             config: Rc::clone(config),
+            bookmarks: Rc::clone(bookmarks),
             pubsub_tx,
             rect: Rect::default(),
             component_pubsub_tx,

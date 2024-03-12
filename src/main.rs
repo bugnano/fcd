@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     io::{self, Write},
     panic,
     path::PathBuf,
@@ -27,6 +28,7 @@ mod widgets;
 use crate::{
     app::{init_events, Action, App},
     config::load_config,
+    fm::bookmarks::Bookmarks,
 };
 
 #[derive(Parser, Debug)]
@@ -104,13 +106,28 @@ fn main() -> Result<()> {
 
     let mut app = match cli.view {
         Some(file) => Box::new(viewer::app::App::new(&config, &file, cli.tabsize)?) as Box<dyn App>,
-        None => Box::new(fm::app::App::new(
-            &config,
-            cli.printwd.as_deref(),
-            cli.database.as_deref(),
-            cli.use_db,
-            cli.tabsize,
-        )?) as Box<dyn App>,
+        None => {
+            let bookmark_path = xdg::BaseDirectories::with_prefix(crate_name!())
+                .ok()
+                .map(|xdg_dirs| xdg_dirs.place_config_file(&PathBuf::from("bookmarks")).ok())
+                .flatten();
+
+            let bookmarks = Rc::new(RefCell::new(Bookmarks::new(bookmark_path.as_deref())));
+
+            let h_bookmark = bookmarks.borrow().get('h');
+            if let (None, Some(home_dir)) = (h_bookmark, home::home_dir()) {
+                bookmarks.borrow_mut().insert('h', &home_dir);
+            }
+
+            Box::new(fm::app::App::new(
+                &config,
+                &bookmarks,
+                cli.printwd.as_deref(),
+                cli.database.as_deref(),
+                cli.use_db,
+                cli.tabsize,
+            )?) as Box<dyn App>
+        }
     };
 
     loop {

@@ -33,6 +33,8 @@ caseless = "*"
 chrono = "*"
 fuzzy-matcher = "*"
 natord = "*"
+atomicwrites = "*"
+home = "*"
 
 [profile.release]
 strip = true
