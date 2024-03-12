@@ -1,6 +1,7 @@
 use std::{
     cmp::{max, min},
     path::{Path, PathBuf},
+    rc::Rc,
     str, thread,
 };
 
@@ -51,7 +52,7 @@ enum ComponentPubSub {
 
 #[derive(Debug)]
 pub struct TextViewer {
-    config: Config,
+    config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
     component_pubsub_tx: Sender<ComponentPubSub>,
     component_pubsub_rx: Receiver<ComponentPubSub>,
@@ -76,7 +77,7 @@ pub struct TextViewer {
 
 impl TextViewer {
     pub fn new(
-        config: &Config,
+        config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
         filename: &Path,
         filename_str: &str,
@@ -128,7 +129,7 @@ impl TextViewer {
         let (highlight_tx, highlight_rx) = crossbeam_channel::unbounded();
 
         let mut viewer = TextViewer {
-            config: *config,
+            config: Rc::clone(config),
             pubsub_tx,
             component_pubsub_tx,
             component_pubsub_rx,
@@ -172,7 +173,7 @@ impl TextViewer {
     fn highlight(&self) {
         let filename = self.filename.clone();
         let lines = self.lines.clone();
-        let config = self.config;
+        let config = *self.config.clone();
         let component_pubsub_tx = self.component_pubsub_tx.clone();
         let pubsub_tx = self.pubsub_tx.clone();
         let highlight_rx = self.highlight_rx.clone();

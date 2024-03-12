@@ -2,6 +2,7 @@ use std::{
     cmp::max,
     env, fs,
     path::{Path, PathBuf},
+    rc::Rc,
     time::SystemTime,
 };
 
@@ -42,7 +43,7 @@ const LABELS: &[&str] = &[
 
 #[derive(Debug)]
 pub struct App {
-    config: Config,
+    config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
     pubsub_rx: Receiver<PubSub>,
     panels: Vec<Box<dyn PanelComponent>>,
@@ -57,7 +58,7 @@ pub struct App {
 
 impl App {
     pub fn new(
-        config: &Config,
+        config: &Rc<Config>,
         printwd: Option<&Path>,
         database: Option<&Path>,
         use_db: bool,
@@ -71,7 +72,7 @@ impl App {
         };
 
         Ok(App {
-            config: *config,
+            config: Rc::clone(config),
             pubsub_tx: pubsub_tx.clone(),
             pubsub_rx,
             panels: vec![

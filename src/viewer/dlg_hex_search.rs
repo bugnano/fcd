@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use anyhow::Result;
 use crossbeam_channel::Sender;
 use ratatui::{
@@ -25,7 +27,7 @@ pub struct HexSearch {
 
 #[derive(Debug)]
 pub struct DlgHexSearch {
-    config: Config,
+    config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
     input: Input,
     check_boxes: Vec<CheckBox>,
@@ -38,12 +40,12 @@ pub struct DlgHexSearch {
 
 impl DlgHexSearch {
     pub fn new(
-        config: &Config,
+        config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
         hex_search: &HexSearch,
     ) -> Result<DlgHexSearch> {
         Ok(DlgHexSearch {
-            config: *config,
+            config: Rc::clone(config),
             pubsub_tx,
             input: Input::new(
                 &Style::default()

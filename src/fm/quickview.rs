@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, rc::Rc};
 
 use anyhow::Result;
 use crossbeam_channel::Sender;
@@ -22,7 +22,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct QuickView {
-    config: Config,
+    config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
     enabled: bool,
     filename: String,
@@ -31,9 +31,9 @@ pub struct QuickView {
 }
 
 impl QuickView {
-    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>, tabsize: u8) -> Result<QuickView> {
+    pub fn new(config: &Rc<Config>, pubsub_tx: Sender<PubSub>, tabsize: u8) -> Result<QuickView> {
         Ok(QuickView {
-            config: *config,
+            config: Rc::clone(config),
             pubsub_tx,
             enabled: false,
             filename: String::from(""),

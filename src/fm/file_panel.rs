@@ -1,6 +1,7 @@
 use std::{
     fs::{self, read_dir},
     path::{Path, PathBuf},
+    rc::Rc,
     thread,
 };
 
@@ -40,7 +41,7 @@ enum ComponentPubSub {
 
 #[derive(Debug)]
 pub struct FilePanel {
-    config: Config,
+    config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
     rect: Rect,
     component_pubsub_tx: Sender<ComponentPubSub>,
@@ -64,7 +65,7 @@ pub struct FilePanel {
 
 impl FilePanel {
     pub fn new(
-        config: &Config,
+        config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
         initial_path: &Path,
     ) -> Result<FilePanel> {
@@ -72,7 +73,7 @@ impl FilePanel {
         let (file_list_tx, file_list_rx) = crossbeam_channel::unbounded();
 
         let mut panel = FilePanel {
-            config: *config,
+            config: Rc::clone(config),
             pubsub_tx,
             rect: Rect::default(),
             component_pubsub_tx,

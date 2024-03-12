@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use anyhow::Result;
 use crossbeam_channel::Sender;
 use ratatui::{
@@ -26,7 +28,7 @@ pub enum GotoType {
 
 #[derive(Debug)]
 pub struct DlgGoto {
-    config: Config,
+    config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
     goto_type: GotoType,
     input: Input,
@@ -37,9 +39,13 @@ pub struct DlgGoto {
 }
 
 impl DlgGoto {
-    pub fn new(config: &Config, pubsub_tx: Sender<PubSub>, goto_type: GotoType) -> Result<DlgGoto> {
+    pub fn new(
+        config: &Rc<Config>,
+        pubsub_tx: Sender<PubSub>,
+        goto_type: GotoType,
+    ) -> Result<DlgGoto> {
         Ok(DlgGoto {
-            config: *config,
+            config: Rc::clone(config),
             pubsub_tx,
             goto_type,
             input: Input::new(

@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use anyhow::Result;
 use ratatui::{
     prelude::*,
@@ -15,16 +17,16 @@ use crate::{
 
 #[derive(Debug)]
 pub struct TopBar {
-    config: Config,
+    config: Rc<Config>,
     filename: String,
     position: String,
     percent: String,
 }
 
 impl TopBar {
-    pub fn new(config: &Config) -> Result<TopBar> {
+    pub fn new(config: &Rc<Config>) -> Result<TopBar> {
         Ok(TopBar {
-            config: *config,
+            config: Rc::clone(config),
             filename: String::new(),
             position: String::new(),
             percent: String::new(),

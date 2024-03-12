@@ -1,4 +1,4 @@
-use std::{cmp::min, path::Path, str};
+use std::{cmp::min, path::Path, rc::Rc, str};
 
 use anyhow::Result;
 use crossbeam_channel::Sender;
@@ -23,7 +23,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct DirViewer {
-    config: Config,
+    config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
     rect: Rect,
     filename_str: String,
@@ -38,14 +38,14 @@ pub struct DirViewer {
 
 impl DirViewer {
     pub fn new(
-        config: &Config,
+        config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
         _filename: &Path,
         filename_str: &str,
         file_list: Vec<Entry>,
     ) -> Result<DirViewer> {
         let mut viewer = DirViewer {
-            config: *config,
+            config: Rc::clone(config),
             pubsub_tx,
             rect: Rect::default(),
             filename_str: String::from(filename_str),

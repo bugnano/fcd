@@ -3,6 +3,7 @@ use std::{
     fs::File,
     io::{BufReader, Read, Seek},
     path::Path,
+    rc::Rc,
     str,
 };
 
@@ -120,7 +121,7 @@ pub enum ViewerType {
 
 #[derive(Debug)]
 pub struct HexViewer {
-    config: Config,
+    config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
     rect: Rect,
     filename_str: String,
@@ -138,7 +139,7 @@ pub struct HexViewer {
 
 impl HexViewer {
     pub fn new(
-        config: &Config,
+        config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
         filename: &Path,
         filename_str: &str,
@@ -151,7 +152,7 @@ impl HexViewer {
         let len_address = format!("{:X}", file_length).len();
 
         let mut viewer = HexViewer {
-            config: *config,
+            config: Rc::clone(config),
             pubsub_tx,
             rect: Rect::default(),
             filename_str: String::from(filename_str),

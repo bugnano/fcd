@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use anyhow::Result;
 use ratatui::{prelude::*, widgets::*};
 
@@ -8,17 +10,17 @@ use crate::{
 
 #[derive(Debug)]
 pub struct ButtonBar {
-    config: Config,
+    config: Rc<Config>,
     labels: Vec<String>,
 }
 
 impl ButtonBar {
     pub fn new<T: IntoIterator<Item = U>, U: AsRef<str>>(
-        config: &Config,
+        config: &Rc<Config>,
         labels: T,
     ) -> Result<ButtonBar> {
         Ok(ButtonBar {
-            config: *config,
+            config: Rc::clone(config),
             labels: labels
                 .into_iter()
                 .map(|label| String::from(label.as_ref()))

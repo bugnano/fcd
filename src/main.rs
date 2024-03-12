@@ -2,6 +2,7 @@ use std::{
     io::{self, Write},
     panic,
     path::PathBuf,
+    rc::Rc,
 };
 
 use anyhow::{Context, Result};
@@ -76,7 +77,7 @@ fn initialize_panic_handler() {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let config = load_config().context("failed to load config")?;
+    let config = Rc::new(load_config().context("failed to load config")?);
 
     #[cfg(debug_assertions)]
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))

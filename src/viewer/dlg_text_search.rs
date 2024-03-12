@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use anyhow::Result;
 use crossbeam_channel::Sender;
 use ratatui::{
@@ -34,7 +36,7 @@ pub struct TextSearch {
 
 #[derive(Debug)]
 pub struct DlgTextSearch {
-    config: Config,
+    config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
     input: Input,
     radio: RadioBox,
@@ -49,12 +51,12 @@ pub struct DlgTextSearch {
 
 impl DlgTextSearch {
     pub fn new(
-        config: &Config,
+        config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
         text_search: &TextSearch,
     ) -> Result<DlgTextSearch> {
         Ok(DlgTextSearch {
-            config: *config,
+            config: Rc::clone(config),
             pubsub_tx,
             input: Input::new(
                 &Style::default()

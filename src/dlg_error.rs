@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use anyhow::Result;
 use crossbeam_channel::Sender;
 use ratatui::{
@@ -27,7 +29,7 @@ pub enum DialogType {
 
 #[derive(Debug)]
 pub struct DlgError {
-    config: Config,
+    config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
     message: String,
     title: String,
@@ -36,14 +38,14 @@ pub struct DlgError {
 
 impl DlgError {
     pub fn new(
-        config: &Config,
+        config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
         message: &str,
         title: &str,
         dialog_type: DialogType,
     ) -> Result<DlgError> {
         Ok(DlgError {
-            config: *config,
+            config: Rc::clone(config),
             pubsub_tx,
             message: String::from(message),
             title: String::from(title),

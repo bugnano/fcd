@@ -2,6 +2,7 @@ use std::{
     fs::{self, File},
     io::Read,
     path::Path,
+    rc::Rc,
 };
 
 use anyhow::Result;
@@ -30,7 +31,7 @@ pub struct FileViewer {
 
 impl FileViewer {
     pub fn new(
-        config: &Config,
+        config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
         filename: &Path,
         tabsize: u8,

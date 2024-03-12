@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, rc::Rc};
 
 use anyhow::Result;
 use crossbeam_channel::{select, Receiver, Sender};
@@ -34,7 +34,7 @@ const LABELS: &[&str] = &[
 
 #[derive(Debug)]
 pub struct App {
-    config: Config,
+    config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
     pubsub_rx: Receiver<PubSub>,
     top_bar: TopBar,
@@ -44,11 +44,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(config: &Config, filename: &Path, tabsize: u8) -> Result<App> {
+    pub fn new(config: &Rc<Config>, filename: &Path, tabsize: u8) -> Result<App> {
         let (pubsub_tx, pubsub_rx) = crossbeam_channel::unbounded();
 
         Ok(App {
-            config: *config,
+            config: Rc::clone(config),
             pubsub_tx: pubsub_tx.clone(),
             pubsub_rx,
             top_bar: TopBar::new(config)?,
