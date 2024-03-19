@@ -24,6 +24,7 @@ pub enum PubSub {
     Info(String, String),
     CloseDialog,
     ComponentThreadEvent,
+    Leader(Option<char>),
 
     // File viewer events
     FileInfo(String, String, String),

@@ -109,8 +109,7 @@ fn main() -> Result<()> {
         None => {
             let bookmark_path = xdg::BaseDirectories::with_prefix(crate_name!())
                 .ok()
-                .map(|xdg_dirs| xdg_dirs.place_config_file(&PathBuf::from("bookmarks")).ok())
-                .flatten();
+                .and_then(|xdg_dirs| xdg_dirs.place_config_file(PathBuf::from("bookmarks")).ok());
 
             let bookmarks = Rc::new(RefCell::new(Bookmarks::new(bookmark_path.as_deref())));
 

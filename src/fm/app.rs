@@ -24,7 +24,8 @@ use crate::{
     config::Config,
     dlg_error::{DialogType, DlgError},
     fm::{
-        bookmarks::Bookmarks, file_panel::FilePanel, panel::PanelComponent, quickview::QuickView,
+        bookmarks::Bookmarks, command_bar::leader::Leader, file_panel::FilePanel,
+        panel::PanelComponent, quickview::QuickView,
     },
     viewer::{
         self, dlg_goto::DlgGoto, dlg_hex_search::DlgHexSearch, dlg_text_search::DlgTextSearch,
@@ -50,6 +51,7 @@ pub struct App {
     pubsub_tx: Sender<PubSub>,
     pubsub_rx: Receiver<PubSub>,
     panels: Vec<Box<dyn PanelComponent>>,
+    command_bar: Option<Box<dyn Component>>,
     button_bar: ButtonBar,
     dialog: Option<Box<dyn Component>>,
     fg_app: Option<Box<dyn app::App>>,
@@ -94,6 +96,7 @@ impl App {
                 )?),
                 Box::new(QuickView::new(config, pubsub_tx.clone(), tabsize)?),
             ],
+            command_bar: None,
             button_bar: ButtonBar::new(config, LABELS)?,
             dialog: None,
             fg_app: None,
@@ -203,6 +206,10 @@ impl App {
             panel.handle_pubsub(pubsub)?;
         }
 
+        if let Some(command_bar) = &mut self.command_bar {
+            command_bar.handle_pubsub(pubsub)?;
+        }
+
         self.button_bar.handle_pubsub(pubsub)?;
 
         if let Some(dlg) = &mut self.dialog {
@@ -268,6 +275,12 @@ impl App {
                 // TODO: If there's an external viewer configured, run that viewer
                 if let Ok(app) = viewer::app::App::new(&self.config, file, self.tabsize) {
                     self.fg_app = Some(Box::new(app));
+                }
+            }
+            PubSub::Leader(leader) => {
+                self.command_bar = match leader {
+                    Some(c) => Some(Box::new(Leader::new(&self.config, *c)?)),
+                    None => None,
                 }
             }
             _ => (),
@@ -345,6 +358,17 @@ impl app::App for App {
                 _ => Focus::Normal,
             },
         );
+
+        if let Some(command_bar) = &mut self.command_bar {
+            command_bar.render(
+                f,
+                &chunks[1],
+                match &self.dialog {
+                    Some(_) => Focus::Normal,
+                    None => Focus::Focused,
+                },
+            );
+        }
 
         self.button_bar.render(f, &chunks[2], Focus::Normal);
 

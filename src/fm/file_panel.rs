@@ -53,6 +53,7 @@ pub struct FilePanel {
     file_list_rx: Receiver<PathBuf>,
     cwd: PathBuf,
     old_cwd: PathBuf,
+    leader: Option<char>,
     free: u64,
     is_loading: bool,
     file_list: Vec<Entry>,
@@ -87,6 +88,7 @@ impl FilePanel {
             file_list_rx,
             cwd: PathBuf::new(),
             old_cwd: PathBuf::new(),
+            leader: None,
             free: 0,
             is_loading: false,
             file_list: Vec::new(),
@@ -207,6 +209,12 @@ impl FilePanel {
         Ok(())
     }
 
+    fn chdir_old_cwd(&mut self) -> Result<()> {
+        let old_cwd = self.old_cwd.clone();
+
+        self.chdir(&old_cwd)
+    }
+
     fn load_file_list(&mut self) -> Result<()> {
         self.free = disk_usage(&self.cwd)?.free;
 
@@ -258,219 +266,256 @@ impl Component for FilePanel {
     fn handle_key(&mut self, key: &Key) -> Result<bool> {
         let mut key_handled = true;
 
-        match key {
-            Key::Left | Key::Char('h') => {
-                let cwd = self.cwd.clone();
-
-                if let Some(new_cwd) = cwd.parent() {
-                    self.chdir(new_cwd)?
+        if let Some(c) = self.leader {
+            match (c, key) {
+                ('`', Key::Char('\'')) | ('`', Key::Char('`')) => {
+                    self.chdir_old_cwd()?;
                 }
+                ('`', Key::Char(c)) => {
+                    let bookmark =
+                        self.bookmarks
+                            .borrow()
+                            .get(*c)
+                            .and_then(|cwd| match read_dir(&cwd) {
+                                Ok(_) => Some(cwd),
+                                Err(_) => None,
+                            });
+
+                    if let Some(cwd) = bookmark {
+                        self.chdir(&cwd)?;
+                    }
+                }
+                ('m', Key::Char(c)) => self.bookmarks.borrow_mut().insert(*c, &self.cwd),
+                _ => key_handled = false,
             }
-            Key::Right | Key::Char('\n') | Key::Char('l') => {
-                if !self.shown_file_list.is_empty() {
-                    let entry = self.shown_file_list[self.cursor_position].clone();
 
-                    if entry.stat.is_dir() {
-                        self.chdir(&entry.file)?;
-                    } else if let Some(path) = &entry.link_target {
-                        let _ = path
-                            .try_exists()
-                            .map_err(anyhow::Error::new)
-                            .and_then(|exists| {
-                                if !exists {
-                                    bail!("!exists")
-                                }
+            // When pressing a key after a leader, the leader is automatically reset
+            self.leader = None;
+            self.pubsub_tx.send(PubSub::Leader(self.leader)).unwrap();
+        } else {
+            match key {
+                Key::Char(c) if *c == '\'' || *c == '`' => {
+                    self.leader = Some('`');
+                    self.pubsub_tx.send(PubSub::Leader(Some(*c))).unwrap();
+                }
+                Key::Char('m') => {
+                    // TODO: Cannot bookmark inside an archive
+                    self.leader = Some('m');
+                    self.pubsub_tx.send(PubSub::Leader(self.leader)).unwrap();
+                }
+                Key::Left | Key::Char('h') => {
+                    let cwd = self.cwd.clone();
 
-                                Ok(fs::metadata(path)?)
-                            })
-                            .and_then(|metadata| {
-                                match metadata.is_dir() {
-                                    true => {
-                                        // Change directory only if we can change to that exact directory
-                                        read_dir(path)?;
+                    if let Some(new_cwd) = cwd.parent() {
+                        self.chdir(new_cwd)?
+                    }
+                }
+                Key::Right | Key::Char('\n') | Key::Char('l') => {
+                    if !self.shown_file_list.is_empty() {
+                        let entry = self.shown_file_list[self.cursor_position].clone();
 
-                                        self.chdir(path)?
+                        if entry.stat.is_dir() {
+                            self.chdir(&entry.file)?;
+                        } else if let Some(path) = &entry.link_target {
+                            let _ = path
+                                .try_exists()
+                                .map_err(anyhow::Error::new)
+                                .and_then(|exists| {
+                                    if !exists {
+                                        bail!("!exists")
                                     }
-                                    false => {
-                                        let parent = path.parent().ok_or_else(|| {
-                                            anyhow!("failed to read link target parent")
-                                        })?;
 
-                                        // Change directory only if we can change to that exact directory
-                                        read_dir(parent)?;
+                                    Ok(fs::metadata(path)?)
+                                })
+                                .and_then(|metadata| {
+                                    match metadata.is_dir() {
+                                        true => {
+                                            // Change directory only if we can change to that exact directory
+                                            read_dir(path)?;
 
-                                        self.chdir(parent)?;
+                                            self.chdir(path)?
+                                        }
+                                        false => {
+                                            let parent = path.parent().ok_or_else(|| {
+                                                anyhow!("failed to read link target parent")
+                                            })?;
 
-                                        if self.cwd == parent {
-                                            let old_cursor_position = self.cursor_position;
-                                            let diff_cursor_first = self
-                                                .cursor_position
-                                                .saturating_sub(self.first_line);
+                                            // Change directory only if we can change to that exact directory
+                                            read_dir(parent)?;
 
-                                            self.cursor_position = self.clamp_cursor(
-                                                self.shown_file_list
-                                                    .iter()
-                                                    .position(|entry| &entry.file == path)
-                                                    .unwrap_or(old_cursor_position),
-                                            );
+                                            self.chdir(parent)?;
 
-                                            if self.cursor_position != old_cursor_position {
-                                                self.first_line = self
+                                            if self.cwd == parent {
+                                                let old_cursor_position = self.cursor_position;
+                                                let diff_cursor_first = self
                                                     .cursor_position
-                                                    .saturating_sub(diff_cursor_first);
-                                                self.clamp_first_line();
+                                                    .saturating_sub(self.first_line);
 
-                                                self.pubsub_tx
-                                                    .send(PubSub::UpdateQuickView(
-                                                        self.get_selected_file(),
-                                                    ))
-                                                    .unwrap();
+                                                self.cursor_position = self.clamp_cursor(
+                                                    self.shown_file_list
+                                                        .iter()
+                                                        .position(|entry| &entry.file == path)
+                                                        .unwrap_or(old_cursor_position),
+                                                );
+
+                                                if self.cursor_position != old_cursor_position {
+                                                    self.first_line = self
+                                                        .cursor_position
+                                                        .saturating_sub(diff_cursor_first);
+                                                    self.clamp_first_line();
+
+                                                    self.pubsub_tx
+                                                        .send(PubSub::UpdateQuickView(
+                                                            self.get_selected_file(),
+                                                        ))
+                                                        .unwrap();
+                                                }
                                             }
                                         }
                                     }
-                                }
 
-                                Ok(())
-                            });
-                    }
-                    // TODO: Handle archives and regular files
-                }
-            }
-            Key::Up | Key::Char('k') => {
-                self.handle_up();
-            }
-            Key::Down | Key::Char('j') => {
-                self.handle_down();
-            }
-            Key::Home | Key::Char('g') => {
-                let old_cursor_position = self.cursor_position;
-
-                self.cursor_position = 0;
-
-                if self.cursor_position != old_cursor_position {
-                    self.pubsub_tx
-                        .send(PubSub::UpdateQuickView(self.get_selected_file()))
-                        .unwrap();
-                }
-            }
-            Key::End | Key::Char('G') => {
-                let old_cursor_position = self.cursor_position;
-
-                self.cursor_position = self.clamp_cursor(self.shown_file_list.len());
-
-                if self.cursor_position != old_cursor_position {
-                    self.pubsub_tx
-                        .send(PubSub::UpdateQuickView(self.get_selected_file()))
-                        .unwrap();
-                }
-            }
-            Key::PageUp | Key::Ctrl('b') => {
-                let rect_height = (self.rect.height as usize).saturating_sub(1);
-                let old_cursor_position = self.cursor_position;
-
-                self.cursor_position =
-                    self.clamp_cursor(self.cursor_position.saturating_sub(rect_height));
-
-                self.first_line = self.first_line.saturating_sub(rect_height);
-                self.clamp_first_line();
-
-                if self.cursor_position != old_cursor_position {
-                    self.pubsub_tx
-                        .send(PubSub::UpdateQuickView(self.get_selected_file()))
-                        .unwrap();
-                }
-            }
-            Key::PageDown | Key::Ctrl('f') => {
-                let rect_height = (self.rect.height as usize).saturating_sub(1);
-                let old_cursor_position = self.cursor_position;
-
-                self.cursor_position =
-                    self.clamp_cursor(self.cursor_position.saturating_add(rect_height));
-
-                self.first_line = self.first_line.saturating_add(rect_height);
-                self.clamp_first_line();
-
-                if self.cursor_position != old_cursor_position {
-                    self.pubsub_tx
-                        .send(PubSub::UpdateQuickView(self.get_selected_file()))
-                        .unwrap();
-                }
-            }
-            Key::Char('v') | Key::F(3) => {
-                if !self.shown_file_list.is_empty() {
-                    let entry = self.shown_file_list[self.cursor_position].clone();
-
-                    match entry.stat.is_dir() {
-                        true => self.chdir(&entry.file)?,
-                        false => self.pubsub_tx.send(PubSub::ViewFile(entry.file)).unwrap(),
+                                    Ok(())
+                                });
+                        }
+                        // TODO: Handle archives and regular files
                     }
                 }
-            }
-            Key::Insert | Key::Char(' ') => {
-                if !self.shown_file_list.is_empty() {
-                    let entry = &self.shown_file_list[self.cursor_position];
+                Key::Up | Key::Char('k') => {
+                    self.handle_up();
+                }
+                Key::Down | Key::Char('j') => {
+                    self.handle_down();
+                }
+                Key::Home | Key::Char('g') => {
+                    let old_cursor_position = self.cursor_position;
 
-                    if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
-                        self.tagged_files.swap_remove(i);
-                    } else {
-                        self.tagged_files.push(entry.clone());
+                    self.cursor_position = 0;
+
+                    if self.cursor_position != old_cursor_position {
+                        self.pubsub_tx
+                            .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                            .unwrap();
                     }
                 }
+                Key::End | Key::Char('G') => {
+                    let old_cursor_position = self.cursor_position;
 
-                self.handle_down();
-            }
-            Key::Char('t') => {
-                if !self.shown_file_list.is_empty() {
-                    let entry = &self.shown_file_list[self.cursor_position];
+                    self.cursor_position = self.clamp_cursor(self.shown_file_list.len());
 
-                    if !self.tagged_files.contains(entry) {
-                        self.tagged_files.push(entry.clone());
+                    if self.cursor_position != old_cursor_position {
+                        self.pubsub_tx
+                            .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                            .unwrap();
                     }
                 }
+                Key::PageUp | Key::Ctrl('b') => {
+                    let rect_height = (self.rect.height as usize).saturating_sub(1);
+                    let old_cursor_position = self.cursor_position;
 
-                self.handle_down();
-            }
-            Key::Char('u') => {
-                if !self.shown_file_list.is_empty() {
-                    let entry = &self.shown_file_list[self.cursor_position];
+                    self.cursor_position =
+                        self.clamp_cursor(self.cursor_position.saturating_sub(rect_height));
 
-                    if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
-                        self.tagged_files.swap_remove(i);
+                    self.first_line = self.first_line.saturating_sub(rect_height);
+                    self.clamp_first_line();
+
+                    if self.cursor_position != old_cursor_position {
+                        self.pubsub_tx
+                            .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                            .unwrap();
                     }
                 }
+                Key::PageDown | Key::Ctrl('f') => {
+                    let rect_height = (self.rect.height as usize).saturating_sub(1);
+                    let old_cursor_position = self.cursor_position;
 
-                self.handle_down();
-            }
-            Key::Char('*') => {
-                if !self.shown_file_list.is_empty() {
-                    for entry in self.shown_file_list.iter() {
+                    self.cursor_position =
+                        self.clamp_cursor(self.cursor_position.saturating_add(rect_height));
+
+                    self.first_line = self.first_line.saturating_add(rect_height);
+                    self.clamp_first_line();
+
+                    if self.cursor_position != old_cursor_position {
+                        self.pubsub_tx
+                            .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                            .unwrap();
+                    }
+                }
+                Key::Char('v') | Key::F(3) => {
+                    if !self.shown_file_list.is_empty() {
+                        let entry = self.shown_file_list[self.cursor_position].clone();
+
+                        match entry.stat.is_dir() {
+                            true => self.chdir(&entry.file)?,
+                            false => self.pubsub_tx.send(PubSub::ViewFile(entry.file)).unwrap(),
+                        }
+                    }
+                }
+                Key::Insert | Key::Char(' ') => {
+                    if !self.shown_file_list.is_empty() {
+                        let entry = &self.shown_file_list[self.cursor_position];
+
                         if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
                             self.tagged_files.swap_remove(i);
                         } else {
                             self.tagged_files.push(entry.clone());
                         }
                     }
+
+                    self.handle_down();
                 }
-            }
-            Key::Char('T') => {
-                if !self.shown_file_list.is_empty() {
-                    for entry in self.shown_file_list.iter() {
+                Key::Char('t') => {
+                    if !self.shown_file_list.is_empty() {
+                        let entry = &self.shown_file_list[self.cursor_position];
+
                         if !self.tagged_files.contains(entry) {
                             self.tagged_files.push(entry.clone());
                         }
                     }
+
+                    self.handle_down();
                 }
-            }
-            Key::Char('U') => {
-                if !self.shown_file_list.is_empty() {
-                    for entry in self.shown_file_list.iter() {
+                Key::Char('u') => {
+                    if !self.shown_file_list.is_empty() {
+                        let entry = &self.shown_file_list[self.cursor_position];
+
                         if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
                             self.tagged_files.swap_remove(i);
                         }
                     }
+
+                    self.handle_down();
                 }
+                Key::Char('*') => {
+                    if !self.shown_file_list.is_empty() {
+                        for entry in self.shown_file_list.iter() {
+                            if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
+                                self.tagged_files.swap_remove(i);
+                            } else {
+                                self.tagged_files.push(entry.clone());
+                            }
+                        }
+                    }
+                }
+                Key::Char('T') => {
+                    if !self.shown_file_list.is_empty() {
+                        for entry in self.shown_file_list.iter() {
+                            if !self.tagged_files.contains(entry) {
+                                self.tagged_files.push(entry.clone());
+                            }
+                        }
+                    }
+                }
+                Key::Char('U') => {
+                    if !self.shown_file_list.is_empty() {
+                        for entry in self.shown_file_list.iter() {
+                            if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
+                                self.tagged_files.swap_remove(i);
+                            }
+                        }
+                    }
+                }
+                _ => key_handled = false,
             }
-            _ => key_handled = false,
         }
 
         Ok(key_handled)
