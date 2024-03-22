@@ -115,7 +115,19 @@ impl App {
                 Event::Key(key) => {
                     let key_handled = match &mut self.dialog {
                         Some(dlg) => dlg.handle_key(key)?,
-                        None => self.panels[self.panel_focus_position].handle_key(key)?,
+                        None => {
+                            let mut key_handled = match &mut self.command_bar {
+                                Some(command_bar) => command_bar.handle_key(key)?,
+                                None => false,
+                            };
+
+                            if !key_handled {
+                                key_handled =
+                                    self.panels[self.panel_focus_position].handle_key(key)?;
+                            }
+
+                            key_handled
+                        }
                     };
 
                     if !key_handled {
@@ -138,6 +150,7 @@ impl App {
                             Key::Ctrl('c') => action = Action::CtrlC,
                             Key::Ctrl('l') => action = Action::Redraw,
                             Key::Ctrl('z') => action = Action::CtrlZ,
+                            Key::Ctrl('r') => self.pubsub_tx.send(PubSub::Reload).unwrap(),
                             Key::BackTab => {
                                 // This assumes that there are always 2 panels visible
                                 self.panel_focus_position ^= 1;
@@ -169,7 +182,7 @@ impl App {
 
                                 self.pubsub_tx
                                     .send(PubSub::ToggleQuickView(
-                                        self.panels[self.panel_focus_position].get_selected_file(),
+                                        self.panels[self.panel_focus_position].get_selected_entry(),
                                     ))
                                     .unwrap();
                             }

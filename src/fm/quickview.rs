@@ -1,4 +1,4 @@
-use std::{path::Path, rc::Rc};
+use std::rc::Rc;
 
 use anyhow::Result;
 use crossbeam_channel::Sender;
@@ -15,7 +15,10 @@ use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
-    fm::panel::{Panel, PanelComponent},
+    fm::{
+        entry::Entry,
+        panel::{Panel, PanelComponent},
+    },
     tilde_layout::tilde_layout,
     viewer::file_viewer::FileViewer,
 };
@@ -42,10 +45,11 @@ impl QuickView {
         })
     }
 
-    fn update_quickview(&mut self, filename: Option<&Path>) {
-        match (&self.enabled, filename) {
-            (true, Some(name)) => {
-                let file_name = name
+    fn update_quickview(&mut self, entry: Option<&Entry>) {
+        match (&self.enabled, entry) {
+            (true, Some(entry)) => {
+                let file_name = entry
+                    .file
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy()
@@ -54,9 +58,18 @@ impl QuickView {
                 if file_name != self.filename {
                     self.filename = file_name;
 
-                    self.viewer =
-                        FileViewer::new(&self.config, self.pubsub_tx.clone(), name, self.tabsize)
-                            .ok();
+                    // We use the quick viewer only for regular files and directories
+                    if entry.stat.is_file() || entry.stat.is_dir() {
+                        self.viewer = FileViewer::new(
+                            &self.config,
+                            self.pubsub_tx.clone(),
+                            &entry.file,
+                            self.tabsize,
+                        )
+                        .ok();
+                    } else {
+                        self.viewer = None;
+                    }
                 }
             }
             _ => {
@@ -81,14 +94,14 @@ impl Component for QuickView {
         }
 
         match event {
-            PubSub::ToggleQuickView(filename) => {
+            PubSub::ToggleQuickView(entry) => {
                 self.enabled = !self.enabled;
 
-                self.update_quickview(filename.as_deref());
+                self.update_quickview(entry.as_ref());
             }
-            PubSub::UpdateQuickView(filename) => {
+            PubSub::UpdateQuickView(entry) => {
                 if self.enabled {
-                    self.update_quickview(filename.as_deref());
+                    self.update_quickview(entry.as_ref());
                 }
             }
             _ => (),

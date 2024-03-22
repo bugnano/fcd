@@ -6,7 +6,7 @@ use std::{
 
 use atomicwrites::{AllowOverwrite, AtomicFile};
 
-const BOOKMARK_KEYS: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+pub const BOOKMARK_KEYS: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 #[derive(Debug)]
 pub struct Bookmarks {

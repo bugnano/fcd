@@ -8,7 +8,10 @@ use termion::{event::*, input::TermRead};
 use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
 
-use crate::viewer::{dlg_goto::GotoType, dlg_hex_search::HexSearch, dlg_text_search::TextSearch};
+use crate::{
+    fm::entry::{Entry, SortBy, SortOrder},
+    viewer::{dlg_goto::GotoType, dlg_hex_search::HexSearch, dlg_text_search::TextSearch},
+};
 
 #[derive(Debug, Clone)]
 pub enum Events {
@@ -51,10 +54,13 @@ pub enum PubSub {
 
     // File panel events
     ViewFile(PathBuf),
+    SortFiles(SortBy, SortOrder),
+    ToggleHidden,
+    Reload,
 
     // Quick view events
-    ToggleQuickView(Option<PathBuf>),
-    UpdateQuickView(Option<PathBuf>),
+    ToggleQuickView(Option<Entry>),
+    UpdateQuickView(Option<Entry>),
 }
 
 #[derive(Debug, Copy, Clone)]

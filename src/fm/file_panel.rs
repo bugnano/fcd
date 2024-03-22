@@ -25,7 +25,7 @@ use crate::{
     config::Config,
     fm::{
         app::human_readable_size,
-        bookmarks::Bookmarks,
+        bookmarks::{Bookmarks, BOOKMARK_KEYS},
         entry::{
             count_directories, filter_file_list, get_file_list, sort_by_function,
             style_from_palette, Entry, HiddenFiles, SortBy, SortOrder,
@@ -65,6 +65,8 @@ pub struct FilePanel {
     file_filter: String,
     sort_method: SortBy,
     sort_order: SortOrder,
+    selected_file: Option<PathBuf>,
+    last_focus: Focus,
 }
 
 impl FilePanel {
@@ -100,6 +102,8 @@ impl FilePanel {
             file_filter: String::from(""),
             sort_method: SortBy::Name,
             sort_order: SortOrder::Normal,
+            selected_file: None,
+            last_focus: Focus::Normal,
         };
 
         panel.file_list_thread();
@@ -117,20 +121,10 @@ impl FilePanel {
 
                     self.file_list = file_list;
 
-                    self.shown_file_list =
-                        filter_file_list(&self.file_list, self.hidden_files, &self.file_filter);
-
-                    self.shown_file_list
-                        .sort_by(|a, b| sort_by_function(self.sort_method)(a, b, self.sort_order));
+                    self.filter_and_sort_file_list(self.selected_file.clone().as_deref());
 
                     self.tagged_files
                         .retain(|entry| self.file_list.contains(entry));
-
-                    if !self.shown_file_list.is_empty() {
-                        self.pubsub_tx
-                            .send(PubSub::UpdateQuickView(self.get_selected_file()))
-                            .unwrap();
-                    }
                 }
             }
         }
@@ -203,7 +197,7 @@ impl FilePanel {
             self.cursor_position = 0;
             self.first_line = 0;
 
-            self.load_file_list()?;
+            self.load_file_list(Some(&self.old_cwd.clone()))?;
         }
 
         Ok(())
@@ -215,13 +209,45 @@ impl FilePanel {
         self.chdir(&old_cwd)
     }
 
-    fn load_file_list(&mut self) -> Result<()> {
+    fn load_file_list(&mut self, selected_file: Option<&Path>) -> Result<()> {
+        self.selected_file = selected_file.map(PathBuf::from);
         self.free = disk_usage(&self.cwd)?.free;
 
         self.is_loading = true;
         self.file_list_tx.send(self.cwd.clone())?;
 
         Ok(())
+    }
+
+    fn filter_and_sort_file_list(&mut self, selected_file: Option<&Path>) {
+        let offset_from_first = self.cursor_position.saturating_sub(self.first_line);
+
+        self.shown_file_list =
+            filter_file_list(&self.file_list, self.hidden_files, &self.file_filter);
+
+        self.shown_file_list
+            .sort_by(|a, b| sort_by_function(self.sort_method)(a, b, self.sort_order));
+
+        match selected_file {
+            Some(file) => match self
+                .shown_file_list
+                .iter()
+                .position(|entry| entry.file == file)
+            {
+                Some(i) => self.cursor_position = self.clamp_cursor(i),
+                None => self.cursor_position = 0,
+            },
+            None => self.cursor_position = 0,
+        }
+
+        self.first_line = self.cursor_position.saturating_sub(offset_from_first);
+        self.clamp_first_line();
+
+        if let Focus::Focused = self.last_focus {
+            self.pubsub_tx
+                .send(PubSub::UpdateQuickView(self.get_selected_entry()))
+                .unwrap();
+        }
     }
 
     fn clamp_cursor(&self, new_cursor_pos: usize) -> usize {
@@ -244,7 +270,7 @@ impl FilePanel {
 
         if self.cursor_position != old_cursor_position {
             self.pubsub_tx
-                .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                .send(PubSub::UpdateQuickView(self.get_selected_entry()))
                 .unwrap();
         }
     }
@@ -256,7 +282,7 @@ impl FilePanel {
 
         if self.cursor_position != old_cursor_position {
             self.pubsub_tx
-                .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                .send(PubSub::UpdateQuickView(self.get_selected_entry()))
                 .unwrap();
         }
     }
@@ -271,7 +297,7 @@ impl Component for FilePanel {
                 ('`', Key::Char('\'')) | ('`', Key::Char('`')) => {
                     self.chdir_old_cwd()?;
                 }
-                ('`', Key::Char(c)) => {
+                ('`', Key::Char(c)) if BOOKMARK_KEYS.contains(*c) => {
                     let bookmark =
                         self.bookmarks
                             .borrow()
@@ -285,7 +311,49 @@ impl Component for FilePanel {
                         self.chdir(&cwd)?;
                     }
                 }
-                ('m', Key::Char(c)) => self.bookmarks.borrow_mut().insert(*c, &self.cwd),
+                ('m', Key::Char(c)) if BOOKMARK_KEYS.contains(*c) => {
+                    self.bookmarks.borrow_mut().insert(*c, &self.cwd)
+                }
+                ('s', Key::Char('n')) => {
+                    self.pubsub_tx
+                        .send(PubSub::SortFiles(SortBy::Name, SortOrder::Normal))
+                        .unwrap();
+                }
+                ('s', Key::Char('N')) => {
+                    self.pubsub_tx
+                        .send(PubSub::SortFiles(SortBy::Name, SortOrder::Reverse))
+                        .unwrap();
+                }
+                ('s', Key::Char('e')) => {
+                    self.pubsub_tx
+                        .send(PubSub::SortFiles(SortBy::Extension, SortOrder::Normal))
+                        .unwrap();
+                }
+                ('s', Key::Char('E')) => {
+                    self.pubsub_tx
+                        .send(PubSub::SortFiles(SortBy::Extension, SortOrder::Reverse))
+                        .unwrap();
+                }
+                ('s', Key::Char('d')) => {
+                    self.pubsub_tx
+                        .send(PubSub::SortFiles(SortBy::Date, SortOrder::Normal))
+                        .unwrap();
+                }
+                ('s', Key::Char('D')) => {
+                    self.pubsub_tx
+                        .send(PubSub::SortFiles(SortBy::Date, SortOrder::Reverse))
+                        .unwrap();
+                }
+                ('s', Key::Char('s')) => {
+                    self.pubsub_tx
+                        .send(PubSub::SortFiles(SortBy::Size, SortOrder::Normal))
+                        .unwrap();
+                }
+                ('s', Key::Char('S')) => {
+                    self.pubsub_tx
+                        .send(PubSub::SortFiles(SortBy::Size, SortOrder::Reverse))
+                        .unwrap();
+                }
                 _ => key_handled = false,
             }
 
@@ -301,6 +369,10 @@ impl Component for FilePanel {
                 Key::Char('m') => {
                     // TODO: Cannot bookmark inside an archive
                     self.leader = Some('m');
+                    self.pubsub_tx.send(PubSub::Leader(self.leader)).unwrap();
+                }
+                Key::Char('s') => {
+                    self.leader = Some('s');
                     self.pubsub_tx.send(PubSub::Leader(self.leader)).unwrap();
                 }
                 Key::Left | Key::Char('h') => {
@@ -366,7 +438,7 @@ impl Component for FilePanel {
 
                                                     self.pubsub_tx
                                                         .send(PubSub::UpdateQuickView(
-                                                            self.get_selected_file(),
+                                                            self.get_selected_entry(),
                                                         ))
                                                         .unwrap();
                                                 }
@@ -393,7 +465,7 @@ impl Component for FilePanel {
 
                     if self.cursor_position != old_cursor_position {
                         self.pubsub_tx
-                            .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                            .send(PubSub::UpdateQuickView(self.get_selected_entry()))
                             .unwrap();
                     }
                 }
@@ -404,7 +476,7 @@ impl Component for FilePanel {
 
                     if self.cursor_position != old_cursor_position {
                         self.pubsub_tx
-                            .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                            .send(PubSub::UpdateQuickView(self.get_selected_entry()))
                             .unwrap();
                     }
                 }
@@ -420,7 +492,7 @@ impl Component for FilePanel {
 
                     if self.cursor_position != old_cursor_position {
                         self.pubsub_tx
-                            .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                            .send(PubSub::UpdateQuickView(self.get_selected_entry()))
                             .unwrap();
                     }
                 }
@@ -436,7 +508,7 @@ impl Component for FilePanel {
 
                     if self.cursor_position != old_cursor_position {
                         self.pubsub_tx
-                            .send(PubSub::UpdateQuickView(self.get_selected_file()))
+                            .send(PubSub::UpdateQuickView(self.get_selected_entry()))
                             .unwrap();
                     }
                 }
@@ -514,6 +586,7 @@ impl Component for FilePanel {
                         }
                     }
                 }
+                Key::Backspace => self.pubsub_tx.send(PubSub::ToggleHidden).unwrap(),
                 _ => key_handled = false,
             }
         }
@@ -524,6 +597,36 @@ impl Component for FilePanel {
     fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
         match event {
             PubSub::ComponentThreadEvent => self.handle_component_pubsub()?,
+            PubSub::SortFiles(sort_method, sort_order) => {
+                self.sort_method = *sort_method;
+                self.sort_order = *sort_order;
+
+                self.filter_and_sort_file_list(self.get_selected_file().as_deref());
+            }
+            PubSub::ToggleHidden => {
+                let hidden_files = self.hidden_files;
+
+                self.hidden_files = match hidden_files {
+                    HiddenFiles::Show => HiddenFiles::Hide,
+                    HiddenFiles::Hide => HiddenFiles::Show,
+                };
+
+                self.filter_and_sort_file_list(self.get_selected_file().as_deref());
+            }
+            PubSub::Reload => {
+                let new_cwd = self
+                    .cwd
+                    .ancestors()
+                    .find(|d| read_dir(d).is_ok())
+                    .ok_or_else(|| anyhow!("failed to change directory"))?
+                    .to_path_buf();
+
+                if new_cwd != self.cwd {
+                    self.chdir(&new_cwd)?;
+                } else {
+                    self.load_file_list(self.get_selected_file().as_deref())?;
+                }
+            }
             _ => (),
         }
 
@@ -531,6 +634,8 @@ impl Component for FilePanel {
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {
+        self.last_focus = focus;
+
         let middle_border_set = symbols::border::Set {
             top_left: symbols::line::NORMAL.vertical_right,
             top_right: symbols::line::NORMAL.vertical_left,
@@ -742,6 +847,13 @@ impl Panel for FilePanel {
         match self.shown_file_list.is_empty() {
             true => None,
             false => Some(self.shown_file_list[self.cursor_position].file.clone()),
+        }
+    }
+
+    fn get_selected_entry(&self) -> Option<Entry> {
+        match self.shown_file_list.is_empty() {
+            true => None,
+            false => Some(self.shown_file_list[self.cursor_position].clone()),
         }
     }
 

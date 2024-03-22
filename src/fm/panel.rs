@@ -1,9 +1,13 @@
 use std::{fmt, path::PathBuf};
 
-use crate::component::Component;
+use crate::{component::Component, fm::entry::Entry};
 
 pub trait Panel {
     fn get_selected_file(&self) -> Option<PathBuf> {
+        None
+    }
+
+    fn get_selected_entry(&self) -> Option<Entry> {
         None
     }
 
