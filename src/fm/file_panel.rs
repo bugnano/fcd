@@ -24,7 +24,7 @@ use crate::{
     component::{Component, Focus},
     config::Config,
     fm::{
-        app::human_readable_size,
+        app::{human_readable_size, LABELS},
         bookmarks::{Bookmarks, BOOKMARK_KEYS},
         entry::{
             count_directories, filter_file_list, get_file_list, sort_by_function,
@@ -66,7 +66,7 @@ pub struct FilePanel {
     sort_method: SortBy,
     sort_order: SortOrder,
     selected_file: Option<PathBuf>,
-    last_focus: Focus,
+    focus: Focus,
 }
 
 impl FilePanel {
@@ -75,6 +75,7 @@ impl FilePanel {
         bookmarks: &Rc<RefCell<Bookmarks>>,
         pubsub_tx: Sender<PubSub>,
         initial_path: &Path,
+        focus: Focus,
     ) -> Result<FilePanel> {
         let (component_pubsub_tx, component_pubsub_rx) = crossbeam_channel::unbounded();
         let (file_list_tx, file_list_rx) = crossbeam_channel::unbounded();
@@ -103,7 +104,7 @@ impl FilePanel {
             sort_method: SortBy::Name,
             sort_order: SortOrder::Normal,
             selected_file: None,
-            last_focus: Focus::Normal,
+            focus,
         };
 
         panel.file_list_thread();
@@ -209,6 +210,13 @@ impl FilePanel {
         self.chdir(&old_cwd)
     }
 
+    fn get_selected_file(&self) -> Option<PathBuf> {
+        match self.shown_file_list.is_empty() {
+            true => None,
+            false => Some(self.shown_file_list[self.cursor_position].file.clone()),
+        }
+    }
+
     fn load_file_list(&mut self, selected_file: Option<&Path>) -> Result<()> {
         self.selected_file = selected_file.map(PathBuf::from);
         self.free = disk_usage(&self.cwd)?.free;
@@ -243,9 +251,9 @@ impl FilePanel {
         self.first_line = self.cursor_position.saturating_sub(offset_from_first);
         self.clamp_first_line();
 
-        if let Focus::Focused = self.last_focus {
+        if let Focus::Focused = self.focus {
             self.pubsub_tx
-                .send(PubSub::UpdateQuickView(self.get_selected_entry()))
+                .send(PubSub::SelectedEntry(self.get_selected_entry()))
                 .unwrap();
         }
     }
@@ -270,7 +278,7 @@ impl FilePanel {
 
         if self.cursor_position != old_cursor_position {
             self.pubsub_tx
-                .send(PubSub::UpdateQuickView(self.get_selected_entry()))
+                .send(PubSub::SelectedEntry(self.get_selected_entry()))
                 .unwrap();
         }
     }
@@ -282,7 +290,7 @@ impl FilePanel {
 
         if self.cursor_position != old_cursor_position {
             self.pubsub_tx
-                .send(PubSub::UpdateQuickView(self.get_selected_entry()))
+                .send(PubSub::SelectedEntry(self.get_selected_entry()))
                 .unwrap();
         }
     }
@@ -437,7 +445,7 @@ impl Component for FilePanel {
                                                     self.clamp_first_line();
 
                                                     self.pubsub_tx
-                                                        .send(PubSub::UpdateQuickView(
+                                                        .send(PubSub::SelectedEntry(
                                                             self.get_selected_entry(),
                                                         ))
                                                         .unwrap();
@@ -465,7 +473,7 @@ impl Component for FilePanel {
 
                     if self.cursor_position != old_cursor_position {
                         self.pubsub_tx
-                            .send(PubSub::UpdateQuickView(self.get_selected_entry()))
+                            .send(PubSub::SelectedEntry(self.get_selected_entry()))
                             .unwrap();
                     }
                 }
@@ -476,7 +484,7 @@ impl Component for FilePanel {
 
                     if self.cursor_position != old_cursor_position {
                         self.pubsub_tx
-                            .send(PubSub::UpdateQuickView(self.get_selected_entry()))
+                            .send(PubSub::SelectedEntry(self.get_selected_entry()))
                             .unwrap();
                     }
                 }
@@ -492,7 +500,7 @@ impl Component for FilePanel {
 
                     if self.cursor_position != old_cursor_position {
                         self.pubsub_tx
-                            .send(PubSub::UpdateQuickView(self.get_selected_entry()))
+                            .send(PubSub::SelectedEntry(self.get_selected_entry()))
                             .unwrap();
                     }
                 }
@@ -508,7 +516,7 @@ impl Component for FilePanel {
 
                     if self.cursor_position != old_cursor_position {
                         self.pubsub_tx
-                            .send(PubSub::UpdateQuickView(self.get_selected_entry()))
+                            .send(PubSub::SelectedEntry(self.get_selected_entry()))
                             .unwrap();
                     }
                 }
@@ -634,8 +642,6 @@ impl Component for FilePanel {
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {
-        self.last_focus = focus;
-
         let middle_border_set = symbols::border::Set {
             top_left: symbols::line::NORMAL.vertical_right,
             top_right: symbols::line::NORMAL.vertical_left,
@@ -843,10 +849,15 @@ impl Component for FilePanel {
 }
 
 impl Panel for FilePanel {
-    fn get_selected_file(&self) -> Option<PathBuf> {
-        match self.shown_file_list.is_empty() {
-            true => None,
-            false => Some(self.shown_file_list[self.cursor_position].file.clone()),
+    fn change_focus(&mut self, focus: Focus) {
+        self.focus = focus;
+
+        if let Focus::Focused = focus {
+            self.pubsub_tx
+                .send(PubSub::ButtonLabels(
+                    LABELS.iter().map(|&label| String::from(label)).collect(),
+                ))
+                .unwrap();
         }
     }
 

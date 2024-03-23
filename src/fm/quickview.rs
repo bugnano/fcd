@@ -20,7 +20,7 @@ use crate::{
         panel::{Panel, PanelComponent},
     },
     tilde_layout::tilde_layout,
-    viewer::file_viewer::FileViewer,
+    viewer::{app::LABELS, file_viewer::FileViewer},
 };
 
 #[derive(Debug)]
@@ -34,7 +34,12 @@ pub struct QuickView {
 }
 
 impl QuickView {
-    pub fn new(config: &Rc<Config>, pubsub_tx: Sender<PubSub>, tabsize: u8) -> Result<QuickView> {
+    pub fn new(
+        config: &Rc<Config>,
+        pubsub_tx: Sender<PubSub>,
+        tabsize: u8,
+        _focus: Focus,
+    ) -> Result<QuickView> {
         Ok(QuickView {
             config: Rc::clone(config),
             pubsub_tx,
@@ -99,7 +104,7 @@ impl Component for QuickView {
 
                 self.update_quickview(entry.as_ref());
             }
-            PubSub::UpdateQuickView(entry) => {
+            PubSub::SelectedEntry(entry) => {
                 if self.enabled {
                     self.update_quickview(entry.as_ref());
                 }
@@ -154,5 +159,16 @@ impl Component for QuickView {
     }
 }
 
-impl Panel for QuickView {}
+impl Panel for QuickView {
+    fn change_focus(&mut self, focus: Focus) {
+        if let Focus::Focused = focus {
+            self.pubsub_tx
+                .send(PubSub::ButtonLabels(
+                    LABELS.iter().map(|&label| String::from(label)).collect(),
+                ))
+                .unwrap();
+        }
+    }
+}
+
 impl PanelComponent for QuickView {}

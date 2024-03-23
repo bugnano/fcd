@@ -29,6 +29,9 @@ pub enum PubSub {
     ComponentThreadEvent,
     Leader(Option<char>),
 
+    // Button bar events
+    ButtonLabels(Vec<String>),
+
     // File viewer events
     FileInfo(String, String, String),
     ToggleHex,
@@ -53,6 +56,7 @@ pub enum PubSub {
     HexSearch(HexSearch),
 
     // File panel events
+    SelectedEntry(Option<Entry>),
     ViewFile(PathBuf),
     SortFiles(SortBy, SortOrder),
     ToggleHidden,
@@ -60,7 +64,6 @@ pub enum PubSub {
 
     // Quick view events
     ToggleQuickView(Option<Entry>),
-    UpdateQuickView(Option<Entry>),
 }
 
 #[derive(Debug, Copy, Clone)]

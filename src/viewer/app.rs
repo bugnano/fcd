@@ -19,7 +19,7 @@ use crate::{
     },
 };
 
-const LABELS: &[&str] = &[
+pub const LABELS: &[&str] = &[
     " ",      //
     "UnWrap", //
     "Quit",   //

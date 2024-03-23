@@ -4,6 +4,7 @@ use anyhow::Result;
 use ratatui::{prelude::*, widgets::*};
 
 use crate::{
+    app::PubSub,
     component::{Component, Focus},
     config::Config,
 };
@@ -30,6 +31,15 @@ impl ButtonBar {
 }
 
 impl Component for ButtonBar {
+    fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
+        match event {
+            PubSub::ButtonLabels(labels) => self.labels = labels.clone(),
+            _ => (),
+        }
+
+        Ok(())
+    }
+
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
         let label_width =
             (chunk.width.saturating_sub(2 * self.labels.len() as u16)) / (self.labels.len() as u16);

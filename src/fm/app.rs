@@ -32,7 +32,7 @@ use crate::{
     },
 };
 
-const LABELS: &[&str] = &[
+pub const LABELS: &[&str] = &[
     " ",      //
     " ",      //
     "View",   //
@@ -87,14 +87,21 @@ impl App {
                     bookmarks,
                     pubsub_tx.clone(),
                     &initial_path,
+                    Focus::Focused,
                 )?),
                 Box::new(FilePanel::new(
                     config,
                     bookmarks,
                     pubsub_tx.clone(),
                     &initial_path,
+                    Focus::Normal,
                 )?),
-                Box::new(QuickView::new(config, pubsub_tx.clone(), tabsize)?),
+                Box::new(QuickView::new(
+                    config,
+                    pubsub_tx.clone(),
+                    tabsize,
+                    Focus::Normal,
+                )?),
             ],
             command_bar: None,
             button_bar: ButtonBar::new(config, LABELS)?,
@@ -152,12 +159,20 @@ impl App {
                             Key::Ctrl('z') => action = Action::CtrlZ,
                             Key::Ctrl('r') => self.pubsub_tx.send(PubSub::Reload).unwrap(),
                             Key::BackTab => {
+                                self.panels[self.panel_focus_position].change_focus(Focus::Normal);
+
                                 // This assumes that there are always 2 panels visible
                                 self.panel_focus_position ^= 1;
+
+                                self.panels[self.panel_focus_position].change_focus(Focus::Focused);
                             }
                             Key::Char('\t') => {
+                                self.panels[self.panel_focus_position].change_focus(Focus::Normal);
+
                                 // This assumes that there are always 2 panels visible
                                 self.panel_focus_position ^= 1;
+
+                                self.panels[self.panel_focus_position].change_focus(Focus::Focused);
                             }
                             Key::Ctrl('u') => {
                                 // This assumes that there are always 2 panels visible
@@ -171,9 +186,21 @@ impl App {
                             Key::Alt('q') => {
                                 // This assumes that there are always 2 panels visible
                                 if self.quickviewer_position < 2 {
+                                    let quickviewer_position = self.quickviewer_position;
+
+                                    if self.panel_focus_position == quickviewer_position {
+                                        self.panels[self.panel_focus_position]
+                                            .change_focus(Focus::Normal);
+                                    }
+
                                     self.panels.swap(self.quickviewer_position, 2);
 
                                     self.quickviewer_position = 2;
+
+                                    if self.panel_focus_position == quickviewer_position {
+                                        self.panels[self.panel_focus_position]
+                                            .change_focus(Focus::Focused);
+                                    }
                                 } else {
                                     self.quickviewer_position = self.panel_focus_position ^ 1;
 
