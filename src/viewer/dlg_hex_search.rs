@@ -51,6 +51,8 @@ impl DlgHexSearch {
                 &Style::default()
                     .fg(config.dialog.input_fg)
                     .bg(config.dialog.input_bg),
+                "",
+                0,
             )?,
             check_boxes: vec![
                 CheckBox::new(

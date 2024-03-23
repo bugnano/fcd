@@ -15,19 +15,17 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn new(style: &Style) -> Result<Input> {
-        Ok(Input {
-            input: String::new(),
+    pub fn new(style: &Style, input: &str, cursor_position: usize) -> Result<Input> {
+        let mut widget = Input {
+            input: String::from(input),
             style: *style,
             cursor_position: 0,
             scroll_offset: 0,
-        })
-    }
+        };
 
-    pub fn reset(&mut self) {
-        self.input = String::new();
-        self.cursor_position = 0;
-        self.scroll_offset = 0;
+        widget.cursor_position = widget.clamp_cursor(cursor_position);
+
+        Ok(widget)
     }
 
     pub fn value(&mut self) -> String {
@@ -88,7 +86,7 @@ impl Component for Input {
         let mut key_handled = true;
 
         match key {
-            Key::Char('\t') | Key::Char('\n') => key_handled = false,
+            Key::BackTab | Key::Char('\t') | Key::Char('\n') => key_handled = false,
             Key::Char(c) => self.enter_char(*c),
             Key::Left => self.move_cursor_left(),
             Key::Right => self.move_cursor_right(),

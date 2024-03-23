@@ -24,8 +24,11 @@ use crate::{
     config::Config,
     dlg_error::{DialogType, DlgError},
     fm::{
-        bookmarks::Bookmarks, command_bar::leader::Leader, file_panel::FilePanel,
-        panel::PanelComponent, quickview::QuickView,
+        bookmarks::Bookmarks,
+        command_bar::{filter::Filter, leader::Leader},
+        file_panel::FilePanel,
+        panel::PanelComponent,
+        quickview::QuickView,
     },
     viewer::{
         self, dlg_goto::DlgGoto, dlg_hex_search::DlgHexSearch, dlg_text_search::DlgTextSearch,
@@ -158,6 +161,7 @@ impl App {
                             Key::Ctrl('l') => action = Action::Redraw,
                             Key::Ctrl('z') => action = Action::CtrlZ,
                             Key::Ctrl('r') => self.pubsub_tx.send(PubSub::Reload).unwrap(),
+                            Key::Esc => self.pubsub_tx.send(PubSub::Esc).unwrap(),
                             Key::BackTab => {
                                 self.panels[self.panel_focus_position].change_focus(Focus::Normal);
 
@@ -290,6 +294,7 @@ impl App {
                 action = Action::NextLoop;
             }
             PubSub::CloseDialog => self.dialog = None,
+            PubSub::Esc => self.command_bar = None,
             PubSub::DlgGoto(goto_type) => {
                 self.dialog = Some(Box::new(DlgGoto::new(
                     &self.config,
@@ -317,11 +322,19 @@ impl App {
                     self.fg_app = Some(Box::new(app));
                 }
             }
+            PubSub::CloseCommandBar => self.command_bar = None,
             PubSub::Leader(leader) => {
                 self.command_bar = match leader {
                     Some(c) => Some(Box::new(Leader::new(&self.config, *c)?)),
                     None => None,
                 }
+            }
+            PubSub::FilterFiles(filter) => {
+                self.command_bar = Some(Box::new(Filter::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    filter,
+                )?));
             }
             _ => (),
         }

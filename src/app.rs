@@ -27,7 +27,7 @@ pub enum PubSub {
     Info(String, String),
     CloseDialog,
     ComponentThreadEvent,
-    Leader(Option<char>),
+    Esc,
 
     // Button bar events
     ButtonLabels(Vec<String>),
@@ -58,12 +58,18 @@ pub enum PubSub {
     // File panel events
     SelectedEntry(Option<Entry>),
     ViewFile(PathBuf),
+    Leader(Option<char>),
     SortFiles(SortBy, SortOrder),
     ToggleHidden,
     Reload,
+    FilterFiles(String),
 
     // Quick view events
     ToggleQuickView(Option<Entry>),
+
+    // Command bar events
+    CloseCommandBar,
+    FileFilter(String),
 }
 
 #[derive(Debug, Copy, Clone)]

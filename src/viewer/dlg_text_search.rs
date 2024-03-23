@@ -62,6 +62,8 @@ impl DlgTextSearch {
                 &Style::default()
                     .fg(config.dialog.input_fg)
                     .bg(config.dialog.input_bg),
+                "",
+                0,
             )?,
             radio: RadioBox::new(
                 ["Normal", "Regular expression", "Wildcard search"],

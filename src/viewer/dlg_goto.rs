@@ -52,6 +52,8 @@ impl DlgGoto {
                 &Style::default()
                     .fg(config.dialog.input_fg)
                     .bg(config.dialog.input_bg),
+                "",
+                0,
             )?,
             btn_ok: Button::new(
                 "OK",

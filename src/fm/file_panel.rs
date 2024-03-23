@@ -17,6 +17,7 @@ use ratatui::{
 };
 use termion::event::*;
 
+use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
@@ -126,6 +127,12 @@ impl FilePanel {
 
                     self.tagged_files
                         .retain(|entry| self.file_list.contains(entry));
+
+                    if let Focus::Focused = self.focus {
+                        self.pubsub_tx
+                            .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                            .unwrap();
+                    }
                 }
             }
         }
@@ -250,12 +257,6 @@ impl FilePanel {
 
         self.first_line = self.cursor_position.saturating_sub(offset_from_first);
         self.clamp_first_line();
-
-        if let Focus::Focused = self.focus {
-            self.pubsub_tx
-                .send(PubSub::SelectedEntry(self.get_selected_entry()))
-                .unwrap();
-        }
     }
 
     fn clamp_cursor(&self, new_cursor_pos: usize) -> usize {
@@ -595,6 +596,11 @@ impl Component for FilePanel {
                     }
                 }
                 Key::Backspace => self.pubsub_tx.send(PubSub::ToggleHidden).unwrap(),
+                Key::Char('f') | Key::Char('/') => {
+                    self.pubsub_tx
+                        .send(PubSub::FilterFiles(self.file_filter.clone()))
+                        .unwrap();
+                }
                 _ => key_handled = false,
             }
         }
@@ -605,11 +611,74 @@ impl Component for FilePanel {
     fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
         match event {
             PubSub::ComponentThreadEvent => self.handle_component_pubsub()?,
+            PubSub::Esc => {
+                self.leader = None;
+
+                if !self.file_filter.is_empty() {
+                    self.file_filter.clear();
+
+                    self.filter_and_sort_file_list(self.get_selected_file().as_deref());
+
+                    if let Focus::Focused = self.focus {
+                        self.pubsub_tx
+                            .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                            .unwrap();
+                    }
+                }
+            }
             PubSub::SortFiles(sort_method, sort_order) => {
                 self.sort_method = *sort_method;
                 self.sort_order = *sort_order;
 
                 self.filter_and_sort_file_list(self.get_selected_file().as_deref());
+
+                if let Focus::Focused = self.focus {
+                    self.pubsub_tx
+                        .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                        .unwrap();
+                }
+            }
+            PubSub::FileFilter(filter) => {
+                if let Focus::Focused = self.focus {
+                    if filter != &self.file_filter {
+                        self.file_filter = filter.clone();
+
+                        self.filter_and_sort_file_list(self.get_selected_file().as_deref());
+
+                        if !self.shown_file_list.is_empty() {
+                            let matcher = SkimMatcherV2::default();
+
+                            let scores: Vec<i64> = self
+                                .shown_file_list
+                                .iter()
+                                .map(|entry| {
+                                    matcher.fuzzy_match(&entry.key, filter).unwrap_or(i64::MIN)
+                                })
+                                .collect();
+
+                            let new_cursor_position = self.clamp_cursor(
+                                scores
+                                    .iter()
+                                    .enumerate()
+                                    .max_by_key(|(_i, &score)| score)
+                                    .map(|(i, _score)| i)
+                                    .unwrap_or_default(),
+                            );
+
+                            if new_cursor_position != self.cursor_position
+                                && scores[new_cursor_position] > scores[self.cursor_position]
+                            {
+                                self.cursor_position = new_cursor_position;
+                            }
+                        }
+
+                        if let Focus::Focused = self.focus {
+                            self.pubsub_tx
+                                .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                                .unwrap();
+                        }
+                    }
+                }
             }
             PubSub::ToggleHidden => {
                 let hidden_files = self.hidden_files;
@@ -620,6 +689,12 @@ impl Component for FilePanel {
                 };
 
                 self.filter_and_sort_file_list(self.get_selected_file().as_deref());
+
+                if let Focus::Focused = self.focus {
+                    self.pubsub_tx
+                        .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                        .unwrap();
+                }
             }
             PubSub::Reload => {
                 let new_cwd = self
