@@ -573,6 +573,7 @@ impl Component for FilePanel {
                         }
                     }
                 }
+                Key::Ctrl('r') => self.pubsub_tx.send(PubSub::Reload).unwrap(),
                 Key::Backspace => self.pubsub_tx.send(PubSub::ToggleHidden).unwrap(),
                 Key::Char('f') | Key::Char('/') => {
                     self.pubsub_tx

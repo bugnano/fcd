@@ -161,7 +161,6 @@ impl App {
                             Key::Ctrl('c') => action = Action::CtrlC,
                             Key::Ctrl('l') => action = Action::Redraw,
                             Key::Ctrl('z') => action = Action::CtrlZ,
-                            Key::Ctrl('r') => self.pubsub_tx.send(PubSub::Reload).unwrap(),
                             Key::Esc => self.pubsub_tx.send(PubSub::Esc).unwrap(),
                             Key::BackTab => {
                                 self.panels[self.panel_focus_position].change_focus(Focus::Normal);
