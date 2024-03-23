@@ -189,28 +189,6 @@ impl FilePanel {
         });
     }
 
-    fn chdir(&mut self, cwd: &Path) -> Result<()> {
-        let new_cwd = cwd
-            .ancestors()
-            .find(|d| read_dir(d).is_ok())
-            .ok_or_else(|| anyhow!("failed to change directory"))?
-            .to_path_buf();
-
-        if new_cwd != self.cwd {
-            self.old_cwd = self.cwd.clone();
-            self.cwd = new_cwd;
-
-            self.file_filter.clear();
-            self.tagged_files.clear();
-            self.cursor_position = 0;
-            self.first_line = 0;
-
-            self.load_file_list(Some(&self.old_cwd.clone()))?;
-        }
-
-        Ok(())
-    }
-
     fn chdir_old_cwd(&mut self) -> Result<()> {
         let old_cwd = self.old_cwd.clone();
 
@@ -945,6 +923,28 @@ impl Panel for FilePanel {
 
     fn get_cwd(&self) -> Option<PathBuf> {
         Some(self.cwd.clone())
+    }
+
+    fn chdir(&mut self, cwd: &Path) -> Result<()> {
+        let new_cwd = cwd
+            .ancestors()
+            .find(|d| read_dir(d).is_ok())
+            .ok_or_else(|| anyhow!("failed to change directory"))?
+            .to_path_buf();
+
+        if new_cwd != self.cwd {
+            self.old_cwd = self.cwd.clone();
+            self.cwd = new_cwd;
+
+            self.file_filter.clear();
+            self.tagged_files.clear();
+            self.cursor_position = 0;
+            self.first_line = 0;
+
+            self.load_file_list(Some(&self.old_cwd.clone()))?;
+        }
+
+        Ok(())
     }
 }
 

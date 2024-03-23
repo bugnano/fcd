@@ -145,6 +145,7 @@ impl App {
                             Key::Char('q') | Key::Char('Q') | Key::F(10) => {
                                 action = Action::Quit;
 
+                                // This assumes that there are always 2 panels visible
                                 let cwd = if self.panel_focus_position == self.quickviewer_position
                                 {
                                     self.panels[self.panel_focus_position ^ 1].get_cwd()
@@ -216,6 +217,40 @@ impl App {
                                         self.panels[self.panel_focus_position].get_selected_entry(),
                                     ))
                                     .unwrap();
+                            }
+                            Key::Alt('i') => {
+                                // This assumes that there are always 2 panels visible
+                                let other_panel = match self.quickviewer_position {
+                                    2 => self.panel_focus_position ^ 1,
+                                    _ => 2,
+                                };
+
+                                if let Some(cwd) = self.panels[self.panel_focus_position].get_cwd()
+                                {
+                                    self.panels[other_panel].chdir(&cwd)?;
+                                }
+                            }
+                            Key::Alt('o') => {
+                                // This assumes that there are always 2 panels visible
+                                let other_panel = match self.quickviewer_position {
+                                    2 => self.panel_focus_position ^ 1,
+                                    _ => 2,
+                                };
+
+                                if let Some(cwd) = self.panels[self.panel_focus_position].get_cwd()
+                                {
+                                    let target_cwd = match self.panels[self.panel_focus_position]
+                                        .get_selected_entry()
+                                    {
+                                        Some(entry) => match entry.stat.is_dir() {
+                                            true => entry.file,
+                                            false => PathBuf::from(cwd.parent().unwrap_or(&cwd)),
+                                        },
+                                        None => PathBuf::from(cwd.parent().unwrap_or(&cwd)),
+                                    };
+
+                                    self.panels[other_panel].chdir(&target_cwd)?;
+                                }
                             }
                             _ => log::debug!("{:?}", key),
                         }

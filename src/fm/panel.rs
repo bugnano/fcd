@@ -1,4 +1,9 @@
-use std::{fmt, path::PathBuf};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+};
+
+use anyhow::Result;
 
 use crate::{
     component::{Component, Focus},
@@ -14,6 +19,10 @@ pub trait Panel {
 
     fn get_cwd(&self) -> Option<PathBuf> {
         None
+    }
+
+    fn chdir(&mut self, _cwd: &Path) -> Result<()> {
+        Ok(())
     }
 }
 
