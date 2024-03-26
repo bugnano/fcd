@@ -1,4 +1,3 @@
-use anyhow::Result;
 use ratatui::{prelude::*, widgets::*};
 
 use unicode_width::UnicodeWidthStr;
@@ -14,18 +13,13 @@ pub struct Button {
 }
 
 impl Button {
-    pub fn new(
-        label: &str,
-        style: &Style,
-        focused_style: &Style,
-        active_style: &Style,
-    ) -> Result<Button> {
-        Ok(Button {
+    pub fn new(label: &str, style: &Style, focused_style: &Style, active_style: &Style) -> Button {
+        Button {
             label: String::from(label),
             style: *style,
             focused_style: *focused_style,
             active_style: *active_style,
-        })
+        }
     }
 
     pub fn width(&self) -> usize {

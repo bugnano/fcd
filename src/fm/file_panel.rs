@@ -6,7 +6,7 @@ use std::{
     thread,
 };
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail};
 use crossbeam_channel::{Receiver, Sender};
 use ratatui::{
     prelude::*,
@@ -79,7 +79,7 @@ impl FilePanel {
         pubsub_tx: Sender<PubSub>,
         initial_path: &Path,
         focus: Focus,
-    ) -> Result<FilePanel> {
+    ) -> FilePanel {
         let (component_pubsub_tx, component_pubsub_rx) = crossbeam_channel::unbounded();
         let (file_list_tx, file_list_rx) = crossbeam_channel::unbounded();
 
@@ -111,13 +111,13 @@ impl FilePanel {
         };
 
         panel.file_list_thread();
-        panel.chdir(initial_path)?;
+        panel.chdir(initial_path);
         panel.old_cwd = panel.cwd.clone();
 
-        Ok(panel)
+        panel
     }
 
-    fn handle_component_pubsub(&mut self) -> Result<()> {
+    fn handle_component_pubsub(&mut self) {
         if let Ok(event) = self.component_pubsub_rx.try_recv() {
             match event {
                 ComponentPubSub::FileList(file_list) => {
@@ -138,8 +138,6 @@ impl FilePanel {
                 }
             }
         }
-
-        Ok(())
     }
 
     fn file_list_thread(&mut self) {
@@ -191,7 +189,7 @@ impl FilePanel {
         });
     }
 
-    fn chdir_old_cwd(&mut self) -> Result<()> {
+    fn chdir_old_cwd(&mut self) {
         let old_cwd = self.old_cwd.clone();
 
         self.chdir(&old_cwd)
@@ -204,14 +202,15 @@ impl FilePanel {
         }
     }
 
-    fn load_file_list(&mut self, selected_file: Option<&Path>) -> Result<()> {
+    fn load_file_list(&mut self, selected_file: Option<&Path>) {
         self.selected_file = selected_file.map(PathBuf::from);
-        self.free = disk_usage(&self.cwd)?.free;
+        self.free = match disk_usage(&self.cwd) {
+            Ok(usage) => usage.free,
+            Err(_) => 0,
+        };
 
         self.is_loading = true;
-        self.file_list_tx.send(self.cwd.clone())?;
-
-        Ok(())
+        self.file_list_tx.send(self.cwd.clone()).unwrap();
     }
 
     fn filter_and_sort_file_list(&mut self, selected_file: Option<&Path>) {
@@ -278,13 +277,13 @@ impl FilePanel {
 }
 
 impl Component for FilePanel {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         let mut key_handled = true;
 
         if let Some(c) = self.leader {
             match (c, key) {
                 ('`', Key::Char('\'')) | ('`', Key::Char('`')) => {
-                    self.chdir_old_cwd()?;
+                    self.chdir_old_cwd();
                 }
                 ('`', Key::Char(c)) if BOOKMARK_KEYS.contains(*c) => {
                     let bookmark =
@@ -297,7 +296,7 @@ impl Component for FilePanel {
                             });
 
                     if let Some(cwd) = bookmark {
-                        self.chdir(&cwd)?;
+                        self.chdir(&cwd);
                     }
                 }
                 ('m', Key::Char(c)) if BOOKMARK_KEYS.contains(*c) => {
@@ -368,7 +367,7 @@ impl Component for FilePanel {
                     let cwd = self.cwd.clone();
 
                     if let Some(new_cwd) = cwd.parent() {
-                        self.chdir(new_cwd)?
+                        self.chdir(new_cwd);
                     }
                 }
                 Key::Right | Key::Char('\n') | Key::Char('l') => {
@@ -376,7 +375,7 @@ impl Component for FilePanel {
                         let entry = self.shown_file_list[self.cursor_position].clone();
 
                         if entry.stat.is_dir() {
-                            self.chdir(&entry.file)?;
+                            self.chdir(&entry.file);
                         } else if let Some(path) = &entry.link_target {
                             let _ = path
                                 .try_exists()
@@ -394,7 +393,7 @@ impl Component for FilePanel {
                                             // Change directory only if we can change to that exact directory
                                             read_dir(path)?;
 
-                                            self.chdir(path)?
+                                            self.chdir(path);
                                         }
                                         false => {
                                             let parent = path.parent().ok_or_else(|| {
@@ -404,7 +403,7 @@ impl Component for FilePanel {
                                             // Change directory only if we can change to that exact directory
                                             read_dir(parent)?;
 
-                                            self.chdir(parent)?;
+                                            self.chdir(parent);
 
                                             if self.cwd == parent {
                                                 let old_cursor_position = self.cursor_position;
@@ -506,7 +505,7 @@ impl Component for FilePanel {
                         let entry = self.shown_file_list[self.cursor_position].clone();
 
                         match entry.stat.is_dir() {
-                            true => self.chdir(&entry.file)?,
+                            true => self.chdir(&entry.file),
                             false => self.pubsub_tx.send(PubSub::ViewFile(entry.file)).unwrap(),
                         }
                     }
@@ -590,12 +589,12 @@ impl Component for FilePanel {
             }
         }
 
-        Ok(key_handled)
+        key_handled
     }
 
-    fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
+    fn handle_pubsub(&mut self, event: &PubSub) {
         match event {
-            PubSub::ComponentThreadEvent => self.handle_component_pubsub()?,
+            PubSub::ComponentThreadEvent => self.handle_component_pubsub(),
             PubSub::Esc => {
                 self.leader = None;
 
@@ -716,19 +715,18 @@ impl Component for FilePanel {
                     .cwd
                     .ancestors()
                     .find(|d| read_dir(d).is_ok())
-                    .ok_or_else(|| anyhow!("failed to change directory"))?
+                    .ok_or_else(|| anyhow!("failed to change directory"))
+                    .unwrap()
                     .to_path_buf();
 
                 if new_cwd != self.cwd {
-                    self.chdir(&new_cwd)?;
+                    self.chdir(&new_cwd);
                 } else {
-                    self.load_file_list(self.get_selected_file().as_deref())?;
+                    self.load_file_list(self.get_selected_file().as_deref());
                 }
             }
             _ => (),
         }
-
-        Ok(())
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {
@@ -972,11 +970,12 @@ impl Panel for FilePanel {
         Some(self.cwd.clone())
     }
 
-    fn chdir(&mut self, cwd: &Path) -> Result<()> {
+    fn chdir(&mut self, cwd: &Path) {
         let new_cwd = cwd
             .ancestors()
             .find(|d| read_dir(d).is_ok())
-            .ok_or_else(|| anyhow!("failed to change directory"))?
+            .ok_or_else(|| anyhow!("failed to change directory"))
+            .unwrap()
             .to_path_buf();
 
         if new_cwd != self.cwd {
@@ -988,10 +987,8 @@ impl Panel for FilePanel {
             self.cursor_position = 0;
             self.first_line = 0;
 
-            self.load_file_list(Some(&self.old_cwd.clone()))?;
+            self.load_file_list(Some(&self.old_cwd.clone()));
         }
-
-        Ok(())
     }
 }
 

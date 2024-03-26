@@ -1,6 +1,5 @@
 use std::{cmp::min, path::Path, rc::Rc, str};
 
-use anyhow::Result;
 use crossbeam_channel::Sender;
 use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
@@ -43,7 +42,7 @@ impl DirViewer {
         _filename: &Path,
         filename_str: &str,
         file_list: Vec<Entry>,
-    ) -> Result<DirViewer> {
+    ) -> DirViewer {
         let mut viewer = DirViewer {
             config: Rc::clone(config),
             pubsub_tx,
@@ -60,7 +59,7 @@ impl DirViewer {
 
         viewer.send_updated_position();
 
-        Ok(viewer)
+        viewer
     }
 
     pub fn clamp_first_line(&mut self) {
@@ -157,7 +156,7 @@ impl DirViewer {
 }
 
 impl Component for DirViewer {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         let mut key_handled = true;
 
         match key {
@@ -268,10 +267,10 @@ impl Component for DirViewer {
             _ => key_handled = false,
         }
 
-        Ok(key_handled)
+        key_handled
     }
 
-    fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
+    fn handle_pubsub(&mut self, event: &PubSub) {
         match event {
             PubSub::Goto(GotoType::LineNumber, str_line_number) => {
                 match str_line_number.parse::<usize>() {
@@ -300,7 +299,7 @@ impl Component for DirViewer {
             PubSub::TextSearch(search) => {
                 if search.search_string.is_empty() {
                     self.expression = None;
-                    return Ok(());
+                    return;
                 }
 
                 self.backwards = search.backwards;
@@ -367,8 +366,6 @@ impl Component for DirViewer {
             }
             _ => (),
         }
-
-        Ok(())
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {

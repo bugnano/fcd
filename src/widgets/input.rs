@@ -1,4 +1,3 @@
-use anyhow::Result;
 use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
@@ -15,7 +14,7 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn new(style: &Style, input: &str, cursor_position: usize) -> Result<Input> {
+    pub fn new(style: &Style, input: &str, cursor_position: usize) -> Input {
         let mut widget = Input {
             input: String::from(input),
             style: *style,
@@ -25,7 +24,7 @@ impl Input {
 
         widget.cursor_position = widget.clamp_cursor(cursor_position);
 
-        Ok(widget)
+        widget
     }
 
     pub fn value(&mut self) -> String {
@@ -82,7 +81,7 @@ impl Input {
 }
 
 impl Component for Input {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         let mut key_handled = true;
 
         match key {
@@ -97,7 +96,7 @@ impl Component for Input {
             _ => key_handled = false,
         }
 
-        Ok(key_handled)
+        key_handled
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {

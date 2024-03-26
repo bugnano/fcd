@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use anyhow::Result;
 use crossbeam_channel::Sender;
 use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
@@ -36,21 +35,21 @@ impl CmdBar {
         label: &str,
         input: &str,
         cursor_position: usize,
-    ) -> Result<CmdBar> {
-        Ok(CmdBar {
+    ) -> CmdBar {
+        CmdBar {
             pubsub_tx,
             command_bar_type,
             label: String::from(label),
-            input: Input::new(&Style::default(), input, cursor_position)?,
-        })
+            input: Input::new(&Style::default(), input, cursor_position),
+        }
     }
 }
 
 impl Component for CmdBar {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         let mut key_handled = true;
 
-        let input_handled = self.input.handle_key(key)?;
+        let input_handled = self.input.handle_key(key);
 
         if !input_handled {
             match key {
@@ -78,7 +77,7 @@ impl Component for CmdBar {
             }
         }
 
-        Ok(key_handled)
+        key_handled
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {

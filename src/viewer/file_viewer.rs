@@ -53,7 +53,7 @@ impl FileViewer {
                     filename,
                     &filename_str,
                     file_list,
-                )?) as Box<dyn Component>
+                )) as Box<dyn Component>
             }
             false => {
                 let mut f = File::open(filename)?;
@@ -79,7 +79,7 @@ impl FileViewer {
                             &filename_str,
                             tabsize,
                             buffer,
-                        )?) as Box<dyn Component>
+                        )) as Box<dyn Component>
                     }
                     false => Box::new(HexViewer::new(
                         config,
@@ -88,7 +88,7 @@ impl FileViewer {
                         &filename_str,
                         attr.len(),
                         ViewerType::Dump,
-                    )?) as Box<dyn Component>,
+                    )) as Box<dyn Component>,
                 }
             }
         };
@@ -102,7 +102,7 @@ impl FileViewer {
                 &filename_str,
                 attr.len(),
                 ViewerType::Hex,
-            )?),
+            )),
         };
 
         Ok(FileViewer {
@@ -114,25 +114,23 @@ impl FileViewer {
 }
 
 impl Component for FileViewer {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         match (self.hex_mode, &mut self.hex_viewer) {
             (true, Some(hex_viewer)) => hex_viewer.handle_key(key),
             _ => self.main_viewer.handle_key(key),
         }
     }
 
-    fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
+    fn handle_pubsub(&mut self, event: &PubSub) {
         match (self.hex_mode, &mut self.hex_viewer) {
-            (true, Some(hex_viewer)) => hex_viewer.handle_pubsub(event)?,
-            _ => self.main_viewer.handle_pubsub(event)?,
+            (true, Some(hex_viewer)) => hex_viewer.handle_pubsub(event),
+            _ => self.main_viewer.handle_pubsub(event),
         }
 
         match event {
             PubSub::ToggleHex => self.hex_mode = !self.hex_mode,
             _ => (),
         }
-
-        Ok(())
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {

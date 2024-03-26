@@ -7,7 +7,6 @@ use std::{
     str,
 };
 
-use anyhow::Result;
 use crossbeam_channel::Sender;
 use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
@@ -145,8 +144,8 @@ impl HexViewer {
         filename_str: &str,
         file_length: u64,
         viewer_type: ViewerType,
-    ) -> Result<HexViewer> {
-        let f = File::open(filename)?;
+    ) -> HexViewer {
+        let f = File::open(filename).unwrap();
         let reader = BufReader::with_capacity(131072, f);
 
         let len_address = format!("{:X}", file_length).len();
@@ -170,7 +169,7 @@ impl HexViewer {
 
         viewer.send_updated_position();
 
-        Ok(viewer)
+        viewer
     }
 
     fn clamp_offset(&mut self) {
@@ -282,7 +281,7 @@ impl HexViewer {
 }
 
 impl Component for HexViewer {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         let mut key_handled = true;
 
         match key {
@@ -427,10 +426,10 @@ impl Component for HexViewer {
             _ => key_handled = false,
         }
 
-        Ok(key_handled)
+        key_handled
     }
 
-    fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
+    fn handle_pubsub(&mut self, event: &PubSub) {
         match event {
             PubSub::Goto(GotoType::HexOffset, str_offset) => {
                 match u64::from_str_radix(
@@ -492,7 +491,7 @@ impl Component for HexViewer {
             PubSub::HexSearch(search) => {
                 if search.search_string.is_empty() {
                     self.expression = None;
-                    return Ok(());
+                    return;
                 }
 
                 self.backwards = search.backwards;
@@ -613,8 +612,6 @@ impl Component for HexViewer {
             }
             _ => (),
         }
-
-        Ok(())
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {

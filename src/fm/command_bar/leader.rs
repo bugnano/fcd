@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use anyhow::Result;
 use ratatui::{prelude::*, widgets::*};
 
 use crate::{
@@ -14,10 +13,10 @@ pub struct Leader {
 }
 
 impl Leader {
-    pub fn new(_config: &Rc<Config>, label: char) -> Result<Leader> {
-        Ok(Leader {
+    pub fn new(_config: &Rc<Config>, label: char) -> Leader {
+        Leader {
             label: String::from(label),
-        })
+        }
     }
 }
 

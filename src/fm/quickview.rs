@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use anyhow::Result;
 use crossbeam_channel::Sender;
 use ratatui::{
     prelude::*,
@@ -39,15 +38,15 @@ impl QuickView {
         pubsub_tx: Sender<PubSub>,
         tabsize: u8,
         _focus: Focus,
-    ) -> Result<QuickView> {
-        Ok(QuickView {
+    ) -> QuickView {
+        QuickView {
             config: Rc::clone(config),
             pubsub_tx,
             enabled: false,
             filename: String::from(""),
             viewer: None,
             tabsize,
-        })
+        }
     }
 
     fn update_quickview(&mut self, entry: Option<&Entry>) {
@@ -86,16 +85,16 @@ impl QuickView {
 }
 
 impl Component for QuickView {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         match &mut self.viewer {
             Some(viewer) => viewer.handle_key(key),
-            None => Ok(false),
+            None => false,
         }
     }
 
-    fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
+    fn handle_pubsub(&mut self, event: &PubSub) {
         if let Some(viewer) = &mut self.viewer {
-            viewer.handle_pubsub(event)?
+            viewer.handle_pubsub(event);
         }
 
         match event {
@@ -111,8 +110,6 @@ impl Component for QuickView {
             }
             _ => (),
         }
-
-        Ok(())
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {

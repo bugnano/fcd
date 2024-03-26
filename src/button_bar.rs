@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use anyhow::Result;
 use ratatui::{prelude::*, widgets::*};
 
 use crate::{
@@ -19,25 +18,23 @@ impl ButtonBar {
     pub fn new<T: IntoIterator<Item = U>, U: AsRef<str>>(
         config: &Rc<Config>,
         labels: T,
-    ) -> Result<ButtonBar> {
-        Ok(ButtonBar {
+    ) -> ButtonBar {
+        ButtonBar {
             config: Rc::clone(config),
             labels: labels
                 .into_iter()
                 .map(|label| String::from(label.as_ref()))
                 .collect(),
-        })
+        }
     }
 }
 
 impl Component for ButtonBar {
-    fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
+    fn handle_pubsub(&mut self, event: &PubSub) {
         match event {
             PubSub::ButtonLabels(labels) => self.labels = labels.clone(),
             _ => (),
         }
-
-        Ok(())
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {

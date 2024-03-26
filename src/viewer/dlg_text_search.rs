@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use anyhow::Result;
 use crossbeam_channel::Sender;
 use ratatui::{
     prelude::*,
@@ -54,8 +53,8 @@ impl DlgTextSearch {
         config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
         text_search: &TextSearch,
-    ) -> Result<DlgTextSearch> {
-        Ok(DlgTextSearch {
+    ) -> DlgTextSearch {
+        DlgTextSearch {
             config: Rc::clone(config),
             pubsub_tx,
             input: Input::new(
@@ -64,7 +63,7 @@ impl DlgTextSearch {
                     .bg(config.dialog.input_bg),
                 "",
                 0,
-            )?,
+            ),
             radio: RadioBox::new(
                 ["Normal", "Regular expression", "Wildcard search"],
                 &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
@@ -76,7 +75,7 @@ impl DlgTextSearch {
                     SearchType::Regex => 1,
                     SearchType::Wildcard => 2,
                 },
-            )?,
+            ),
             check_boxes: vec![
                 CheckBox::new(
                     "Case sensitive",
@@ -85,7 +84,7 @@ impl DlgTextSearch {
                         .fg(config.dialog.focus_fg)
                         .bg(config.dialog.focus_bg),
                     text_search.case_sensitive,
-                )?,
+                ),
                 CheckBox::new(
                     "Backwards",
                     &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
@@ -93,7 +92,7 @@ impl DlgTextSearch {
                         .fg(config.dialog.focus_fg)
                         .bg(config.dialog.focus_bg),
                     text_search.backwards,
-                )?,
+                ),
                 CheckBox::new(
                     "Whole words",
                     &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
@@ -101,7 +100,7 @@ impl DlgTextSearch {
                         .fg(config.dialog.focus_fg)
                         .bg(config.dialog.focus_bg),
                     text_search.whole_words,
-                )?,
+                ),
             ],
             btn_ok: Button::new(
                 "OK",
@@ -112,7 +111,7 @@ impl DlgTextSearch {
                 &Style::default()
                     .fg(config.dialog.title_fg)
                     .bg(config.dialog.bg),
-            )?,
+            ),
             btn_cancel: Button::new(
                 "Cancel",
                 &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
@@ -122,24 +121,24 @@ impl DlgTextSearch {
                 &Style::default()
                     .fg(config.dialog.title_fg)
                     .bg(config.dialog.bg),
-            )?,
+            ),
             section_focus_position: 0,
             middle_focus_position: 0,
             check_focus_position: 0,
             button_focus_position: 0,
-        })
+        }
     }
 }
 
 impl Component for DlgTextSearch {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         let mut key_handled = true;
 
         let input_handled = match self.section_focus_position {
-            0 => self.input.handle_key(key)?,
+            0 => self.input.handle_key(key),
             1 => match self.middle_focus_position {
-                0 => self.radio.handle_key(key)?,
-                1 => self.check_boxes[self.check_focus_position].handle_key(key)?,
+                0 => self.radio.handle_key(key),
+                1 => self.check_boxes[self.check_focus_position].handle_key(key),
                 _ => unreachable!(),
             },
             2 => false,
@@ -229,7 +228,7 @@ impl Component for DlgTextSearch {
             }
         }
 
-        Ok(key_handled)
+        key_handled
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {

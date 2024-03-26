@@ -1,4 +1,3 @@
-use anyhow::Result;
 use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
@@ -13,18 +12,13 @@ pub struct CheckBox {
 }
 
 impl CheckBox {
-    pub fn new(
-        label: &str,
-        style: &Style,
-        focused_style: &Style,
-        checked: bool,
-    ) -> Result<CheckBox> {
-        Ok(CheckBox {
+    pub fn new(label: &str, style: &Style, focused_style: &Style, checked: bool) -> CheckBox {
+        CheckBox {
             label: String::from(label),
             style: *style,
             focused_style: *focused_style,
             checked,
-        })
+        }
     }
 
     pub fn value(&mut self) -> bool {
@@ -33,7 +27,7 @@ impl CheckBox {
 }
 
 impl Component for CheckBox {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         let mut key_handled = true;
 
         match key {
@@ -41,7 +35,7 @@ impl Component for CheckBox {
             _ => key_handled = false,
         }
 
-        Ok(key_handled)
+        key_handled
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {

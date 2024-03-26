@@ -5,7 +5,6 @@ use std::{
     str, thread,
 };
 
-use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender};
 use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
@@ -83,7 +82,7 @@ impl TextViewer {
         filename_str: &str,
         tabsize: u8,
         data: Vec<u8>,
-    ) -> Result<TextViewer> {
+    ) -> TextViewer {
         let tab_size = if tabsize > 0 {
             tabsize
         } else {
@@ -97,7 +96,7 @@ impl TextViewer {
                 // to find the correct encoding
                 match WINDOWS_1252.decode_without_bom_handling_and_without_replacement(&data) {
                     Some(content) => String::from(content),
-                    None => return Err(e.into()),
+                    None => panic!("{}", e),
                 }
             }
         };
@@ -155,10 +154,10 @@ impl TextViewer {
         viewer.send_updated_position();
         viewer.highlight();
 
-        Ok(viewer)
+        viewer
     }
 
-    fn handle_component_pubsub(&mut self) -> Result<()> {
+    fn handle_component_pubsub(&mut self) {
         if let Ok(event) = self.component_pubsub_rx.try_recv() {
             match event {
                 ComponentPubSub::Highlight(styled_lines) => {
@@ -166,8 +165,6 @@ impl TextViewer {
                 }
             }
         }
-
-        Ok(())
     }
 
     fn highlight(&self) {
@@ -343,7 +340,7 @@ impl TextViewer {
 }
 
 impl Component for TextViewer {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         let mut key_handled = true;
 
         match key {
@@ -466,12 +463,12 @@ impl Component for TextViewer {
             _ => key_handled = false,
         }
 
-        Ok(key_handled)
+        key_handled
     }
 
-    fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
+    fn handle_pubsub(&mut self, event: &PubSub) {
         match event {
-            PubSub::ComponentThreadEvent => self.handle_component_pubsub()?,
+            PubSub::ComponentThreadEvent => self.handle_component_pubsub(),
             PubSub::Goto(GotoType::LineNumber, str_line_number) => {
                 match str_line_number.parse::<usize>() {
                     Ok(line_number) => {
@@ -510,7 +507,7 @@ impl Component for TextViewer {
             PubSub::TextSearch(search) => {
                 if search.search_string.is_empty() {
                     self.expression = None;
-                    return Ok(());
+                    return;
                 }
 
                 self.backwards = search.backwards;
@@ -577,8 +574,6 @@ impl Component for TextViewer {
             }
             _ => (),
         }
-
-        Ok(())
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {

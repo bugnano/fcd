@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use anyhow::Result;
 use crossbeam_channel::Sender;
 use ratatui::{
     prelude::*,
@@ -39,12 +38,8 @@ pub struct DlgGoto {
 }
 
 impl DlgGoto {
-    pub fn new(
-        config: &Rc<Config>,
-        pubsub_tx: Sender<PubSub>,
-        goto_type: GotoType,
-    ) -> Result<DlgGoto> {
-        Ok(DlgGoto {
+    pub fn new(config: &Rc<Config>, pubsub_tx: Sender<PubSub>, goto_type: GotoType) -> DlgGoto {
+        DlgGoto {
             config: Rc::clone(config),
             pubsub_tx,
             goto_type,
@@ -54,7 +49,7 @@ impl DlgGoto {
                     .bg(config.dialog.input_bg),
                 "",
                 0,
-            )?,
+            ),
             btn_ok: Button::new(
                 "OK",
                 &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
@@ -64,7 +59,7 @@ impl DlgGoto {
                 &Style::default()
                     .fg(config.dialog.title_fg)
                     .bg(config.dialog.bg),
-            )?,
+            ),
             btn_cancel: Button::new(
                 "Cancel",
                 &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
@@ -74,19 +69,19 @@ impl DlgGoto {
                 &Style::default()
                     .fg(config.dialog.title_fg)
                     .bg(config.dialog.bg),
-            )?,
+            ),
             section_focus_position: 0,
             button_focus_position: 0,
-        })
+        }
     }
 }
 
 impl Component for DlgGoto {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         let mut key_handled = true;
 
         let input_handled = if self.section_focus_position == 0 {
-            self.input.handle_key(key)?
+            self.input.handle_key(key)
         } else {
             false
         };
@@ -131,7 +126,7 @@ impl Component for DlgGoto {
             }
         }
 
-        Ok(key_handled)
+        key_handled
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {

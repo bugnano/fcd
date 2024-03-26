@@ -89,7 +89,7 @@ pub enum Action {
 }
 
 pub trait App {
-    fn handle_events(&mut self, events_rx: &mut Receiver<Events>) -> Result<Action>;
+    fn handle_events(&mut self, events_rx: &mut Receiver<Events>) -> Action;
     fn render(&mut self, f: &mut Frame);
 }
 

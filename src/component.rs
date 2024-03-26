@@ -1,6 +1,5 @@
 use std::fmt;
 
-use anyhow::Result;
 use ratatui::prelude::*;
 use termion::event::*;
 
@@ -14,17 +13,13 @@ pub enum Focus {
 }
 
 pub trait Component {
-    fn handle_key(&mut self, _key: &Key) -> Result<bool> {
-        Ok(false)
+    fn handle_key(&mut self, _key: &Key) -> bool {
+        false
     }
 
-    fn handle_mouse(&mut self, _event: &MouseEvent) -> Result<()> {
-        Ok(())
-    }
+    fn handle_mouse(&mut self, _event: &MouseEvent) {}
 
-    fn handle_pubsub(&mut self, _event: &PubSub) -> Result<()> {
-        Ok(())
-    }
+    fn handle_pubsub(&mut self, _event: &PubSub) {}
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus);
 }

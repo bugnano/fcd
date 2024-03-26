@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use anyhow::Result;
 use crossbeam_channel::Sender;
 use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
@@ -21,19 +20,19 @@ pub struct Filter {
 }
 
 impl Filter {
-    pub fn new(_config: &Rc<Config>, pubsub_tx: Sender<PubSub>, filter: &str) -> Result<Filter> {
-        Ok(Filter {
+    pub fn new(_config: &Rc<Config>, pubsub_tx: Sender<PubSub>, filter: &str) -> Filter {
+        Filter {
             pubsub_tx,
-            input: Input::new(&Style::default(), filter, filter.len())?,
-        })
+            input: Input::new(&Style::default(), filter, filter.len()),
+        }
     }
 }
 
 impl Component for Filter {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         let mut key_handled = true;
 
-        let input_handled = self.input.handle_key(key)?;
+        let input_handled = self.input.handle_key(key);
 
         match input_handled {
             true => {
@@ -57,7 +56,7 @@ impl Component for Filter {
             },
         }
 
-        Ok(key_handled)
+        key_handled
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {

@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use anyhow::Result;
 use crossbeam_channel::Sender;
 use ratatui::{
     prelude::*,
@@ -43,8 +42,8 @@ impl DlgHexSearch {
         config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
         hex_search: &HexSearch,
-    ) -> Result<DlgHexSearch> {
-        Ok(DlgHexSearch {
+    ) -> DlgHexSearch {
+        DlgHexSearch {
             config: Rc::clone(config),
             pubsub_tx,
             input: Input::new(
@@ -53,7 +52,7 @@ impl DlgHexSearch {
                     .bg(config.dialog.input_bg),
                 "",
                 0,
-            )?,
+            ),
             check_boxes: vec![
                 CheckBox::new(
                     "Hexadecimal",
@@ -62,7 +61,7 @@ impl DlgHexSearch {
                         .fg(config.dialog.focus_fg)
                         .bg(config.dialog.focus_bg),
                     hex_search.hexadecimal,
-                )?,
+                ),
                 CheckBox::new(
                     "Backwards",
                     &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
@@ -70,7 +69,7 @@ impl DlgHexSearch {
                         .fg(config.dialog.focus_fg)
                         .bg(config.dialog.focus_bg),
                     hex_search.backwards,
-                )?,
+                ),
             ],
             btn_ok: Button::new(
                 "OK",
@@ -81,7 +80,7 @@ impl DlgHexSearch {
                 &Style::default()
                     .fg(config.dialog.title_fg)
                     .bg(config.dialog.bg),
-            )?,
+            ),
             btn_cancel: Button::new(
                 "Cancel",
                 &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
@@ -91,21 +90,21 @@ impl DlgHexSearch {
                 &Style::default()
                     .fg(config.dialog.title_fg)
                     .bg(config.dialog.bg),
-            )?,
+            ),
             section_focus_position: 0,
             check_focus_position: 0,
             button_focus_position: 0,
-        })
+        }
     }
 }
 
 impl Component for DlgHexSearch {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         let mut key_handled = true;
 
         let input_handled = match self.section_focus_position {
-            0 => self.input.handle_key(key)?,
-            1 => self.check_boxes[self.check_focus_position].handle_key(key)?,
+            0 => self.input.handle_key(key),
+            1 => self.check_boxes[self.check_focus_position].handle_key(key),
             2 => false,
             _ => unreachable!(),
         };
@@ -164,7 +163,7 @@ impl Component for DlgHexSearch {
             }
         }
 
-        Ok(key_handled)
+        key_handled
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {

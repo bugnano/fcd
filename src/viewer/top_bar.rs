@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use anyhow::Result;
 use ratatui::{
     prelude::*,
     widgets::{block::Title, *},
@@ -24,18 +23,18 @@ pub struct TopBar {
 }
 
 impl TopBar {
-    pub fn new(config: &Rc<Config>) -> Result<TopBar> {
-        Ok(TopBar {
+    pub fn new(config: &Rc<Config>) -> TopBar {
+        TopBar {
             config: Rc::clone(config),
             filename: String::new(),
             position: String::new(),
             percent: String::new(),
-        })
+        }
     }
 }
 
 impl Component for TopBar {
-    fn handle_pubsub(&mut self, event: &PubSub) -> Result<()> {
+    fn handle_pubsub(&mut self, event: &PubSub) {
         match event {
             PubSub::FileInfo(filename, position, percent) => {
                 self.filename = String::from(filename);
@@ -44,8 +43,6 @@ impl Component for TopBar {
             }
             _ => (),
         }
-
-        Ok(())
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {

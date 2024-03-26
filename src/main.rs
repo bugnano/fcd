@@ -132,7 +132,7 @@ fn main() -> Result<()> {
     loop {
         terminal.draw(|f| app.render(f))?;
 
-        match app.handle_events(&mut events_rx)? {
+        match app.handle_events(&mut events_rx) {
             Action::Continue => (),
             Action::NextLoop => (),
             Action::Redraw => {

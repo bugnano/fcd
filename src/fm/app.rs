@@ -95,23 +95,23 @@ impl App {
                     pubsub_tx.clone(),
                     &initial_path,
                     Focus::Focused,
-                )?),
+                )),
                 Box::new(FilePanel::new(
                     config,
                     bookmarks,
                     pubsub_tx.clone(),
                     &initial_path,
                     Focus::Normal,
-                )?),
+                )),
                 Box::new(QuickView::new(
                     config,
                     pubsub_tx.clone(),
                     tabsize,
                     Focus::Normal,
-                )?),
+                )),
             ],
             command_bar: None,
-            button_bar: ButtonBar::new(config, LABELS)?,
+            button_bar: ButtonBar::new(config, LABELS),
             dialog: None,
             fg_app: None,
             panel_focus_position: 0,
@@ -121,23 +121,23 @@ impl App {
         })
     }
 
-    fn handle_event(&mut self, event: &Events) -> Result<Action> {
+    fn handle_event(&mut self, event: &Events) -> Action {
         let mut action = Action::Continue;
 
         match event {
             Events::Input(input) => match input {
                 Event::Key(key) => {
                     let key_handled = match &mut self.dialog {
-                        Some(dlg) => dlg.handle_key(key)?,
+                        Some(dlg) => dlg.handle_key(key),
                         None => {
                             let mut key_handled = match &mut self.command_bar {
-                                Some(command_bar) => command_bar.handle_key(key)?,
+                                Some(command_bar) => command_bar.handle_key(key),
                                 None => false,
                             };
 
                             if !key_handled {
                                 key_handled =
-                                    self.panels[self.panel_focus_position].handle_key(key)?;
+                                    self.panels[self.panel_focus_position].handle_key(key);
                             }
 
                             key_handled
@@ -230,7 +230,7 @@ impl App {
 
                                 if let Some(cwd) = self.panels[self.panel_focus_position].get_cwd()
                                 {
-                                    self.panels[other_panel].chdir(&cwd)?;
+                                    self.panels[other_panel].chdir(&cwd);
                                 }
                             }
                             Key::Alt('o') => {
@@ -252,7 +252,7 @@ impl App {
                                         None => PathBuf::from(cwd.parent().unwrap_or(&cwd)),
                                     };
 
-                                    self.panels[other_panel].chdir(&target_cwd)?;
+                                    self.panels[other_panel].chdir(&target_cwd);
                                 }
                             }
                             _ => log::debug!("{:?}", key),
@@ -261,11 +261,11 @@ impl App {
                 }
                 Event::Mouse(mouse) => {
                     match &mut self.dialog {
-                        Some(dlg) => dlg.handle_mouse(mouse)?,
+                        Some(dlg) => dlg.handle_mouse(mouse),
                         None => (),
                     };
 
-                    self.button_bar.handle_mouse(mouse)?;
+                    self.button_bar.handle_mouse(mouse);
                 }
                 Event::Unsupported(_) => (),
             },
@@ -278,24 +278,24 @@ impl App {
             },
         }
 
-        Ok(action)
+        action
     }
 
-    fn handle_pubsub(&mut self, pubsub: &PubSub) -> Result<Action> {
+    fn handle_pubsub(&mut self, pubsub: &PubSub) -> Action {
         let mut action = Action::Continue;
 
         for panel in &mut self.panels {
-            panel.handle_pubsub(pubsub)?;
+            panel.handle_pubsub(pubsub);
         }
 
         if let Some(command_bar) = &mut self.command_bar {
-            command_bar.handle_pubsub(pubsub)?;
+            command_bar.handle_pubsub(pubsub);
         }
 
-        self.button_bar.handle_pubsub(pubsub)?;
+        self.button_bar.handle_pubsub(pubsub);
 
         if let Some(dlg) = &mut self.dialog {
-            dlg.handle_pubsub(pubsub)?;
+            dlg.handle_pubsub(pubsub);
         }
 
         match pubsub {
@@ -306,7 +306,7 @@ impl App {
                     msg,
                     "Error",
                     DialogType::Error,
-                )?));
+                )));
             }
             PubSub::Warning(title, msg) => {
                 self.dialog = Some(Box::new(DlgError::new(
@@ -315,7 +315,7 @@ impl App {
                     msg,
                     title,
                     DialogType::Warning,
-                )?));
+                )));
             }
             PubSub::Info(title, msg) => {
                 self.dialog = Some(Box::new(DlgError::new(
@@ -324,7 +324,7 @@ impl App {
                     msg,
                     title,
                     DialogType::Info,
-                )?));
+                )));
 
                 // Given that the Info dialog is used to show information,
                 // stop processing further PubSub events in this loop,
@@ -338,21 +338,21 @@ impl App {
                     &self.config,
                     self.pubsub_tx.clone(),
                     *goto_type,
-                )?));
+                )));
             }
             PubSub::DlgTextSearch(text_search) => {
                 self.dialog = Some(Box::new(DlgTextSearch::new(
                     &self.config,
                     self.pubsub_tx.clone(),
                     text_search,
-                )?));
+                )));
             }
             PubSub::DlgHexSearch(hex_search) => {
                 self.dialog = Some(Box::new(DlgHexSearch::new(
                     &self.config,
                     self.pubsub_tx.clone(),
                     hex_search,
-                )?));
+                )));
             }
             PubSub::ViewFile(file) => {
                 // TODO: If there's an external viewer configured, run that viewer
@@ -363,7 +363,7 @@ impl App {
             PubSub::CloseCommandBar => self.command_bar = None,
             PubSub::Leader(leader) => {
                 self.command_bar = match leader {
-                    Some(c) => Some(Box::new(Leader::new(&self.config, *c)?)),
+                    Some(c) => Some(Box::new(Leader::new(&self.config, *c))),
                     None => None,
                 }
             }
@@ -372,7 +372,7 @@ impl App {
                     &self.config,
                     self.pubsub_tx.clone(),
                     filter,
-                )?));
+                )));
             }
             PubSub::PromptTagGlob => {
                 self.command_bar = Some(Box::new(CmdBar::new(
@@ -382,7 +382,7 @@ impl App {
                     "tag: ",
                     "*",
                     1,
-                )?));
+                )));
             }
             PubSub::PromptUntagGlob => {
                 self.command_bar = Some(Box::new(CmdBar::new(
@@ -392,45 +392,45 @@ impl App {
                     "untag: ",
                     "*",
                     1,
-                )?));
+                )));
             }
             _ => (),
         }
 
-        Ok(action)
+        action
     }
 }
 
 impl app::App for App {
-    fn handle_events(&mut self, events_rx: &mut Receiver<Events>) -> Result<Action> {
+    fn handle_events(&mut self, events_rx: &mut Receiver<Events>) -> Action {
         if let Some(app) = &mut self.fg_app {
-            let mut action = app.handle_events(events_rx)?;
+            let mut action = app.handle_events(events_rx);
 
             if let Action::Quit = action {
                 self.fg_app = None;
                 action = Action::Continue;
             }
 
-            return Ok(action);
+            return action;
         }
 
         let mut action = select! {
-            recv(events_rx) -> event => self.handle_event(&event?)?,
-            recv(self.pubsub_rx) -> pubsub => self.handle_pubsub(&pubsub?)?,
+            recv(events_rx) -> event => self.handle_event(&event.unwrap()),
+            recv(self.pubsub_rx) -> pubsub => self.handle_pubsub(&pubsub.unwrap()),
         };
 
         // Key handlers may generate multiple pubsub events.
         // Let's handle them all here, so that there's only 1 redraw per keypress
         if let Action::Continue = action {
             while let Ok(pubsub) = self.pubsub_rx.try_recv() {
-                action = self.handle_pubsub(&pubsub)?;
+                action = self.handle_pubsub(&pubsub);
                 if !matches!(action, Action::Continue) {
                     break;
                 }
             }
         }
 
-        Ok(action)
+        action
     }
 
     fn render(&mut self, f: &mut Frame) {

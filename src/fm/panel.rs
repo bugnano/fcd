@@ -3,8 +3,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::Result;
-
 use crate::{
     component::{Component, Focus},
     fm::entry::Entry,
@@ -21,9 +19,7 @@ pub trait Panel {
         None
     }
 
-    fn chdir(&mut self, _cwd: &Path) -> Result<()> {
-        Ok(())
-    }
+    fn chdir(&mut self, _cwd: &Path) {}
 }
 
 impl fmt::Debug for dyn Panel + '_ {

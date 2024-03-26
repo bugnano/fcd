@@ -1,6 +1,5 @@
 use std::cmp::min;
 
-use anyhow::Result;
 use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
@@ -21,7 +20,7 @@ impl RadioBox {
         style: &Style,
         focused_style: &Style,
         selected_button: usize,
-    ) -> Result<RadioBox> {
+    ) -> RadioBox {
         let b: Vec<String> = buttons
             .into_iter()
             .map(|item| String::from(item.as_ref()))
@@ -29,13 +28,13 @@ impl RadioBox {
 
         let selected = min(selected_button, b.len().saturating_sub(1));
 
-        Ok(RadioBox {
+        RadioBox {
             buttons: b,
             style: *style,
             focused_style: *focused_style,
             selected_button: selected,
             cursor_position: 0,
-        })
+        }
     }
 
     pub fn value(&mut self) -> usize {
@@ -44,7 +43,7 @@ impl RadioBox {
 }
 
 impl Component for RadioBox {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         let mut key_handled = true;
 
         match key {
@@ -66,7 +65,7 @@ impl Component for RadioBox {
             _ => key_handled = false,
         }
 
-        Ok(key_handled)
+        key_handled
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {

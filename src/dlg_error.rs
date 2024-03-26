@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use anyhow::Result;
 use crossbeam_channel::Sender;
 use ratatui::{
     prelude::*,
@@ -43,19 +42,19 @@ impl DlgError {
         message: &str,
         title: &str,
         dialog_type: DialogType,
-    ) -> Result<DlgError> {
-        Ok(DlgError {
+    ) -> DlgError {
+        DlgError {
             config: Rc::clone(config),
             pubsub_tx,
             message: String::from(message),
             title: String::from(title),
             dialog_type,
-        })
+        }
     }
 }
 
 impl Component for DlgError {
-    fn handle_key(&mut self, key: &Key) -> Result<bool> {
+    fn handle_key(&mut self, key: &Key) -> bool {
         let mut key_handled = true;
 
         match self.dialog_type {
@@ -63,12 +62,14 @@ impl Component for DlgError {
                 self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
             }
             DialogType::Info => match key {
-                Key::Char(_) | Key::F(_) => (),
-                _ => key_handled = false,
+                Key::Ctrl('c') => key_handled = false,
+                Key::Ctrl('l') => key_handled = false,
+                Key::Ctrl('z') => key_handled = false,
+                _ => (),
             },
         }
 
-        Ok(key_handled)
+        key_handled
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
