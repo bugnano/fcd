@@ -18,6 +18,7 @@ use ratatui::{
 use termion::event::*;
 
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+use regex::RegexBuilder;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
@@ -33,6 +34,7 @@ use crate::{
         },
         panel::{Panel, PanelComponent},
     },
+    fnmatch,
     shutil::disk_usage,
     tilde_layout::tilde_layout,
 };
@@ -573,11 +575,15 @@ impl Component for FilePanel {
                         }
                     }
                 }
+                Key::Char('+') => self.pubsub_tx.send(PubSub::PromptTagGlob).unwrap(),
+                Key::Char('-') | Key::Char('\\') => {
+                    self.pubsub_tx.send(PubSub::PromptUntagGlob).unwrap();
+                }
                 Key::Ctrl('r') => self.pubsub_tx.send(PubSub::Reload).unwrap(),
                 Key::Backspace => self.pubsub_tx.send(PubSub::ToggleHidden).unwrap(),
                 Key::Char('f') | Key::Char('/') => {
                     self.pubsub_tx
-                        .send(PubSub::FilterFiles(self.file_filter.clone()))
+                        .send(PubSub::PromptFileFilter(self.file_filter.clone()))
                         .unwrap();
                 }
                 _ => key_handled = false,
@@ -673,6 +679,36 @@ impl Component for FilePanel {
                     self.pubsub_tx
                         .send(PubSub::SelectedEntry(self.get_selected_entry()))
                         .unwrap();
+                }
+            }
+            PubSub::TagGlob(glob) => {
+                if let Focus::Focused = self.focus {
+                    if let Ok(re) = RegexBuilder::new(&fnmatch::translate(glob))
+                        .case_insensitive(true)
+                        .build()
+                    {
+                        for entry in &self.shown_file_list {
+                            if re.is_match(&entry.file_name) && !self.tagged_files.contains(entry) {
+                                self.tagged_files.push(entry.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            PubSub::UntagGlob(glob) => {
+                if let Focus::Focused = self.focus {
+                    if let Ok(re) = RegexBuilder::new(&fnmatch::translate(glob))
+                        .case_insensitive(true)
+                        .build()
+                    {
+                        for entry in &self.shown_file_list {
+                            if re.is_match(&entry.file_name) {
+                                if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
+                                    self.tagged_files.swap_remove(i);
+                                }
+                            }
+                        }
+                    }
                 }
             }
             PubSub::Reload => {
@@ -802,10 +838,22 @@ impl Component for FilePanel {
                                 &entry.shown_mtime,
                                 width = filename_max_width.saturating_sub(filename_width)
                             ),
-                            match (self.tagged_files.contains(entry), is_selected) {
-                                (true, true) => Style::default().fg(self.config.ui.markselect_fg),
-                                (true, false) => Style::default().fg(self.config.ui.marked_fg),
-                                _ => style_from_palette(&self.config, entry.palette),
+                            match (
+                                self.tagged_files.contains(entry),
+                                is_selected,
+                                matches!(focus, Focus::Focused),
+                            ) {
+                                (true, true, true) => {
+                                    Style::default().fg(self.config.ui.markselect_fg)
+                                }
+                                (true, true, false) => {
+                                    Style::default().fg(self.config.ui.marked_fg)
+                                }
+                                (true, false, _) => Style::default().fg(self.config.ui.marked_fg),
+                                (false, true, true) => {
+                                    Style::default().fg(self.config.ui.selected_fg)
+                                }
+                                (false, _, _) => style_from_palette(&self.config, entry.palette),
                             },
                         )
                         .into()
@@ -813,9 +861,7 @@ impl Component for FilePanel {
                     .collect();
 
                 let items = List::new(items).highlight_style(match focus {
-                    Focus::Focused => Style::default()
-                        .fg(self.config.ui.selected_fg)
-                        .bg(self.config.ui.selected_bg),
+                    Focus::Focused => Style::default().bg(self.config.ui.selected_bg),
                     _ => Style::default(),
                 });
 

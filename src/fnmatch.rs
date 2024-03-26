@@ -59,5 +59,5 @@ pub fn translate(pattern: &str) -> String {
         i += 1;
     }
 
-    format!("(?s:{})\\z", res.iter().collect::<String>())
+    format!(r"\A(?s:{})\z", res.iter().collect::<String>())
 }

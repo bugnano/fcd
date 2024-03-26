@@ -86,7 +86,7 @@ impl Component for Input {
         let mut key_handled = true;
 
         match key {
-            Key::BackTab | Key::Char('\t') | Key::Char('\n') => key_handled = false,
+            Key::Char('\t') | Key::Char('\n') => key_handled = false,
             Key::Char(c) => self.enter_char(*c),
             Key::Left => self.move_cursor_left(),
             Key::Right => self.move_cursor_right(),

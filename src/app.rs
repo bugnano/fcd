@@ -62,7 +62,9 @@ pub enum PubSub {
     SortFiles(SortBy, SortOrder),
     ToggleHidden,
     Reload,
-    FilterFiles(String),
+    PromptFileFilter(String),
+    PromptTagGlob,
+    PromptUntagGlob,
 
     // Quick view events
     ToggleQuickView(Option<Entry>),
@@ -70,6 +72,8 @@ pub enum PubSub {
     // Command bar events
     CloseCommandBar,
     FileFilter(String),
+    TagGlob(String),
+    UntagGlob(String),
 }
 
 #[derive(Debug, Copy, Clone)]

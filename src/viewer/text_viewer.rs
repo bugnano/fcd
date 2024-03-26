@@ -521,7 +521,7 @@ impl Component for TextViewer {
                     SearchType::Wildcard => {
                         let re = fnmatch::translate(&search.search_string);
 
-                        String::from(&re[..(re.len() - 2)])
+                        String::from(&re[2..(re.len() - 2)])
                     }
                 };
 

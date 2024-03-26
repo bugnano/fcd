@@ -222,8 +222,10 @@ impl Component for DlgTextSearch {
                     2 => self.button_focus_position = 1,
                     _ => unreachable!(),
                 },
-                Key::Char(_) | Key::F(_) => (),
-                _ => key_handled = false,
+                Key::Ctrl('c') => key_handled = false,
+                Key::Ctrl('l') => key_handled = false,
+                Key::Ctrl('z') => key_handled = false,
+                _ => (),
             }
         }
 

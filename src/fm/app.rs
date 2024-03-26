@@ -25,7 +25,11 @@ use crate::{
     dlg_error::{DialogType, DlgError},
     fm::{
         bookmarks::Bookmarks,
-        command_bar::{filter::Filter, leader::Leader},
+        command_bar::{
+            cmdbar::{CmdBar, CmdBarType},
+            filter::Filter,
+            leader::Leader,
+        },
         file_panel::FilePanel,
         panel::PanelComponent,
         quickview::QuickView,
@@ -363,11 +367,31 @@ impl App {
                     None => None,
                 }
             }
-            PubSub::FilterFiles(filter) => {
+            PubSub::PromptFileFilter(filter) => {
                 self.command_bar = Some(Box::new(Filter::new(
                     &self.config,
                     self.pubsub_tx.clone(),
                     filter,
+                )?));
+            }
+            PubSub::PromptTagGlob => {
+                self.command_bar = Some(Box::new(CmdBar::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    CmdBarType::TagGlob,
+                    "tag: ",
+                    "*",
+                    1,
+                )?));
+            }
+            PubSub::PromptUntagGlob => {
+                self.command_bar = Some(Box::new(CmdBar::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    CmdBarType::UntagGlob,
+                    "untag: ",
+                    "*",
+                    1,
                 )?));
             }
             _ => (),

@@ -31,26 +31,31 @@ impl Filter {
 
 impl Component for Filter {
     fn handle_key(&mut self, key: &Key) -> Result<bool> {
+        let mut key_handled = true;
+
         let input_handled = self.input.handle_key(key)?;
 
-        let key_handled = match input_handled {
+        match input_handled {
             true => {
                 self.pubsub_tx
                     .send(PubSub::FileFilter(self.input.value()))
                     .unwrap();
-
-                true
             }
             false => match key {
-                Key::Char('\n') => {
+                Key::Char('\n') => self.pubsub_tx.send(PubSub::CloseCommandBar).unwrap(),
+                Key::Esc | Key::F(10) => {
                     self.pubsub_tx.send(PubSub::CloseCommandBar).unwrap();
 
-                    true
+                    self.pubsub_tx
+                        .send(PubSub::FileFilter(String::from("")))
+                        .unwrap();
                 }
-                Key::BackTab | Key::Char('\t') => true,
-                _ => false,
+                Key::Ctrl('c') => key_handled = false,
+                Key::Ctrl('l') => key_handled = false,
+                Key::Ctrl('z') => key_handled = false,
+                _ => (),
             },
-        };
+        }
 
         Ok(key_handled)
     }
