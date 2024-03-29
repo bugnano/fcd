@@ -122,6 +122,7 @@ impl Component for DlgGoto {
                 Key::Ctrl('c') => key_handled = false,
                 Key::Ctrl('l') => key_handled = false,
                 Key::Ctrl('z') => key_handled = false,
+                Key::Ctrl('o') => key_handled = false,
                 _ => (),
             }
         }

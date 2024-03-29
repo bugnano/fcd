@@ -66,6 +66,7 @@ pub struct App {
     quickviewer_position: usize,
     printwd: Option<PathBuf>,
     tabsize: u8,
+    ctrl_o: bool,
 }
 
 impl App {
@@ -118,6 +119,7 @@ impl App {
             quickviewer_position: 2,
             printwd: printwd.map(PathBuf::from),
             tabsize,
+            ctrl_o: false,
         })
     }
 
@@ -125,150 +127,184 @@ impl App {
         let mut action = Action::Continue;
 
         match event {
-            Events::Input(input) => match input {
-                Event::Key(key) => {
-                    let key_handled = match &mut self.dialog {
-                        Some(dlg) => dlg.handle_key(key),
-                        None => {
-                            let mut key_handled = match &mut self.command_bar {
-                                Some(command_bar) => command_bar.handle_key(key),
-                                None => false,
+            Events::Input(input) => {
+                match self.ctrl_o {
+                    true => {
+                        if let Event::Key(key) = input {
+                            match key {
+                                Key::Char('\n') => {
+                                    self.ctrl_o = false;
+                                    action = Action::ExitCtrlO;
+                                }
+                                Key::Ctrl('c') => action = Action::CtrlC,
+                                Key::Ctrl('z') => action = Action::CtrlZ,
+                                _ => (),
+                            }
+                        }
+                    }
+                    false => match input {
+                        Event::Key(key) => {
+                            let key_handled = match &mut self.dialog {
+                                Some(dlg) => dlg.handle_key(key),
+                                None => {
+                                    let mut key_handled = match &mut self.command_bar {
+                                        Some(command_bar) => command_bar.handle_key(key),
+                                        None => false,
+                                    };
+
+                                    if !key_handled {
+                                        key_handled =
+                                            self.panels[self.panel_focus_position].handle_key(key);
+                                    }
+
+                                    key_handled
+                                }
                             };
 
                             if !key_handled {
-                                key_handled =
-                                    self.panels[self.panel_focus_position].handle_key(key);
-                            }
+                                match key {
+                                    Key::Char('q') | Key::Char('Q') | Key::F(10) => {
+                                        action = Action::Quit;
 
-                            key_handled
-                        }
-                    };
+                                        // This assumes that there are always 2 panels visible
+                                        let cwd = if self.panel_focus_position
+                                            == self.quickviewer_position
+                                        {
+                                            self.panels[self.panel_focus_position ^ 1].get_cwd()
+                                        } else {
+                                            self.panels[self.panel_focus_position].get_cwd()
+                                        };
 
-                    if !key_handled {
-                        match key {
-                            Key::Char('q') | Key::Char('Q') | Key::F(10) => {
-                                action = Action::Quit;
-
-                                // This assumes that there are always 2 panels visible
-                                let cwd = if self.panel_focus_position == self.quickviewer_position
-                                {
-                                    self.panels[self.panel_focus_position ^ 1].get_cwd()
-                                } else {
-                                    self.panels[self.panel_focus_position].get_cwd()
-                                };
-
-                                if let (Some(pwd), Some(cwd)) = (&self.printwd, cwd) {
-                                    let _ = fs::write(pwd, cwd.as_os_str().as_encoded_bytes());
-                                }
-                            }
-                            //Key::Char('p') => panic!("at the disco"),
-                            Key::Ctrl('c') => action = Action::CtrlC,
-                            Key::Ctrl('l') => action = Action::Redraw,
-                            Key::Ctrl('z') => action = Action::CtrlZ,
-                            Key::Esc => self.pubsub_tx.send(PubSub::Esc).unwrap(),
-                            Key::BackTab => {
-                                self.panels[self.panel_focus_position].change_focus(Focus::Normal);
-
-                                // This assumes that there are always 2 panels visible
-                                self.panel_focus_position ^= 1;
-
-                                self.panels[self.panel_focus_position].change_focus(Focus::Focused);
-                            }
-                            Key::Char('\t') => {
-                                self.panels[self.panel_focus_position].change_focus(Focus::Normal);
-
-                                // This assumes that there are always 2 panels visible
-                                self.panel_focus_position ^= 1;
-
-                                self.panels[self.panel_focus_position].change_focus(Focus::Focused);
-                            }
-                            Key::Ctrl('u') => {
-                                // This assumes that there are always 2 panels visible
-                                self.panels.swap(0, 1);
-                                self.panel_focus_position ^= 1;
-
-                                if self.quickviewer_position < 2 {
-                                    self.quickviewer_position ^= 1;
-                                }
-                            }
-                            Key::Alt('q') => {
-                                // This assumes that there are always 2 panels visible
-                                if self.quickviewer_position < 2 {
-                                    let quickviewer_position = self.quickviewer_position;
-
-                                    if self.panel_focus_position == quickviewer_position {
+                                        if let (Some(pwd), Some(cwd)) = (&self.printwd, cwd) {
+                                            let _ =
+                                                fs::write(pwd, cwd.as_os_str().as_encoded_bytes());
+                                        }
+                                    }
+                                    //Key::Char('p') => panic!("at the disco"),
+                                    Key::Ctrl('c') => action = Action::CtrlC,
+                                    Key::Ctrl('l') => action = Action::Redraw,
+                                    Key::Ctrl('z') => action = Action::CtrlZ,
+                                    Key::Ctrl('o') => {
+                                        self.ctrl_o = true;
+                                        action = Action::CtrlO;
+                                    }
+                                    Key::Esc => self.pubsub_tx.send(PubSub::Esc).unwrap(),
+                                    Key::BackTab => {
                                         self.panels[self.panel_focus_position]
                                             .change_focus(Focus::Normal);
-                                    }
 
-                                    self.panels.swap(self.quickviewer_position, 2);
+                                        // This assumes that there are always 2 panels visible
+                                        self.panel_focus_position ^= 1;
 
-                                    self.quickviewer_position = 2;
-
-                                    if self.panel_focus_position == quickviewer_position {
                                         self.panels[self.panel_focus_position]
                                             .change_focus(Focus::Focused);
                                     }
-                                } else {
-                                    self.quickviewer_position = self.panel_focus_position ^ 1;
+                                    Key::Char('\t') => {
+                                        self.panels[self.panel_focus_position]
+                                            .change_focus(Focus::Normal);
 
-                                    self.panels.swap(self.quickviewer_position, 2);
+                                        // This assumes that there are always 2 panels visible
+                                        self.panel_focus_position ^= 1;
+
+                                        self.panels[self.panel_focus_position]
+                                            .change_focus(Focus::Focused);
+                                    }
+                                    Key::Ctrl('u') => {
+                                        // This assumes that there are always 2 panels visible
+                                        self.panels.swap(0, 1);
+                                        self.panel_focus_position ^= 1;
+
+                                        if self.quickviewer_position < 2 {
+                                            self.quickviewer_position ^= 1;
+                                        }
+                                    }
+                                    Key::Alt('q') => {
+                                        // This assumes that there are always 2 panels visible
+                                        if self.quickviewer_position < 2 {
+                                            let quickviewer_position = self.quickviewer_position;
+
+                                            if self.panel_focus_position == quickviewer_position {
+                                                self.panels[self.panel_focus_position]
+                                                    .change_focus(Focus::Normal);
+                                            }
+
+                                            self.panels.swap(self.quickviewer_position, 2);
+
+                                            self.quickviewer_position = 2;
+
+                                            if self.panel_focus_position == quickviewer_position {
+                                                self.panels[self.panel_focus_position]
+                                                    .change_focus(Focus::Focused);
+                                            }
+                                        } else {
+                                            self.quickviewer_position =
+                                                self.panel_focus_position ^ 1;
+
+                                            self.panels.swap(self.quickviewer_position, 2);
+                                        }
+
+                                        self.pubsub_tx
+                                            .send(PubSub::ToggleQuickView(
+                                                self.panels[self.panel_focus_position]
+                                                    .get_selected_entry(),
+                                            ))
+                                            .unwrap();
+                                    }
+                                    Key::Alt('i') => {
+                                        // This assumes that there are always 2 panels visible
+                                        let other_panel = match self.quickviewer_position {
+                                            2 => self.panel_focus_position ^ 1,
+                                            _ => 2,
+                                        };
+
+                                        if let Some(cwd) =
+                                            self.panels[self.panel_focus_position].get_cwd()
+                                        {
+                                            self.panels[other_panel].chdir(&cwd);
+                                        }
+                                    }
+                                    Key::Alt('o') => {
+                                        // This assumes that there are always 2 panels visible
+                                        let other_panel = match self.quickviewer_position {
+                                            2 => self.panel_focus_position ^ 1,
+                                            _ => 2,
+                                        };
+
+                                        if let Some(cwd) =
+                                            self.panels[self.panel_focus_position].get_cwd()
+                                        {
+                                            let target_cwd = match self.panels
+                                                [self.panel_focus_position]
+                                                .get_selected_entry()
+                                            {
+                                                Some(entry) => match entry.stat.is_dir() {
+                                                    true => entry.file,
+                                                    false => {
+                                                        PathBuf::from(cwd.parent().unwrap_or(&cwd))
+                                                    }
+                                                },
+                                                None => PathBuf::from(cwd.parent().unwrap_or(&cwd)),
+                                            };
+
+                                            self.panels[other_panel].chdir(&target_cwd);
+                                        }
+                                    }
+                                    _ => log::debug!("{:?}", key),
                                 }
-
-                                self.pubsub_tx
-                                    .send(PubSub::ToggleQuickView(
-                                        self.panels[self.panel_focus_position].get_selected_entry(),
-                                    ))
-                                    .unwrap();
                             }
-                            Key::Alt('i') => {
-                                // This assumes that there are always 2 panels visible
-                                let other_panel = match self.quickviewer_position {
-                                    2 => self.panel_focus_position ^ 1,
-                                    _ => 2,
-                                };
-
-                                if let Some(cwd) = self.panels[self.panel_focus_position].get_cwd()
-                                {
-                                    self.panels[other_panel].chdir(&cwd);
-                                }
-                            }
-                            Key::Alt('o') => {
-                                // This assumes that there are always 2 panels visible
-                                let other_panel = match self.quickviewer_position {
-                                    2 => self.panel_focus_position ^ 1,
-                                    _ => 2,
-                                };
-
-                                if let Some(cwd) = self.panels[self.panel_focus_position].get_cwd()
-                                {
-                                    let target_cwd = match self.panels[self.panel_focus_position]
-                                        .get_selected_entry()
-                                    {
-                                        Some(entry) => match entry.stat.is_dir() {
-                                            true => entry.file,
-                                            false => PathBuf::from(cwd.parent().unwrap_or(&cwd)),
-                                        },
-                                        None => PathBuf::from(cwd.parent().unwrap_or(&cwd)),
-                                    };
-
-                                    self.panels[other_panel].chdir(&target_cwd);
-                                }
-                            }
-                            _ => log::debug!("{:?}", key),
                         }
-                    }
-                }
-                Event::Mouse(mouse) => {
-                    match &mut self.dialog {
-                        Some(dlg) => dlg.handle_mouse(mouse),
-                        None => (),
-                    };
+                        Event::Mouse(mouse) => {
+                            match &mut self.dialog {
+                                Some(dlg) => dlg.handle_mouse(mouse),
+                                None => (),
+                            };
 
-                    self.button_bar.handle_mouse(mouse);
+                            self.button_bar.handle_mouse(mouse);
+                        }
+                        Event::Unsupported(_) => (),
+                    },
                 }
-                Event::Unsupported(_) => (),
-            },
+            }
             Events::Signal(signal) => match *signal {
                 SIGWINCH => (),
                 SIGINT => action = Action::CtrlC,

@@ -130,8 +130,11 @@ fn main() -> Result<()> {
         }
     };
 
+    let mut ctrl_o = false;
     loop {
-        terminal.draw(|f| app.render(f))?;
+        if !ctrl_o {
+            terminal.draw(|f| app.render(f))?;
+        }
 
         match app.handle_events(&mut events_rx) {
             Action::Continue => (),
@@ -151,15 +154,17 @@ fn main() -> Result<()> {
                 break;
             }
             Action::CtrlZ => {
-                let mut output = io::stdout();
-                write!(
-                    output,
-                    "{}{}",
-                    termion::screen::ToMainScreen,
-                    termion::cursor::Show
-                )?;
-                output.into_raw_mode()?.suspend_raw_mode()?;
-                io::stdout().flush()?;
+                if !ctrl_o {
+                    let mut output = io::stdout();
+                    write!(
+                        output,
+                        "{}{}",
+                        termion::screen::ToMainScreen,
+                        termion::cursor::Show
+                    )?;
+                    output.into_raw_mode()?.suspend_raw_mode()?;
+                    io::stdout().flush()?;
+                }
 
                 println!("Ctrl+Z");
 
@@ -169,6 +174,40 @@ fn main() -> Result<()> {
             }
             Action::SigCont => {
                 let mut output = io::stdout();
+
+                match ctrl_o {
+                    true => {
+                        write!(output, "Press ENTER to continue...")?;
+                        io::stdout().flush()?;
+                    }
+                    false => {
+                        write!(output, "{}", termion::screen::ToAlternateScreen)?;
+                        output.into_raw_mode()?;
+                        io::stdout().flush()?;
+
+                        terminal.clear()?;
+                    }
+                }
+            }
+            Action::CtrlO => {
+                ctrl_o = true;
+
+                let mut output = io::stdout();
+                write!(
+                    output,
+                    "{}{}",
+                    termion::screen::ToMainScreen,
+                    termion::cursor::Show
+                )?;
+                write!(output, "Press ENTER to continue...")?;
+                output.into_raw_mode()?.suspend_raw_mode()?;
+                io::stdout().flush()?;
+            }
+            Action::ExitCtrlO => {
+                ctrl_o = false;
+
+                let mut output = io::stdout();
+                write!(output, "\r                          \r")?;
                 write!(output, "{}", termion::screen::ToAlternateScreen)?;
                 output.into_raw_mode()?;
                 io::stdout().flush()?;

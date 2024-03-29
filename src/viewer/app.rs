@@ -41,6 +41,7 @@ pub struct App {
     viewer: FileViewer,
     button_bar: ButtonBar,
     dialog: Option<Box<dyn Component>>,
+    ctrl_o: bool,
 }
 
 impl App {
@@ -55,6 +56,7 @@ impl App {
             viewer: FileViewer::new(config, pubsub_tx.clone(), filename, tabsize)?,
             button_bar: ButtonBar::new(config, LABELS),
             dialog: None,
+            ctrl_o: false,
         })
     }
 
@@ -62,40 +64,61 @@ impl App {
         let mut action = Action::Continue;
 
         match event {
-            Events::Input(input) => match input {
-                Event::Key(key) => {
-                    let key_handled = match &mut self.dialog {
-                        Some(dlg) => dlg.handle_key(key),
-                        None => self.viewer.handle_key(key),
-                    };
-
-                    if !key_handled {
-                        match key {
-                            Key::Char('q')
-                            | Key::Char('Q')
-                            | Key::Char('v')
-                            | Key::F(3)
-                            | Key::F(10) => action = Action::Quit,
-                            //Key::Char('p') => panic!("at the disco"),
-                            Key::Ctrl('c') => action = Action::CtrlC,
-                            Key::Ctrl('l') => action = Action::Redraw,
-                            Key::Ctrl('z') => action = Action::CtrlZ,
-                            _ => log::debug!("{:?}", key),
+            Events::Input(input) => {
+                match self.ctrl_o {
+                    true => {
+                        if let Event::Key(key) = input {
+                            match key {
+                                Key::Char('\n') => {
+                                    self.ctrl_o = false;
+                                    action = Action::ExitCtrlO;
+                                }
+                                Key::Ctrl('c') => action = Action::CtrlC,
+                                Key::Ctrl('z') => action = Action::CtrlZ,
+                                _ => (),
+                            }
                         }
                     }
-                }
-                Event::Mouse(mouse) => {
-                    self.top_bar.handle_mouse(mouse);
+                    false => match input {
+                        Event::Key(key) => {
+                            let key_handled = match &mut self.dialog {
+                                Some(dlg) => dlg.handle_key(key),
+                                None => self.viewer.handle_key(key),
+                            };
 
-                    match &mut self.dialog {
-                        Some(dlg) => dlg.handle_mouse(mouse),
-                        None => self.viewer.handle_mouse(mouse),
-                    };
+                            if !key_handled {
+                                match key {
+                                    Key::Char('q')
+                                    | Key::Char('Q')
+                                    | Key::Char('v')
+                                    | Key::F(3)
+                                    | Key::F(10) => action = Action::Quit,
+                                    //Key::Char('p') => panic!("at the disco"),
+                                    Key::Ctrl('c') => action = Action::CtrlC,
+                                    Key::Ctrl('l') => action = Action::Redraw,
+                                    Key::Ctrl('z') => action = Action::CtrlZ,
+                                    Key::Ctrl('o') => {
+                                        self.ctrl_o = true;
+                                        action = Action::CtrlO;
+                                    }
+                                    _ => log::debug!("{:?}", key),
+                                }
+                            }
+                        }
+                        Event::Mouse(mouse) => {
+                            self.top_bar.handle_mouse(mouse);
 
-                    self.button_bar.handle_mouse(mouse);
+                            match &mut self.dialog {
+                                Some(dlg) => dlg.handle_mouse(mouse),
+                                None => self.viewer.handle_mouse(mouse),
+                            };
+
+                            self.button_bar.handle_mouse(mouse);
+                        }
+                        Event::Unsupported(_) => (),
+                    },
                 }
-                Event::Unsupported(_) => (),
-            },
+            }
             Events::Signal(signal) => match *signal {
                 SIGWINCH => (),
                 SIGINT => action = Action::CtrlC,

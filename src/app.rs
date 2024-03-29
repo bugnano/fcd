@@ -86,6 +86,8 @@ pub enum Action {
     SigTerm,
     CtrlZ,
     SigCont,
+    CtrlO,
+    ExitCtrlO,
 }
 
 pub trait App {
