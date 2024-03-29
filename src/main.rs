@@ -21,6 +21,7 @@ mod fm;
 mod fnmatch;
 mod shutil;
 mod stat;
+mod template;
 mod tilde_layout;
 mod viewer;
 mod widgets;
