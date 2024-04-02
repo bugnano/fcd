@@ -1,19 +1,18 @@
 use std::{
     cell::RefCell,
     cmp::max,
-    env, fs,
+    fs,
     path::{Path, PathBuf},
     rc::Rc,
     time::SystemTime,
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use crossbeam_channel::{select, Receiver, Sender};
 use ratatui::prelude::*;
 use termion::event::*;
 
 use chrono::{DateTime, Datelike, Local};
-use path_clean::PathClean;
 use signal_hook::consts::signal::*;
 use unicode_normalization::UnicodeNormalization;
 
@@ -73,17 +72,13 @@ impl App {
     pub fn new(
         config: &Rc<Config>,
         bookmarks: &Rc<RefCell<Bookmarks>>,
+        initial_path: &Path,
         printwd: Option<&Path>,
         database: Option<&Path>,
         use_db: bool,
         tabsize: u8,
     ) -> Result<App> {
         let (pubsub_tx, pubsub_rx) = crossbeam_channel::unbounded();
-
-        let initial_path = match PathBuf::from(env::var("PWD").unwrap_or(String::from("."))) {
-            cwd if cwd.is_absolute() => cwd.clean(),
-            _ => env::current_dir().context("failed to get current working directory")?,
-        };
 
         Ok(App {
             config: Rc::clone(config),
@@ -94,14 +89,14 @@ impl App {
                     config,
                     bookmarks,
                     pubsub_tx.clone(),
-                    &initial_path,
+                    initial_path,
                     Focus::Focused,
                 )),
                 Box::new(FilePanel::new(
                     config,
                     bookmarks,
                     pubsub_tx.clone(),
-                    &initial_path,
+                    initial_path,
                     Focus::Normal,
                 )),
                 Box::new(QuickView::new(

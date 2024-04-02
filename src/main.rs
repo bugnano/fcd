@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    env,
     io::{self, Write},
     panic,
     path::PathBuf,
@@ -11,6 +12,7 @@ use ratatui::prelude::*;
 use termion::{input::MouseTerminal, raw::IntoRawMode, screen::IntoAlternateScreen};
 
 use clap::{crate_name, ArgAction, Parser};
+use path_clean::PathClean;
 
 mod app;
 mod button_bar;
@@ -56,7 +58,11 @@ struct Cli {
     tabsize: u8,
 }
 
-fn initialize_panic_handler() {
+fn initialize_panic_handler() -> Result<()> {
+    let raw_output = io::stdout().into_raw_mode()?;
+
+    raw_output.suspend_raw_mode()?;
+
     let panic_hook = panic::take_hook();
     panic::set_hook(Box::new(move |panic| {
         let panic_cleanup = || -> Result<()> {
@@ -68,13 +74,15 @@ fn initialize_panic_handler() {
                 termion::screen::ToMainScreen,
                 termion::cursor::Show
             )?;
-            output.into_raw_mode()?.suspend_raw_mode()?;
-            io::stdout().flush()?;
+            raw_output.suspend_raw_mode()?;
+            output.flush()?;
             Ok(())
         };
         panic_cleanup().expect("failed to clean up for panic");
         panic_hook(panic);
     }));
+
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -89,9 +97,9 @@ fn main() -> Result<()> {
         )?)))
         .init();
 
-    initialize_panic_handler();
+    initialize_panic_handler().context("failed to initialize panic handler")?;
 
-    let stdout = MouseTerminal::from(
+    let output = MouseTerminal::from(
         io::stdout()
             .into_raw_mode()
             .context("failed to enable raw mode")?
@@ -101,7 +109,7 @@ fn main() -> Result<()> {
 
     // Terminal<TermionBackend<MouseTerminal<AlternateScreen<RawTerminal<Stdout>>>>>
     let mut terminal =
-        Terminal::new(TermionBackend::new(stdout)).context("creating terminal failed")?;
+        Terminal::new(TermionBackend::new(output)).context("creating terminal failed")?;
 
     let (_events_tx, mut events_rx) = init_events().context("initializing events failed")?;
 
@@ -119,9 +127,15 @@ fn main() -> Result<()> {
                 bookmarks.borrow_mut().insert('h', &home_dir);
             }
 
+            let initial_path = match PathBuf::from(env::var("PWD").unwrap_or(String::from("."))) {
+                cwd if cwd.is_absolute() => cwd.clean(),
+                _ => env::current_dir().context("failed to get current working directory")?,
+            };
+
             Box::new(fm::app::App::new(
                 &config,
                 &bookmarks,
+                &initial_path,
                 cli.printwd.as_deref(),
                 cli.database.as_deref(),
                 cli.use_db,
@@ -131,6 +145,8 @@ fn main() -> Result<()> {
     };
 
     let mut ctrl_o = false;
+
+    terminal.clear()?;
     loop {
         if !ctrl_o {
             terminal.draw(|f| app.render(f))?;
@@ -162,8 +178,8 @@ fn main() -> Result<()> {
                         termion::screen::ToMainScreen,
                         termion::cursor::Show
                     )?;
-                    output.into_raw_mode()?.suspend_raw_mode()?;
-                    io::stdout().flush()?;
+                    //output.into_raw_mode()?.suspend_raw_mode()?;
+                    output.flush()?;
                 }
 
                 println!("Ctrl+Z");
@@ -177,13 +193,18 @@ fn main() -> Result<()> {
 
                 match ctrl_o {
                     true => {
-                        write!(output, "Press ENTER to continue...")?;
-                        io::stdout().flush()?;
+                        write!(
+                            output,
+                            "{}Press ENTER to continue...",
+                            termion::cursor::Save
+                        )?;
+                        //output.into_raw_mode()?;
+                        output.flush()?;
                     }
                     false => {
                         write!(output, "{}", termion::screen::ToAlternateScreen)?;
-                        output.into_raw_mode()?;
-                        io::stdout().flush()?;
+                        //output.into_raw_mode()?;
+                        output.flush()?;
 
                         terminal.clear()?;
                     }
@@ -195,22 +216,26 @@ fn main() -> Result<()> {
                 let mut output = io::stdout();
                 write!(
                     output,
-                    "{}{}",
+                    "{}{}{}Press ENTER to continue...",
                     termion::screen::ToMainScreen,
-                    termion::cursor::Show
+                    termion::cursor::Show,
+                    termion::cursor::Save
                 )?;
-                write!(output, "Press ENTER to continue...")?;
-                output.into_raw_mode()?.suspend_raw_mode()?;
-                io::stdout().flush()?;
+                output.flush()?;
             }
             Action::ExitCtrlO => {
                 ctrl_o = false;
 
                 let mut output = io::stdout();
-                write!(output, "\r                          \r")?;
-                write!(output, "{}", termion::screen::ToAlternateScreen)?;
-                output.into_raw_mode()?;
-                io::stdout().flush()?;
+                write!(
+                    output,
+                    "{}{}                          {}{}",
+                    termion::cursor::Restore,
+                    termion::cursor::Save,
+                    termion::cursor::Restore,
+                    termion::screen::ToAlternateScreen
+                )?;
+                output.flush()?;
 
                 terminal.clear()?;
             }
