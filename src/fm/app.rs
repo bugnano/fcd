@@ -23,6 +23,7 @@ use crate::{
     config::Config,
     dlg_error::{DialogType, DlgError},
     fm::{
+        archive_mounter::ArchiveMounter,
         bookmarks::Bookmarks,
         command_bar::{
             cmdbar::{CmdBar, CmdBarType},
@@ -66,6 +67,7 @@ pub struct App {
     printwd: Option<PathBuf>,
     tabsize: u8,
     ctrl_o: bool,
+    archive_mounter: Option<ArchiveMounter>,
 }
 
 impl App {
@@ -115,6 +117,7 @@ impl App {
             printwd: printwd.map(PathBuf::from),
             tabsize,
             ctrl_o: false,
+            archive_mounter: ArchiveMounter::new(),
         })
     }
 
@@ -425,6 +428,41 @@ impl App {
                     1,
                 )));
             }
+            PubSub::MountArchive(archive) => {
+                if let Some(archive_mounter) = &self.archive_mounter {
+                    self.pubsub_tx
+                        .send(PubSub::Info(
+                            archive_mounter.get_exe_name(),
+                            String::from("Opening archive..."),
+                        ))
+                        .unwrap();
+
+                    self.pubsub_tx
+                        .send(PubSub::DoMountArchive(archive.clone()))
+                        .unwrap();
+                }
+            }
+            PubSub::DoMountArchive(archive) => {
+                self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                if let Some(archive_mounter) = &mut self.archive_mounter {
+                    let shown_archive = archive_mounter.archive_path(&archive);
+
+                    match archive_mounter.mount_archive(&shown_archive) {
+                        Ok(temp_dir) => {
+                            self.pubsub_tx
+                                .send(PubSub::ArchiveMounted(archive.clone(), temp_dir))
+                                .unwrap();
+                        }
+                        Err(e) => {
+                            self.pubsub_tx
+                                .send(PubSub::ArchiveMountError(archive.clone(), e.to_string()))
+                                .unwrap();
+                        }
+                    }
+                }
+            }
+
             _ => (),
         }
 

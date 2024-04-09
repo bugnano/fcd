@@ -20,7 +20,7 @@ use crate::{
     stat::filemode,
 };
 
-const ARCHIVE_EXTENSIONS: &[&str] = &[
+pub const ARCHIVE_EXTENSIONS: &[&str] = &[
     ".tar",
     ".tar.gz",
     ".tgz",
@@ -99,7 +99,6 @@ pub struct Entry {
 
 impl PartialEq for Entry {
     fn eq(&self, other: &Entry) -> bool {
-        // TODO: Is the `.file` member still the one to compare when using unarchive_path?
         self.file == other.file
     }
 }

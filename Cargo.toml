@@ -35,6 +35,7 @@ fuzzy-matcher = "*"
 natord = "*"
 atomicwrites = "*"
 home = "*"
+tempfile = "*"
 
 [profile.release]
 strip = true

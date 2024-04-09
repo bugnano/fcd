@@ -28,6 +28,9 @@ pub enum PubSub {
     CloseDialog,
     ComponentThreadEvent,
     Esc,
+    DoMountArchive(PathBuf),
+    ArchiveMounted(PathBuf, PathBuf),
+    ArchiveMountError(PathBuf, String),
 
     // Button bar events
     ButtonLabels(Vec<String>),
@@ -65,6 +68,7 @@ pub enum PubSub {
     PromptFileFilter(String),
     PromptTagGlob,
     PromptUntagGlob,
+    MountArchive(PathBuf),
 
     // Quick view events
     ToggleQuickView(Option<Entry>),

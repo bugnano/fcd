@@ -30,7 +30,7 @@ use crate::{
         bookmarks::{Bookmarks, BOOKMARK_KEYS},
         entry::{
             count_directories, filter_file_list, get_file_list, sort_by_function,
-            style_from_palette, Entry, HiddenFiles, SortBy, SortOrder,
+            style_from_palette, Entry, HiddenFiles, SortBy, SortOrder, ARCHIVE_EXTENSIONS,
         },
         panel::{Panel, PanelComponent},
     },
@@ -70,6 +70,7 @@ pub struct FilePanel {
     sort_order: SortOrder,
     selected_file: Option<PathBuf>,
     focus: Focus,
+    archive_to_mount: Option<PathBuf>,
 }
 
 impl FilePanel {
@@ -108,6 +109,7 @@ impl FilePanel {
             sort_order: SortOrder::Normal,
             selected_file: None,
             focus,
+            archive_to_mount: None,
         };
 
         panel.file_list_thread();
@@ -436,8 +438,15 @@ impl Component for FilePanel {
 
                                     Ok(())
                                 });
+                        } else if ARCHIVE_EXTENSIONS.contains(&entry.extension.as_str()) {
+                            self.archive_to_mount = Some(entry.file.clone());
+
+                            self.pubsub_tx
+                                .send(PubSub::MountArchive(entry.file.clone()))
+                                .unwrap();
+                        } else {
+                            // TODO: Handle regular files
                         }
-                        // TODO: Handle archives and regular files
                     }
                 }
                 Key::Up | Key::Char('k') => {
@@ -723,6 +732,22 @@ impl Component for FilePanel {
                     self.chdir(&new_cwd);
                 } else {
                     self.load_file_list(self.get_selected_file().as_deref());
+                }
+            }
+            PubSub::ArchiveMounted(archive_file, temp_dir) => {
+                if let Some(archive) = &self.archive_to_mount {
+                    if archive == archive_file {
+                        self.archive_to_mount = None;
+
+                        self.chdir(temp_dir);
+                    }
+                }
+            }
+            PubSub::ArchiveMountError(archive_file, error) => {
+                if let Some(archive) = &self.archive_to_mount {
+                    if archive == archive_file {
+                        self.archive_to_mount = None;
+                    }
                 }
             }
             _ => (),
