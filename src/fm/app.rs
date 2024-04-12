@@ -446,7 +446,7 @@ impl App {
                 self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
 
                 if let Some(archive_mounter) = &mut self.archive_mounter {
-                    let shown_archive = archive_mounter.archive_path(&archive);
+                    let shown_archive = archive_mounter.archive_path(archive);
 
                     match archive_mounter.mount_archive(&shown_archive) {
                         Ok(temp_dir) => {

@@ -1,10 +1,13 @@
 use std::{
+    ffi::OsStr,
     fs,
+    io::Read,
+    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
 };
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use tempfile::tempdir;
 
@@ -51,21 +54,37 @@ impl ArchiveMounter {
 
         let temp_dir = tempdir()?.into_path();
 
-        match Command::new(&self.executable)
+        Command::new(&self.executable)
             .args(["-o", "ro"])
             .args([archive.file_name().unwrap(), &temp_dir.as_os_str()])
             .current_dir(&self.unarchive_path(archive.parent().unwrap()))
-            .output()
-        {
-            Ok(_) => {
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(anyhow::Error::new)
+            .and_then(|mut child| {
+                child
+                    .wait()
+                    .map_err(anyhow::Error::new)
+                    .and_then(|exit_status| {
+                        exit_status.success().then_some(()).ok_or_else(|| {
+                            let mut stderr = child.stderr.take().unwrap();
+                            let mut buf: Vec<u8> = Vec::new();
+
+                            stderr.read_to_end(&mut buf).unwrap_or(0);
+
+                            anyhow!("{}", OsStr::from_bytes(&buf).to_string_lossy())
+                        })
+                    })
+            })
+            .map(|()| {
                 self.archive_dirs.push(ArchiveEntry {
                     archive_file: PathBuf::from(archive),
                     temp_dir: temp_dir.clone(),
                 });
 
-                Ok(temp_dir)
-            }
-            Err(e) => {
+                temp_dir.clone()
+            })
+            .map_err(|e| {
                 let _ = Command::new("umount")
                     .arg(&temp_dir)
                     .current_dir(&self.unarchive_path(archive.parent().unwrap()))
@@ -73,9 +92,8 @@ impl ArchiveMounter {
 
                 let _ = fs::remove_dir(&temp_dir);
 
-                Err(e.into())
-            }
-        }
+                e
+            })
     }
 
     pub fn umount_archive(&mut self, archive: &Path) {

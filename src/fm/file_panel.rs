@@ -449,6 +449,17 @@ impl Component for FilePanel {
                         }
                     }
                 }
+                Key::Char('o') => {
+                    if !self.shown_file_list.is_empty() {
+                        let entry = self.shown_file_list[self.cursor_position].clone();
+
+                        self.archive_to_mount = Some(entry.file.clone());
+
+                        self.pubsub_tx
+                            .send(PubSub::MountArchive(entry.file.clone()))
+                            .unwrap();
+                    }
+                }
                 Key::Up | Key::Char('k') => {
                     self.handle_up();
                 }
