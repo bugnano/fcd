@@ -90,12 +90,12 @@ impl TextViewer {
         };
 
         let content = match str::from_utf8(&data) {
-            Ok(content) => String::from(content),
+            Ok(content) => content.replace("\r\n", "\n").replace('\r', "\n"),
             Err(e) => {
                 // TODO: Instead of a fallback to WINDOWS_1252, we could use chardetng
                 // to find the correct encoding
                 match WINDOWS_1252.decode_without_bom_handling_and_without_replacement(&data) {
-                    Some(content) => String::from(content),
+                    Some(content) => content.replace("\r\n", "\n").replace('\r', "\n"),
                     None => panic!("{}", e),
                 }
             }
