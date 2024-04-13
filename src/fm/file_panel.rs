@@ -27,6 +27,7 @@ use crate::{
     config::Config,
     fm::{
         app::{human_readable_size, LABELS},
+        archive_mounter::ArchiveMounter,
         bookmarks::{Bookmarks, BOOKMARK_KEYS},
         entry::{
             count_directories, filter_file_list, get_file_list, sort_by_function,
@@ -42,6 +43,13 @@ use crate::{
 #[derive(Debug, Clone)]
 enum ComponentPubSub {
     FileList(Vec<Entry>),
+}
+
+#[derive(Debug, Clone)]
+enum ArchiveMountRequest {
+    Explicit(PathBuf),
+    Implicit(PathBuf),
+    None,
 }
 
 #[derive(Debug)]
@@ -70,7 +78,8 @@ pub struct FilePanel {
     sort_order: SortOrder,
     selected_file: Option<PathBuf>,
     focus: Focus,
-    archive_to_mount: Option<PathBuf>,
+    archive_mounter: Option<Rc<RefCell<ArchiveMounter>>>,
+    archive_mount_request: ArchiveMountRequest,
 }
 
 impl FilePanel {
@@ -79,6 +88,7 @@ impl FilePanel {
         bookmarks: &Rc<RefCell<Bookmarks>>,
         pubsub_tx: Sender<PubSub>,
         initial_path: &Path,
+        archive_mounter: Option<&Rc<RefCell<ArchiveMounter>>>,
         focus: Focus,
     ) -> FilePanel {
         let (component_pubsub_tx, component_pubsub_rx) = crossbeam_channel::unbounded();
@@ -109,7 +119,8 @@ impl FilePanel {
             sort_order: SortOrder::Normal,
             selected_file: None,
             focus,
-            archive_to_mount: None,
+            archive_mounter: archive_mounter.cloned(),
+            archive_mount_request: ArchiveMountRequest::None,
         };
 
         panel.file_list_thread();
@@ -127,7 +138,12 @@ impl FilePanel {
 
                     self.file_list = file_list;
 
-                    self.filter_and_sort_file_list(self.selected_file.clone().as_deref());
+                    self.filter_and_sort_file_list(
+                        self.selected_file
+                            .as_ref()
+                            .map(|selected_file| self.archive_path(selected_file))
+                            .as_deref(),
+                    );
 
                     self.tagged_files
                         .retain(|entry| self.file_list.contains(entry));
@@ -228,7 +244,7 @@ impl FilePanel {
             Some(file) => match self
                 .shown_file_list
                 .iter()
-                .position(|entry| entry.file == file)
+                .position(|entry| self.archive_path(&entry.file) == file)
             {
                 Some(i) => self.cursor_position = self.clamp_cursor(i),
                 None => self.cursor_position = 0,
@@ -274,6 +290,20 @@ impl FilePanel {
             self.pubsub_tx
                 .send(PubSub::SelectedEntry(self.get_selected_entry()))
                 .unwrap();
+        }
+    }
+
+    fn unarchive_path(&self, file: &Path) -> PathBuf {
+        match &self.archive_mounter {
+            Some(mounter) => mounter.borrow().unarchive_path(file),
+            None => PathBuf::from(file),
+        }
+    }
+
+    fn archive_path(&self, file: &Path) -> PathBuf {
+        match &self.archive_mounter {
+            Some(mounter) => mounter.borrow().archive_path(file),
+            None => PathBuf::from(file),
         }
     }
 }
@@ -357,19 +387,26 @@ impl Component for FilePanel {
                     self.pubsub_tx.send(PubSub::Leader(Some(*c))).unwrap();
                 }
                 Key::Char('m') => {
-                    // TODO: Cannot bookmark inside an archive
-                    self.leader = Some('m');
-                    self.pubsub_tx.send(PubSub::Leader(self.leader)).unwrap();
+                    if self.archive_path(&self.cwd) == self.cwd {
+                        self.leader = Some('m');
+                        self.pubsub_tx.send(PubSub::Leader(self.leader)).unwrap();
+                    } else {
+                        self.pubsub_tx
+                            .send(PubSub::Error(String::from(
+                                "Cannot bookmark inside an archive",
+                            )))
+                            .unwrap();
+                    }
                 }
                 Key::Char('s') => {
                     self.leader = Some('s');
                     self.pubsub_tx.send(PubSub::Leader(self.leader)).unwrap();
                 }
                 Key::Left | Key::Char('h') => {
-                    let cwd = self.cwd.clone();
+                    let cwd = self.archive_path(&self.cwd);
 
                     if let Some(new_cwd) = cwd.parent() {
-                        self.chdir(new_cwd);
+                        self.chdir(&self.unarchive_path(new_cwd));
                     }
                 }
                 Key::Right | Key::Char('\n') | Key::Char('l') => {
@@ -438,8 +475,11 @@ impl Component for FilePanel {
 
                                     Ok(())
                                 });
-                        } else if ARCHIVE_EXTENSIONS.contains(&entry.extension.as_str()) {
-                            self.archive_to_mount = Some(entry.file.clone());
+                        } else if ARCHIVE_EXTENSIONS.contains(&entry.extension.as_str())
+                            && self.archive_mounter.is_some()
+                        {
+                            self.archive_mount_request =
+                                ArchiveMountRequest::Implicit(entry.file.clone());
 
                             self.pubsub_tx
                                 .send(PubSub::MountArchive(entry.file.clone()))
@@ -451,13 +491,25 @@ impl Component for FilePanel {
                 }
                 Key::Char('o') => {
                     if !self.shown_file_list.is_empty() {
-                        let entry = self.shown_file_list[self.cursor_position].clone();
+                        match &self.archive_mounter {
+                            Some(_) => {
+                                let entry = self.shown_file_list[self.cursor_position].clone();
 
-                        self.archive_to_mount = Some(entry.file.clone());
+                                self.archive_mount_request =
+                                    ArchiveMountRequest::Explicit(entry.file.clone());
 
-                        self.pubsub_tx
-                            .send(PubSub::MountArchive(entry.file.clone()))
-                            .unwrap();
+                                self.pubsub_tx
+                                    .send(PubSub::MountArchive(entry.file.clone()))
+                                    .unwrap();
+                            }
+                            None => {
+                                self.pubsub_tx
+                                    .send(PubSub::Error(String::from(
+                                        "archivefs/archivemount executable not found",
+                                    )))
+                                    .unwrap();
+                            }
+                        }
                     }
                 }
                 Key::Up | Key::Char('k') => {
@@ -731,36 +783,53 @@ impl Component for FilePanel {
                 }
             }
             PubSub::Reload => {
-                let new_cwd = self
-                    .cwd
-                    .ancestors()
-                    .find(|d| read_dir(d).is_ok())
-                    .ok_or_else(|| anyhow!("failed to change directory"))
-                    .unwrap()
-                    .to_path_buf();
+                let new_cwd = self.unarchive_path(
+                    self.archive_path(&self.cwd)
+                        .ancestors()
+                        .find(|d| read_dir(self.unarchive_path(d)).is_ok())
+                        .ok_or_else(|| anyhow!("failed to change directory"))
+                        .unwrap(),
+                );
 
                 if new_cwd != self.cwd {
                     self.chdir(&new_cwd);
                 } else {
-                    self.load_file_list(self.get_selected_file().as_deref());
+                    self.load_file_list(
+                        self.get_selected_file()
+                            .map(|selected_file| self.archive_path(&selected_file))
+                            .as_deref(),
+                    );
                 }
             }
-            PubSub::ArchiveMounted(archive_file, temp_dir) => {
-                if let Some(archive) = &self.archive_to_mount {
+            PubSub::ArchiveMounted(archive_file, temp_dir) => match &self.archive_mount_request {
+                ArchiveMountRequest::Explicit(archive) | ArchiveMountRequest::Implicit(archive) => {
                     if archive == archive_file {
-                        self.archive_to_mount = None;
+                        self.archive_mount_request = ArchiveMountRequest::None;
 
                         self.chdir(temp_dir);
                     }
                 }
-            }
-            PubSub::ArchiveMountError(archive_file, error) => {
-                if let Some(archive) = &self.archive_to_mount {
+                ArchiveMountRequest::None => (),
+            },
+            PubSub::ArchiveMountError(archive_file, error) => match &self.archive_mount_request {
+                ArchiveMountRequest::Explicit(archive) => {
                     if archive == archive_file {
-                        self.archive_to_mount = None;
+                        self.archive_mount_request = ArchiveMountRequest::None;
+
+                        self.pubsub_tx
+                            .send(PubSub::Error(String::from(error)))
+                            .unwrap();
                     }
                 }
-            }
+                ArchiveMountRequest::Implicit(archive) => {
+                    if archive == archive_file {
+                        self.archive_mount_request = ArchiveMountRequest::None;
+
+                        // TODO: Fallback to file opener
+                    }
+                }
+                ArchiveMountRequest::None => (),
+            },
             _ => (),
         }
     }
@@ -783,7 +852,7 @@ impl Component for FilePanel {
                     Span::raw(symbols::line::NORMAL.horizontal),
                     Span::styled(
                         tilde_layout(
-                            &format!(" {} ", self.cwd.to_string_lossy()),
+                            &format!(" {} ", self.archive_path(&self.cwd).to_string_lossy()),
                             chunk.width.saturating_sub(4).into(),
                         ),
                         match focus {
@@ -1007,12 +1076,13 @@ impl Panel for FilePanel {
     }
 
     fn chdir(&mut self, cwd: &Path) {
-        let new_cwd = cwd
-            .ancestors()
-            .find(|d| read_dir(d).is_ok())
-            .ok_or_else(|| anyhow!("failed to change directory"))
-            .unwrap()
-            .to_path_buf();
+        let new_cwd = self.unarchive_path(
+            self.archive_path(cwd)
+                .ancestors()
+                .find(|d| read_dir(self.unarchive_path(d)).is_ok())
+                .ok_or_else(|| anyhow!("failed to change directory"))
+                .unwrap(),
+        );
 
         if new_cwd != self.cwd {
             self.old_cwd = self.cwd.clone();
@@ -1023,7 +1093,7 @@ impl Panel for FilePanel {
             self.cursor_position = 0;
             self.first_line = 0;
 
-            self.load_file_list(Some(&self.old_cwd.clone()));
+            self.load_file_list(Some(&self.archive_path(&self.old_cwd)));
         }
     }
 }

@@ -67,7 +67,7 @@ pub struct App {
     printwd: Option<PathBuf>,
     tabsize: u8,
     ctrl_o: bool,
-    archive_mounter: Option<ArchiveMounter>,
+    archive_mounter: Option<Rc<RefCell<ArchiveMounter>>>,
 }
 
 impl App {
@@ -82,6 +82,8 @@ impl App {
     ) -> Result<App> {
         let (pubsub_tx, pubsub_rx) = crossbeam_channel::unbounded();
 
+        let archive_mounter = ArchiveMounter::new().map(|mounter| Rc::new(RefCell::new(mounter)));
+
         Ok(App {
             config: Rc::clone(config),
             pubsub_tx: pubsub_tx.clone(),
@@ -92,6 +94,7 @@ impl App {
                     bookmarks,
                     pubsub_tx.clone(),
                     initial_path,
+                    archive_mounter.as_ref(),
                     Focus::Focused,
                 )),
                 Box::new(FilePanel::new(
@@ -99,6 +102,7 @@ impl App {
                     bookmarks,
                     pubsub_tx.clone(),
                     initial_path,
+                    archive_mounter.as_ref(),
                     Focus::Normal,
                 )),
                 Box::new(QuickView::new(
@@ -117,7 +121,7 @@ impl App {
             printwd: printwd.map(PathBuf::from),
             tabsize,
             ctrl_o: false,
-            archive_mounter: ArchiveMounter::new(),
+            archive_mounter,
         })
     }
 
@@ -429,10 +433,10 @@ impl App {
                 )));
             }
             PubSub::MountArchive(archive) => {
-                if let Some(archive_mounter) = &self.archive_mounter {
+                if let Some(mounter) = &self.archive_mounter {
                     self.pubsub_tx
                         .send(PubSub::Info(
-                            archive_mounter.get_exe_name(),
+                            mounter.borrow().get_exe_name(),
                             String::from("Opening archive..."),
                         ))
                         .unwrap();
@@ -445,10 +449,10 @@ impl App {
             PubSub::DoMountArchive(archive) => {
                 self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
 
-                if let Some(archive_mounter) = &mut self.archive_mounter {
-                    let shown_archive = archive_mounter.archive_path(archive);
+                if let Some(mounter) = &mut self.archive_mounter {
+                    let shown_archive = mounter.borrow().archive_path(archive);
 
-                    match archive_mounter.mount_archive(&shown_archive) {
+                    match mounter.borrow_mut().mount_archive(&shown_archive) {
                         Ok(temp_dir) => {
                             self.pubsub_tx
                                 .send(PubSub::ArchiveMounted(archive.clone(), temp_dir))
@@ -462,7 +466,6 @@ impl App {
                     }
                 }
             }
-
             _ => (),
         }
 
