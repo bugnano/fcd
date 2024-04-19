@@ -657,6 +657,7 @@ impl Component for FilePanel {
                         .send(PubSub::PromptFileFilter(self.file_filter.clone()))
                         .unwrap();
                 }
+                Key::F(7) => self.pubsub_tx.send(PubSub::PromptMkdir).unwrap(),
                 _ => key_handled = false,
             }
         }

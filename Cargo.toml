@@ -36,6 +36,8 @@ natord = "*"
 atomicwrites = "*"
 home = "*"
 tempfile = "*"
+shlex = "*"
+pathdiff = "*"
 
 [profile.release]
 strip = true

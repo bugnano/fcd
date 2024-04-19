@@ -13,6 +13,7 @@ use ratatui::prelude::*;
 use termion::event::*;
 
 use chrono::{DateTime, Datelike, Local};
+use pathdiff::diff_paths;
 use signal_hook::consts::signal::*;
 use unicode_normalization::UnicodeNormalization;
 
@@ -51,6 +52,12 @@ pub const LABELS: &[&str] = &[
     " ",      //
     "Quit",   //
 ];
+
+#[derive(Debug, Clone, Copy)]
+enum Quote {
+    Yes,
+    No,
+}
 
 #[derive(Debug)]
 pub struct App {
@@ -432,6 +439,19 @@ impl App {
                     1,
                 )));
             }
+            PubSub::PromptMkdir => {
+                self.command_bar = Some(Box::new(CmdBar::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    CmdBarType::Mkdir,
+                    "mkdir: ",
+                    "",
+                    0,
+                )));
+            }
+            PubSub::Mkdir(directory) => {
+                let new_dir = self.apply_template(directory, Quote::No);
+            }
             PubSub::MountArchive(archive) => {
                 if let Some(mounter) = &self.archive_mounter {
                     self.pubsub_tx
@@ -470,6 +490,38 @@ impl App {
         }
 
         action
+    }
+
+    fn apply_template(&self, s: &str, quote: Quote) -> String {
+        let (focus_position, other_position) = match self.quickviewer_position {
+            2 => (self.panel_focus_position, self.panel_focus_position ^ 1),
+            pos if pos == self.panel_focus_position => (self.panel_focus_position ^ 1, 2),
+            _ => (self.panel_focus_position, 2),
+        };
+
+        let fn_quote = |s: &str| match quote {
+            Quote::Yes => shlex::try_quote(s)
+                .map(String::from)
+                .unwrap_or(String::new()),
+            Quote::No => String::from(s),
+        };
+
+        let cwd = self.panels[focus_position]
+            .get_cwd()
+            .expect("BUG: The focused panel has no working directory set");
+
+        let current_file =
+            fn_quote(
+                self.panels[focus_position]
+                    .get_selected_entry()
+                    .map(|entry| {
+                        diff_paths(entry.file, cwd)
+                    .expect("BUG: The selected entry should be relative to the working directory")
+                    .to_string_lossy()
+                    .to_string()
+                    })
+                    .unwrap_or(String::new()),
+            );
     }
 }
 

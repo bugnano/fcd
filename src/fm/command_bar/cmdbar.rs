@@ -17,6 +17,7 @@ use crate::{
 pub enum CmdBarType {
     TagGlob,
     UntagGlob,
+    Mkdir,
 }
 
 #[derive(Debug)]
@@ -65,6 +66,11 @@ impl Component for CmdBar {
                         CmdBarType::UntagGlob => {
                             self.pubsub_tx
                                 .send(PubSub::UntagGlob(self.input.value()))
+                                .unwrap();
+                        }
+                        CmdBarType::Mkdir => {
+                            self.pubsub_tx
+                                .send(PubSub::Mkdir(self.input.value()))
                                 .unwrap();
                         }
                     }

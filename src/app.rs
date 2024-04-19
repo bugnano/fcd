@@ -68,6 +68,7 @@ pub enum PubSub {
     PromptFileFilter(String),
     PromptTagGlob,
     PromptUntagGlob,
+    PromptMkdir,
     MountArchive(PathBuf),
 
     // Quick view events
@@ -78,6 +79,7 @@ pub enum PubSub {
     FileFilter(String),
     TagGlob(String),
     UntagGlob(String),
+    Mkdir(String),
 }
 
 #[derive(Debug, Copy, Clone)]
