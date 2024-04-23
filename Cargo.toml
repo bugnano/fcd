@@ -38,6 +38,7 @@ home = "*"
 tempfile = "*"
 shlex = "*"
 pathdiff = "*"
+itertools = "*"
 
 [profile.release]
 strip = true

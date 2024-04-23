@@ -13,6 +13,7 @@ use ratatui::prelude::*;
 use termion::event::*;
 
 use chrono::{DateTime, Datelike, Local};
+use itertools::Itertools;
 use pathdiff::diff_paths;
 use signal_hook::consts::signal::*;
 use unicode_normalization::UnicodeNormalization;
@@ -31,10 +32,12 @@ use crate::{
             filter::Filter,
             leader::Leader,
         },
+        entry::Entry,
         file_panel::FilePanel,
         panel::PanelComponent,
         quickview::QuickView,
     },
+    template,
     viewer::{
         self, dlg_goto::DlgGoto, dlg_hex_search::DlgHexSearch, dlg_text_search::DlgTextSearch,
     },
@@ -450,7 +453,7 @@ impl App {
                 )));
             }
             PubSub::Mkdir(directory) => {
-                let new_dir = self.apply_template(directory, Quote::No);
+                let new_dir = PathBuf::from(&self.apply_template(directory, Quote::No));
             }
             PubSub::MountArchive(archive) => {
                 if let Some(mounter) = &self.archive_mounter {
@@ -499,29 +502,143 @@ impl App {
             _ => (self.panel_focus_position, 2),
         };
 
-        let fn_quote = |s: &str| match quote {
-            Quote::Yes => shlex::try_quote(s)
-                .map(String::from)
-                .unwrap_or(String::new()),
-            Quote::No => String::from(s),
+        let fn_quote = |s: &str| -> String {
+            match quote {
+                Quote::Yes => shlex::try_quote(s).map(String::from).unwrap_or_default(),
+                Quote::No => String::from(s),
+            }
+        };
+
+        let get_file_name_extension = |selected_entry: Option<&Entry>, cwd| {
+            let file = fn_quote(
+                &selected_entry
+                    .map(|entry| {
+                        diff_paths(&entry.file, cwd)
+                    .expect("BUG: The selected entry should be relative to the working directory")
+                    .to_string_lossy()
+                    .to_string()
+                    })
+                    .unwrap_or_default(),
+            );
+
+            let name = fn_quote(
+                &selected_entry
+                    .map(|entry| {
+                        tar_stem(
+                            &entry
+                                .file
+                                .file_name()
+                                .map(|name| name.to_string_lossy().to_string())
+                                .unwrap_or_default(),
+                        )
+                    })
+                    .unwrap_or_default(),
+            );
+
+            let extension = fn_quote(
+                &selected_entry
+                    .map(|entry| {
+                        tar_suffix(
+                            &entry
+                                .file
+                                .file_name()
+                                .map(|name| name.to_string_lossy().to_string())
+                                .unwrap_or_default(),
+                        )
+                    })
+                    .unwrap_or_default(),
+            );
+
+            (file, name, extension)
         };
 
         let cwd = self.panels[focus_position]
             .get_cwd()
             .expect("BUG: The focused panel has no working directory set");
 
-        let current_file =
-            fn_quote(
-                self.panels[focus_position]
-                    .get_selected_entry()
-                    .map(|entry| {
-                        diff_paths(entry.file, cwd)
-                    .expect("BUG: The selected entry should be relative to the working directory")
-                    .to_string_lossy()
-                    .to_string()
-                    })
-                    .unwrap_or(String::new()),
-            );
+        let other_cwd = self.panels[other_position]
+            .get_cwd()
+            .expect("BUG: The other panel has no working directory set");
+
+        let (current_file, current_name, current_extension) = get_file_name_extension(
+            self.panels[focus_position].get_selected_entry().as_ref(),
+            &cwd,
+        );
+
+        let (other_file, other_name, other_extension) = get_file_name_extension(
+            self.panels[other_position].get_selected_entry().as_ref(),
+            &PathBuf::from(""),
+        );
+
+        let current_tagged = self.panels[focus_position]
+            .get_tagged_files()
+            .iter()
+            .map(|entry| {
+                fn_quote(
+                    diff_paths(&entry.file, &cwd)
+                        .expect("BUG: The tagged entry should be relative to the working directory")
+                        .to_string_lossy()
+                        .as_ref(),
+                )
+            })
+            .join(" ");
+
+        let other_tagged = self.panels[other_position]
+            .get_tagged_files()
+            .iter()
+            .map(|entry| fn_quote(entry.file.to_string_lossy().as_ref()))
+            .join(" ");
+
+        let current_selected = match current_tagged.is_empty() {
+            true => current_file.clone(),
+            false => current_tagged.clone(),
+        };
+
+        let other_selected = match other_tagged.is_empty() {
+            true => other_file.clone(),
+            false => other_tagged.clone(),
+        };
+
+        // For the base name of the directories, it's more useful to give
+        // the archive name instead of the temp. directory name
+        let current_base = fn_quote(
+            &match &self.archive_mounter {
+                Some(mounter) => mounter.borrow().archive_path(&cwd),
+                None => cwd.clone(),
+            }
+            .file_name()
+            .map(|base| base.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        );
+
+        let other_base = fn_quote(
+            &match &self.archive_mounter {
+                Some(mounter) => mounter.borrow().archive_path(&other_cwd),
+                None => other_cwd.clone(),
+            }
+            .file_name()
+            .map(|base| base.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        );
+
+        let mapping = [
+            ("f", current_file),
+            ("n", current_name),
+            ("e", current_extension),
+            ("d", fn_quote(cwd.to_string_lossy().as_ref())),
+            ("b", current_base),
+            ("s", current_selected),
+            ("t", current_tagged),
+            ("F", other_file),
+            ("N", other_name),
+            ("E", other_extension),
+            ("D", fn_quote(other_cwd.to_string_lossy().as_ref())),
+            ("B", other_base),
+            ("S", other_selected),
+            ("T", other_tagged),
+        ];
+
+        template::substitute(s, mapping, '%')
     }
 }
 

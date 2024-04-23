@@ -19,6 +19,10 @@ pub trait Panel {
         None
     }
 
+    fn get_tagged_files(&self) -> Vec<Entry> {
+        Vec::new()
+    }
+
     fn chdir(&mut self, _cwd: &Path) {}
 }
 

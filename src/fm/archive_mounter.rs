@@ -9,6 +9,7 @@ use std::{
 
 use anyhow::{anyhow, Result};
 
+use path_clean::PathClean;
 use tempfile::tempdir;
 
 use crate::shutil::which;
@@ -130,6 +131,7 @@ impl ArchiveMounter {
                     .join(file.strip_prefix(&entry.archive_file).unwrap())
             })
             .unwrap_or_else(|| PathBuf::from(file))
+            .clean()
     }
 
     pub fn archive_path(&self, file: &Path) -> PathBuf {
@@ -143,6 +145,7 @@ impl ArchiveMounter {
                     .join(file.strip_prefix(&entry.temp_dir).unwrap())
             })
             .unwrap_or_else(|| PathBuf::from(file))
+            .clean()
     }
 }
 

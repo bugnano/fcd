@@ -1076,6 +1076,14 @@ impl Panel for FilePanel {
         Some(self.cwd.clone())
     }
 
+    fn get_tagged_files(&self) -> Vec<Entry> {
+        let mut tagged_files = self.tagged_files.clone();
+
+        tagged_files.sort_by(|a, b| sort_by_function(self.sort_method)(a, b, self.sort_order));
+
+        tagged_files
+    }
+
     fn chdir(&mut self, cwd: &Path) {
         let new_cwd = self.unarchive_path(
             self.archive_path(cwd)
