@@ -14,6 +14,7 @@ use termion::event::*;
 
 use chrono::{DateTime, Datelike, Local};
 use itertools::Itertools;
+use path_clean::PathClean;
 use pathdiff::diff_paths;
 use signal_hook::consts::signal::*;
 use unicode_normalization::UnicodeNormalization;
@@ -37,6 +38,7 @@ use crate::{
         panel::PanelComponent,
         quickview::QuickView,
     },
+    shutil::expanduser,
     template,
     viewer::{
         self, dlg_goto::DlgGoto, dlg_hex_search::DlgHexSearch, dlg_text_search::DlgTextSearch,
@@ -453,7 +455,34 @@ impl App {
                 )));
             }
             PubSub::Mkdir(directory) => {
-                let new_dir = PathBuf::from(&self.apply_template(directory, Quote::No));
+                let new_dir =
+                    expanduser(&PathBuf::from(&self.apply_template(directory, Quote::No)));
+
+                let new_dir = match new_dir.is_absolute() {
+                    true => new_dir.clean(),
+                    false => {
+                        let focus_position = match self.quickviewer_position {
+                            2 => self.panel_focus_position,
+                            pos if pos == self.panel_focus_position => {
+                                self.panel_focus_position ^ 1
+                            }
+                            _ => self.panel_focus_position,
+                        };
+
+                        let mut cwd = self.panels[focus_position]
+                            .get_cwd()
+                            .expect("BUG: The focused panel has no working directory set");
+
+                        cwd.push(new_dir);
+
+                        cwd.clean()
+                    }
+                };
+
+                match fs::create_dir_all(new_dir) {
+                    Ok(()) => self.pubsub_tx.send(PubSub::Reload).unwrap(),
+                    Err(e) => self.pubsub_tx.send(PubSub::Error(e.to_string())).unwrap(),
+                }
             }
             PubSub::MountArchive(archive) => {
                 if let Some(mounter) = &self.archive_mounter {
