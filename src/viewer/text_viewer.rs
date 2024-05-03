@@ -26,22 +26,54 @@ use crate::{
     },
 };
 
-fn expand_tabs_for_line(line: &str, tabsize: usize) -> String {
-    let mut expanded = String::new();
-    let mut column = 0;
+fn universal_newlines(content: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    let mut last_cr = false;
 
-    for c in line.chars() {
-        if c == '\t' {
-            let spaces_to_insert = tabsize - (column % tabsize);
-            expanded.push_str(&" ".repeat(spaces_to_insert));
-            column += spaces_to_insert;
-        } else {
-            expanded.push(c);
-            column += 1;
+    for c in content.chars() {
+        match c {
+            '\r' => {
+                out.push('\n');
+                last_cr = true;
+            }
+            '\n' => {
+                if !last_cr {
+                    out.push('\n');
+                }
+                last_cr = false;
+            }
+            c => {
+                out.push(c);
+                last_cr = false;
+            }
         }
     }
 
-    expanded
+    out
+}
+
+fn expand_tabs_for_styled_line(line: &[(String, Style)], tabsize: usize) -> Vec<(String, Style)> {
+    let mut out = Vec::with_capacity(line.len());
+    let mut column = 0;
+
+    for (text, style) in line.iter() {
+        let mut expanded = String::new();
+
+        for c in text.chars() {
+            if c == '\t' {
+                let spaces_to_insert = tabsize - (column % tabsize);
+                expanded.push_str(&" ".repeat(spaces_to_insert));
+                column += spaces_to_insert;
+            } else {
+                expanded.push(c);
+                column += c.width().unwrap_or(0);
+            }
+        }
+
+        out.push((expanded, *style));
+    }
+
+    out
 }
 
 #[derive(Debug, Clone)]
@@ -90,20 +122,18 @@ impl TextViewer {
         };
 
         let content = match str::from_utf8(&data) {
-            Ok(content) => content.replace("\r\n", "\n").replace('\r', "\n"),
+            Ok(content) => universal_newlines(content),
             Err(e) => {
                 // TODO: Instead of a fallback to WINDOWS_1252, we could use chardetng
                 // to find the correct encoding
                 match WINDOWS_1252.decode_without_bom_handling_and_without_replacement(&data) {
-                    Some(content) => content.replace("\r\n", "\n").replace('\r', "\n"),
+                    Some(content) => universal_newlines(&content),
                     None => panic!("{}", e),
                 }
             }
         };
 
-        let lines: Vec<String> = LinesWithEndings::from(&content)
-            .map(|e| expand_tabs_for_line(e, tab_size.into()))
-            .collect();
+        let lines: Vec<String> = LinesWithEndings::from(&content).map(String::from).collect();
 
         // Default to unstyled text
         let styled_lines: Vec<Vec<(String, Style)>> = lines
@@ -609,7 +639,7 @@ impl Component for TextViewer {
                     })
                     .bg(self.config.ui.selected_bg);
 
-                match (
+                let highlighted_line = match (
                     &self.expression,
                     self.lines_with_matches.get(self.first_line + i),
                 ) {
@@ -674,7 +704,9 @@ impl Component for TextViewer {
                         v
                     }
                     _ => e.to_vec(),
-                }
+                };
+
+                expand_tabs_for_styled_line(&highlighted_line, self.tabsize as usize)
             })
             .collect();
 
