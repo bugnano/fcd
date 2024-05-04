@@ -24,6 +24,7 @@ pub trait Panel {
     }
 
     fn chdir(&mut self, _cwd: &Path) {}
+    fn reload(&mut self, _selected_file: Option<&Path>) {}
 }
 
 impl fmt::Debug for dyn Panel + '_ {

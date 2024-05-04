@@ -26,7 +26,7 @@ use crate::{
     component::{Component, Focus},
     config::Config,
     fm::{
-        app::{human_readable_size, LABELS},
+        app::{human_readable_size, tar_stem, tar_suffix, LABELS},
         archive_mounter::ArchiveMounter,
         bookmarks::{Bookmarks, BOOKMARK_KEYS},
         entry::{
@@ -313,6 +313,10 @@ impl Component for FilePanel {
         let mut key_handled = true;
 
         if let Some(c) = self.leader {
+            // When pressing a key after a leader, the leader is automatically reset
+            self.leader = None;
+            self.pubsub_tx.send(PubSub::Leader(self.leader)).unwrap();
+
             match (c, key) {
                 ('`', Key::Char('\'')) | ('`', Key::Char('`')) => {
                     self.chdir_old_cwd();
@@ -374,12 +378,25 @@ impl Component for FilePanel {
                         .send(PubSub::SortFiles(SortBy::Size, SortOrder::Reverse))
                         .unwrap();
                 }
+                ('c', Key::Char('c')) | ('c', Key::Char('w')) => {
+                    if !self.shown_file_list.is_empty() {
+                        self.pubsub_tx
+                            .send(PubSub::PromptRename(String::from(""), 0))
+                            .unwrap();
+                    }
+                }
+                ('c', Key::Char('e')) => {
+                    if !self.shown_file_list.is_empty() {
+                        let entry = &self.shown_file_list[self.cursor_position];
+                        let file_name = tar_suffix(&entry.file_name.replace('%', "%%"));
+
+                        self.pubsub_tx
+                            .send(PubSub::PromptRename(file_name, 0))
+                            .unwrap();
+                    }
+                }
                 _ => key_handled = false,
             }
-
-            // When pressing a key after a leader, the leader is automatically reset
-            self.leader = None;
-            self.pubsub_tx.send(PubSub::Leader(self.leader)).unwrap();
         } else {
             match key {
                 Key::Char(c) if *c == '\'' || *c == '`' => {
@@ -400,6 +417,10 @@ impl Component for FilePanel {
                 }
                 Key::Char('s') => {
                     self.leader = Some('s');
+                    self.pubsub_tx.send(PubSub::Leader(self.leader)).unwrap();
+                }
+                Key::Char('c') => {
+                    self.leader = Some('c');
                     self.pubsub_tx.send(PubSub::Leader(self.leader)).unwrap();
                 }
                 Key::Left | Key::Char('h') => {
@@ -493,7 +514,7 @@ impl Component for FilePanel {
                     if !self.shown_file_list.is_empty() {
                         match &self.archive_mounter {
                             Some(_) => {
-                                let entry = self.shown_file_list[self.cursor_position].clone();
+                                let entry = &self.shown_file_list[self.cursor_position];
 
                                 self.archive_mount_request =
                                     ArchiveMountRequest::Explicit(entry.file.clone());
@@ -619,7 +640,7 @@ impl Component for FilePanel {
                 }
                 Key::Char('*') => {
                     if !self.shown_file_list.is_empty() {
-                        for entry in self.shown_file_list.iter() {
+                        for entry in &self.shown_file_list {
                             if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
                                 self.tagged_files.swap_remove(i);
                             } else {
@@ -630,7 +651,7 @@ impl Component for FilePanel {
                 }
                 Key::Char('T') => {
                     if !self.shown_file_list.is_empty() {
-                        for entry in self.shown_file_list.iter() {
+                        for entry in &self.shown_file_list {
                             if !self.tagged_files.contains(entry) {
                                 self.tagged_files.push(entry.clone());
                             }
@@ -639,7 +660,7 @@ impl Component for FilePanel {
                 }
                 Key::Char('U') => {
                     if !self.shown_file_list.is_empty() {
-                        for entry in self.shown_file_list.iter() {
+                        for entry in &self.shown_file_list {
                             if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
                                 self.tagged_files.swap_remove(i);
                             }
@@ -658,6 +679,46 @@ impl Component for FilePanel {
                         .unwrap();
                 }
                 Key::F(7) => self.pubsub_tx.send(PubSub::PromptMkdir).unwrap(),
+                Key::Char('r') => {
+                    if !self.shown_file_list.is_empty() {
+                        self.pubsub_tx
+                            .send(PubSub::PromptRename(String::from(""), 0))
+                            .unwrap();
+                    }
+                }
+                Key::Char('i') | Key::Char('I') => {
+                    if !self.shown_file_list.is_empty() {
+                        let entry = &self.shown_file_list[self.cursor_position];
+                        let file_name = entry.file_name.replace('%', "%%");
+
+                        self.pubsub_tx
+                            .send(PubSub::PromptRename(file_name, 0))
+                            .unwrap();
+                    }
+                }
+                Key::Char('a') => {
+                    if !self.shown_file_list.is_empty() {
+                        let entry = &self.shown_file_list[self.cursor_position];
+                        let file_name = entry.file_name.replace('%', "%%");
+
+                        self.pubsub_tx
+                            .send(PubSub::PromptRename(
+                                file_name.clone(),
+                                tar_stem(&file_name).chars().count(),
+                            ))
+                            .unwrap();
+                    }
+                }
+                Key::Char('A') => {
+                    if !self.shown_file_list.is_empty() {
+                        let entry = &self.shown_file_list[self.cursor_position];
+                        let file_name = entry.file_name.replace('%', "%%");
+
+                        self.pubsub_tx
+                            .send(PubSub::PromptRename(file_name.clone(), file_name.len()))
+                            .unwrap();
+                    }
+                }
                 _ => key_handled = false,
             }
         }
@@ -784,23 +845,7 @@ impl Component for FilePanel {
                 }
             }
             PubSub::Reload => {
-                let new_cwd = self.unarchive_path(
-                    self.archive_path(&self.cwd)
-                        .ancestors()
-                        .find(|d| read_dir(self.unarchive_path(d)).is_ok())
-                        .ok_or_else(|| anyhow!("failed to change directory"))
-                        .unwrap(),
-                );
-
-                if new_cwd != self.cwd {
-                    self.chdir(&new_cwd);
-                } else {
-                    self.load_file_list(
-                        self.get_selected_file()
-                            .map(|selected_file| self.archive_path(&selected_file))
-                            .as_deref(),
-                    );
-                }
+                self.reload(self.get_selected_file().as_deref());
             }
             PubSub::ArchiveMounted(archive_file, temp_dir) => match &self.archive_mount_request {
                 ArchiveMountRequest::Explicit(archive) | ArchiveMountRequest::Implicit(archive) => {
@@ -1103,6 +1148,26 @@ impl Panel for FilePanel {
             self.first_line = 0;
 
             self.load_file_list(Some(&self.archive_path(&self.old_cwd)));
+        }
+    }
+
+    fn reload(&mut self, selected_file: Option<&Path>) {
+        let new_cwd = self.unarchive_path(
+            self.archive_path(&self.cwd)
+                .ancestors()
+                .find(|d| read_dir(self.unarchive_path(d)).is_ok())
+                .ok_or_else(|| anyhow!("failed to change directory"))
+                .unwrap(),
+        );
+
+        if new_cwd != self.cwd {
+            self.chdir(&new_cwd);
+        } else {
+            self.load_file_list(
+                selected_file
+                    .map(|selected_file| self.archive_path(selected_file))
+                    .as_deref(),
+            );
         }
     }
 }

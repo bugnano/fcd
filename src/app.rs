@@ -69,6 +69,7 @@ pub enum PubSub {
     PromptTagGlob,
     PromptUntagGlob,
     PromptMkdir,
+    PromptRename(String, usize),
     MountArchive(PathBuf),
 
     // Quick view events
@@ -80,6 +81,7 @@ pub enum PubSub {
     TagGlob(String),
     UntagGlob(String),
     Mkdir(String),
+    Rename(String),
 }
 
 #[derive(Debug, Copy, Clone)]

@@ -484,6 +484,129 @@ impl App {
                     Err(e) => self.pubsub_tx.send(PubSub::Error(e.to_string())).unwrap(),
                 }
             }
+            PubSub::PromptRename(file_name, cursor_position) => {
+                self.command_bar = Some(Box::new(CmdBar::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    CmdBarType::Rename,
+                    "rename: ",
+                    file_name,
+                    *cursor_position,
+                )));
+            }
+            PubSub::Rename(new_name) => {
+                let new_name =
+                    expanduser(&PathBuf::from(&self.apply_template(new_name, Quote::No)));
+
+                let focus_position = match self.quickviewer_position {
+                    2 => self.panel_focus_position,
+                    pos if pos == self.panel_focus_position => self.panel_focus_position ^ 1,
+                    _ => self.panel_focus_position,
+                };
+
+                let selected_entry = self.panels[focus_position]
+                    .get_selected_entry()
+                    .expect("BUG: The focused panel has no selected entry");
+
+                let mut new_name = match new_name.is_absolute() {
+                    true => new_name.clean(),
+                    false => {
+                        let mut cwd = self.panels[focus_position]
+                            .get_cwd()
+                            .expect("BUG: The focused panel has no working directory set");
+
+                        cwd.push(new_name);
+
+                        cwd.clean()
+                    }
+                };
+
+                if new_name.is_dir() {
+                    new_name.push(&selected_entry.file_name);
+                }
+
+                let old_name = fs::canonicalize(&selected_entry.file);
+
+                match new_name.try_exists() {
+                    Ok(true) => {
+                        match (fs::canonicalize(&new_name), old_name) {
+                            (Ok(path1), Ok(path2)) if path1 == path2 => {
+                                // Renaming a file to itself is a no-op
+                            }
+                            (Ok(_), Ok(_)) => {
+                                self.pubsub_tx
+                                    .send(PubSub::Error(String::from("File already exists")))
+                                    .unwrap();
+                            }
+                            (Err(e), _) => {
+                                self.pubsub_tx.send(PubSub::Error(e.to_string())).unwrap();
+                            }
+                            (_, Err(e)) => {
+                                self.pubsub_tx.send(PubSub::Error(e.to_string())).unwrap();
+                            }
+                        }
+                    }
+                    _ => match fs::rename(&selected_entry.file, &new_name) {
+                        Ok(()) => {
+                            if let (Ok(old_file), Ok(new_file)) =
+                                (old_name, fs::canonicalize(&new_name))
+                            {
+                                let parent = new_file.parent().unwrap();
+
+                                let old_file_name = selected_entry
+                                    .file
+                                    .file_name()
+                                    .unwrap()
+                                    .to_string_lossy()
+                                    .to_string();
+
+                                let new_file_name =
+                                    new_name.file_name().unwrap().to_string_lossy().to_string();
+
+                                // We need to reload the panels, taking into consideration that
+                                // if the selected entry was the renamed file, we need to update the
+                                // selected entry to the new name
+                                if old_file.parent().unwrap() == parent {
+                                    for panel in &mut self.panels {
+                                        match panel.get_cwd() {
+                                            Some(cwd) => match fs::canonicalize(&cwd) {
+                                                Ok(canonical_cwd) if canonical_cwd == parent => {
+                                                    match panel.get_selected_entry() {
+                                                        Some(entry)
+                                                            if entry.file_name == old_file_name =>
+                                                        {
+                                                            let mut selected_entry =
+                                                                PathBuf::from(&cwd);
+
+                                                            selected_entry.push(&new_file_name);
+
+                                                            panel.reload(Some(&selected_entry));
+                                                        }
+                                                        Some(entry) => {
+                                                            panel.reload(Some(&entry.file));
+                                                        }
+                                                        None => panel.reload(None),
+                                                    }
+                                                }
+                                                _ => match panel.get_selected_entry() {
+                                                    Some(entry) => panel.reload(Some(&entry.file)),
+                                                    None => panel.reload(None),
+                                                },
+                                            },
+                                            None => panel.reload(None),
+                                        }
+                                    }
+                                } else {
+                                    self.pubsub_tx.send(PubSub::Reload).unwrap();
+                                }
+                            } else {
+                                self.pubsub_tx.send(PubSub::Reload).unwrap();
+                            }
+                        }
+                        Err(e) => self.pubsub_tx.send(PubSub::Error(e.to_string())).unwrap(),
+                    },
+                }
+            }
             PubSub::MountArchive(archive) => {
                 if let Some(mounter) = &self.archive_mounter {
                     self.pubsub_tx

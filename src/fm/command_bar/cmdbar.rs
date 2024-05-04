@@ -18,6 +18,7 @@ pub enum CmdBarType {
     TagGlob,
     UntagGlob,
     Mkdir,
+    Rename,
 }
 
 #[derive(Debug)]
@@ -71,6 +72,11 @@ impl Component for CmdBar {
                         CmdBarType::Mkdir => {
                             self.pubsub_tx
                                 .send(PubSub::Mkdir(self.input.value()))
+                                .unwrap();
+                        }
+                        CmdBarType::Rename => {
+                            self.pubsub_tx
+                                .send(PubSub::Rename(self.input.value()))
                                 .unwrap();
                         }
                     }
