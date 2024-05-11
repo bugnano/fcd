@@ -125,7 +125,7 @@ impl FilePanel {
 
         panel.file_list_thread();
         panel.chdir(initial_path);
-        panel.old_cwd = panel.cwd.clone();
+        panel.old_cwd.clone_from(&panel.cwd);
 
         panel
     }
@@ -759,7 +759,7 @@ impl Component for FilePanel {
             PubSub::FileFilter(filter) => {
                 if let Focus::Focused = self.focus {
                     if filter != &self.file_filter {
-                        self.file_filter = filter.clone();
+                        self.file_filter.clone_from(filter);
 
                         self.filter_and_sort_file_list(self.get_selected_file().as_deref());
 
@@ -1139,7 +1139,7 @@ impl Panel for FilePanel {
         );
 
         if new_cwd != self.cwd {
-            self.old_cwd = self.cwd.clone();
+            self.old_cwd.clone_from(&self.cwd);
             self.cwd = new_cwd;
 
             self.file_filter.clear();

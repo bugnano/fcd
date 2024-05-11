@@ -32,7 +32,7 @@ impl ButtonBar {
 impl Component for ButtonBar {
     fn handle_pubsub(&mut self, event: &PubSub) {
         match event {
-            PubSub::ButtonLabels(labels) => self.labels = labels.clone(),
+            PubSub::ButtonLabels(labels) => self.labels.clone_from(labels),
             _ => (),
         }
     }

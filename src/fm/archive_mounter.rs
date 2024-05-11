@@ -57,7 +57,7 @@ impl ArchiveMounter {
 
         Command::new(&self.executable)
             .args(["-o", "ro"])
-            .args([archive.file_name().unwrap(), &temp_dir.as_os_str()])
+            .args([archive.file_name().unwrap(), temp_dir.as_os_str()])
             .current_dir(&self.unarchive_path(archive.parent().unwrap()))
             .stderr(Stdio::piped())
             .spawn()
