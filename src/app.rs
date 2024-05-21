@@ -31,6 +31,7 @@ pub enum PubSub {
     DoMountArchive(PathBuf),
     ArchiveMounted(PathBuf, PathBuf),
     ArchiveMountError(PathBuf, String),
+    Question(String, String, Box<PubSub>),
 
     // Button bar events
     ButtonLabels(Vec<String>),
@@ -71,6 +72,7 @@ pub enum PubSub {
     PromptMkdir,
     PromptRename(String, usize),
     MountArchive(PathBuf),
+    Rm(Vec<Entry>),
 
     // Quick view events
     ToggleQuickView(Option<Entry>),

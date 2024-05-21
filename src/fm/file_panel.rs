@@ -719,6 +719,24 @@ impl Component for FilePanel {
                             .unwrap();
                     }
                 }
+                Key::F(8) => {
+                    let selected_files = self.get_selected_files();
+
+                    if !selected_files.is_empty() {
+                        let question = match selected_files.len() {
+                            1 => format!("Delete {}?", selected_files[0].file_name),
+                            n => format!("Delete {} files/directories?", n),
+                        };
+
+                        self.pubsub_tx
+                            .send(PubSub::Question(
+                                String::from("Delete"),
+                                question,
+                                Box::new(PubSub::Rm(selected_files)),
+                            ))
+                            .unwrap();
+                    }
+                }
                 _ => key_handled = false,
             }
         }
@@ -1127,6 +1145,21 @@ impl Panel for FilePanel {
         tagged_files.sort_by(|a, b| sort_by_function(self.sort_method)(a, b, self.sort_order));
 
         tagged_files
+    }
+
+    fn get_selected_files(&self) -> Vec<Entry> {
+        match self.tagged_files.is_empty() {
+            true => {
+                let mut selected_files = Vec::new();
+
+                if !self.shown_file_list.is_empty() {
+                    selected_files.push(self.shown_file_list[self.cursor_position].clone());
+                }
+
+                selected_files
+            }
+            false => self.get_tagged_files(),
+        }
     }
 
     fn chdir(&mut self, cwd: &Path) {

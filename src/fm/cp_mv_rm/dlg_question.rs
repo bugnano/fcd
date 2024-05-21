@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{cmp::max, rc::Rc};
 
 use crossbeam_channel::Sender;
 use ratatui::{
@@ -10,6 +10,8 @@ use ratatui::{
 };
 use termion::event::*;
 
+use unicode_width::UnicodeWidthStr;
+
 use crate::{
     app::{centered_rect, render_shadow, PubSub},
     component::{Component, Focus},
@@ -18,59 +20,58 @@ use crate::{
     widgets::button::Button,
 };
 
-#[derive(Debug, Copy, Clone)]
-pub enum DirscanType {
-    Cp,
-    Mv,
-    Rm,
-}
-
 #[derive(Debug)]
-pub struct DlgDirscan {
+pub struct DlgQuestion {
     config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
-    btn_abort: Button,
-    btn_skip: Button,
-    current: String,
-    files: usize,
-    total_size: Option<u64>,
+    btn_yes: Button,
+    btn_no: Button,
+    title: String,
+    question: String,
+    on_yes: PubSub,
     focus_position: usize,
 }
 
-impl DlgDirscan {
-    pub fn new(config: &Rc<Config>, pubsub_tx: Sender<PubSub>) -> DlgDirscan {
-        DlgDirscan {
+impl DlgQuestion {
+    pub fn new(
+        config: &Rc<Config>,
+        pubsub_tx: Sender<PubSub>,
+        title: &str,
+        question: &str,
+        on_yes: &PubSub,
+    ) -> DlgQuestion {
+        DlgQuestion {
             config: Rc::clone(config),
             pubsub_tx,
-            btn_abort: Button::new(
-                "Abort",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
+            btn_yes: Button::new(
+                "Yes",
+                &Style::default().fg(config.error.fg).bg(config.error.bg),
                 &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
+                    .fg(config.error.focus_fg)
+                    .bg(config.error.focus_bg),
                 &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                    .fg(config.error.title_fg)
+                    .bg(config.error.bg),
             ),
-            btn_skip: Button::new(
-                "Skip",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
+            btn_no: Button::new(
+                "No",
+                &Style::default().fg(config.error.fg).bg(config.error.bg),
                 &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
+                    .fg(config.error.focus_fg)
+                    .bg(config.error.focus_bg),
                 &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                    .fg(config.error.title_fg)
+                    .bg(config.error.bg),
             ),
-            current: String::from(""),
-            files: 0,
-            total_size: None,
+            title: format!(" {} ", title),
+            question: String::from(question),
+            on_yes: on_yes.clone(),
             focus_position: 0,
         }
     }
 }
 
-impl Component for DlgDirscan {
+impl Component for DlgQuestion {
     fn handle_key(&mut self, key: &Key) -> bool {
         let mut key_handled = true;
 
@@ -78,11 +79,15 @@ impl Component for DlgDirscan {
             Key::Esc | Key::Char('q') | Key::Char('Q') | Key::F(10) => {
                 self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
             }
-            Key::Char('\n') | Key::Char(' ') => match self.focus_position {
-                0 => todo!(),
-                1 => todo!(),
-                _ => unreachable!(),
-            },
+            Key::Char('\n') | Key::Char(' ') => {
+                self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                match self.focus_position {
+                    0 => self.pubsub_tx.send(self.on_yes.clone()).unwrap(),
+                    1 => {}
+                    _ => unreachable!(),
+                }
+            }
             Key::Left | Key::Char('h') => self.focus_position = 0,
             Key::Right | Key::Char('l') => self.focus_position = 1,
             Key::Ctrl('c') => key_handled = false,
@@ -96,14 +101,14 @@ impl Component for DlgDirscan {
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
-        let area = centered_rect((chunk.width + 1) / 2, 9, chunk);
+        let area = centered_rect(max(self.question.width() + 6, 21) as u16, 7, chunk);
 
         f.render_widget(Clear, area);
         f.render_widget(
             Block::default().style(
                 Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
+                    .fg(self.config.error.fg)
+                    .bg(self.config.error.bg),
             ),
             area,
         );
@@ -125,7 +130,7 @@ impl Component for DlgDirscan {
 
         let sections = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(6), Constraint::Length(3)])
+            .constraints([Constraint::Length(2), Constraint::Length(3)])
             .split(centered_rect(
                 area.width.saturating_sub(2),
                 area.height.saturating_sub(2),
@@ -137,8 +142,8 @@ impl Component for DlgDirscan {
         let upper_block = Block::default()
             .title(
                 Title::from(Span::styled(
-                    tilde_layout(" Directory scanning ", sections[0].width as usize),
-                    Style::default().fg(self.config.dialog.title_fg),
+                    tilde_layout(&self.title, sections[0].width as usize),
+                    Style::default().fg(self.config.error.title_fg),
                 ))
                 .position(Position::Top)
                 .alignment(Alignment::Center),
@@ -147,42 +152,19 @@ impl Component for DlgDirscan {
             .padding(Padding::horizontal(1))
             .style(
                 Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
+                    .fg(self.config.error.fg)
+                    .bg(self.config.error.bg),
             );
 
-        let upper_area = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-            ])
-            .split(upper_block.inner(sections[0]));
+        let upper_area = upper_block.inner(sections[0]);
 
-        let current = Paragraph::new(Span::raw(tilde_layout(
-            &self.current,
-            upper_area[0].width as usize,
-        )));
-        let files = Paragraph::new(Span::raw(tilde_layout(
-            &format!("Files: {}", self.files),
-            upper_area[1].width as usize,
-        )));
-        let total_size = Paragraph::new(Span::raw(tilde_layout(
-            &format!(
-                "Total size: {}",
-                match self.total_size {
-                    Some(size) => size.to_string(),
-                    None => "n/a".to_string(),
-                }
-            ),
-            upper_area[1].width as usize,
+        let question = Paragraph::new(Span::raw(tilde_layout(
+            &self.question,
+            upper_area.width as usize,
         )));
 
         f.render_widget(upper_block, sections[0]);
-        f.render_widget(current, upper_area[0]);
-        f.render_widget(files, upper_area[1]);
-        f.render_widget(total_size, upper_area[2]);
+        f.render_widget(question, upper_area);
 
         // Lower section
 
@@ -191,25 +173,25 @@ impl Component for DlgDirscan {
             .border_set(middle_border_set)
             .style(
                 Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
+                    .fg(self.config.error.fg)
+                    .bg(self.config.error.bg),
             );
 
         let lower_area = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Length(self.btn_abort.width() as u16),
+                Constraint::Length(self.btn_yes.width() as u16),
                 Constraint::Length(1),
-                Constraint::Length(self.btn_skip.width() as u16),
+                Constraint::Length(self.btn_no.width() as u16),
             ])
             .split(centered_rect(
-                (self.btn_abort.width() + 1 + self.btn_skip.width()) as u16,
+                (self.btn_yes.width() + 1 + self.btn_no.width()) as u16,
                 1,
                 &lower_block.inner(sections[1]),
             ));
 
         f.render_widget(lower_block, sections[1]);
-        self.btn_abort.render(
+        self.btn_yes.render(
             f,
             &lower_area[0],
             match self.focus_position {
@@ -217,7 +199,7 @@ impl Component for DlgDirscan {
                 _ => Focus::Normal,
             },
         );
-        self.btn_skip.render(
+        self.btn_no.render(
             f,
             &lower_area[2],
             match self.focus_position {

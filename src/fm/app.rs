@@ -33,6 +33,7 @@ use crate::{
             filter::Filter,
             leader::Leader,
         },
+        cp_mv_rm::{dlg_dirscan::DlgDirscan, dlg_question::DlgQuestion},
         entry::Entry,
         file_panel::FilePanel,
         panel::PanelComponent,
@@ -640,6 +641,21 @@ impl App {
                         }
                     }
                 }
+            }
+            PubSub::Question(title, question, on_yes) => {
+                self.dialog = Some(Box::new(DlgQuestion::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    title,
+                    question,
+                    on_yes,
+                )));
+            }
+            PubSub::Rm(_entries) => {
+                self.dialog = Some(Box::new(DlgDirscan::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                )));
             }
             _ => (),
         }

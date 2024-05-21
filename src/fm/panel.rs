@@ -23,6 +23,10 @@ pub trait Panel {
         Vec::new()
     }
 
+    fn get_selected_files(&self) -> Vec<Entry> {
+        Vec::new()
+    }
+
     fn chdir(&mut self, _cwd: &Path) {}
     fn reload(&mut self, _selected_file: Option<&Path>) {}
 }
