@@ -92,7 +92,9 @@ impl App {
                                     | Key::Char('Q')
                                     | Key::Char('v')
                                     | Key::F(3)
-                                    | Key::F(10) => action = Action::Quit,
+                                    | Key::F(10)
+                                    | Key::Char('3')
+                                    | Key::Char('0') => action = Action::Quit,
                                     //Key::Char('p') => panic!("at the disco"),
                                     Key::Ctrl('c') => action = Action::CtrlC,
                                     Key::Ctrl('l') => action = Action::Redraw,

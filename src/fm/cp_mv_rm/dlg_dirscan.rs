@@ -1,6 +1,11 @@
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    path::{Path, PathBuf},
+    rc::Rc,
+    thread,
+};
 
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Receiver, Sender};
 use ratatui::{
     prelude::*,
     widgets::{
@@ -10,38 +15,74 @@ use ratatui::{
 };
 use termion::event::*;
 
+use thousands::Separable;
+
 use crate::{
     app::{centered_rect, render_shadow, PubSub},
     component::{Component, Focus},
     config::Config,
+    fm::{
+        app::human_readable_size,
+        archive_mounter::ArchiveMounter,
+        cp_mv_rm::dirscan::{dirscan, DirScanEvent, DirScanInfo, DirScanResult, ReadMetadata},
+        entry::Entry,
+    },
     tilde_layout::tilde_layout,
     widgets::button::Button,
 };
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum DirscanType {
     Cp,
     Mv,
-    Rm,
+    Rm(Vec<Entry>),
 }
 
 #[derive(Debug)]
 pub struct DlgDirscan {
     config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
+    dirscan_type: DirscanType,
+    ev_tx: Sender<DirScanEvent>,
+    info_rx: Receiver<DirScanInfo>,
+    result_rx: Receiver<DirScanResult>,
     btn_abort: Button,
     btn_skip: Button,
     current: String,
     files: usize,
     total_size: Option<u64>,
     focus_position: usize,
+    archive_mounter: Option<Rc<RefCell<ArchiveMounter>>>,
 }
 
 impl DlgDirscan {
-    pub fn new(config: &Rc<Config>, pubsub_tx: Sender<PubSub>) -> DlgDirscan {
-        DlgDirscan {
+    pub fn new(
+        config: &Rc<Config>,
+        pubsub_tx: Sender<PubSub>,
+        cwd: &Path,
+        dirscan_type: DirscanType,
+        archive_mounter: Option<&Rc<RefCell<ArchiveMounter>>>,
+    ) -> DlgDirscan {
+        let (ev_tx, ev_rx) = crossbeam_channel::unbounded();
+        let (info_tx, info_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+
+        let current = match &archive_mounter {
+            Some(mounter) => mounter
+                .borrow()
+                .archive_path(cwd)
+                .to_string_lossy()
+                .to_string(),
+            None => cwd.to_string_lossy().to_string(),
+        };
+
+        let mut dlg = DlgDirscan {
             config: Rc::clone(config),
             pubsub_tx,
+            dirscan_type,
+            ev_tx,
+            info_rx,
+            result_rx,
             btn_abort: Button::new(
                 "Abort",
                 &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
@@ -62,10 +103,52 @@ impl DlgDirscan {
                     .fg(config.dialog.title_fg)
                     .bg(config.dialog.bg),
             ),
-            current: String::from(""),
+            current,
             files: 0,
             total_size: None,
             focus_position: 0,
+            archive_mounter: archive_mounter.cloned(),
+        };
+
+        dlg.dirscan_thread(cwd, ev_rx, info_tx, result_tx);
+
+        dlg
+    }
+
+    fn dirscan_thread(
+        &mut self,
+        cwd: &Path,
+        ev_rx: Receiver<DirScanEvent>,
+        info_tx: Sender<DirScanInfo>,
+        result_tx: Sender<DirScanResult>,
+    ) {
+        let (entries, read_metadata) = match &self.dirscan_type {
+            DirscanType::Cp => todo!(),
+            DirscanType::Mv => todo!(),
+            DirscanType::Rm(entries) => (entries.clone(), ReadMetadata::No),
+        };
+
+        let pubsub_tx = self.pubsub_tx.clone();
+        let cwd = PathBuf::from(cwd);
+
+        thread::spawn(move || {
+            let result = dirscan(
+                &entries,
+                &cwd,
+                read_metadata,
+                ev_rx,
+                info_tx,
+                pubsub_tx.clone(),
+            );
+            let _ = result_tx.send(result);
+            let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
+        });
+    }
+
+    fn archive_path(&self, file: &Path) -> PathBuf {
+        match &self.archive_mounter {
+            Some(mounter) => mounter.borrow().archive_path(file),
+            None => PathBuf::from(file),
         }
     }
 }
@@ -75,12 +158,20 @@ impl Component for DlgDirscan {
         let mut key_handled = true;
 
         match key {
-            Key::Esc | Key::Char('q') | Key::Char('Q') | Key::F(10) => {
+            Key::Esc | Key::Char('q') | Key::Char('Q') | Key::F(10) | Key::Char('0') => {
                 self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                let _ = self.ev_tx.send(DirScanEvent::Abort);
             }
             Key::Char('\n') | Key::Char(' ') => match self.focus_position {
-                0 => todo!(),
-                1 => todo!(),
+                0 => {
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                    let _ = self.ev_tx.send(DirScanEvent::Abort);
+                }
+                1 => {
+                    let _ = self.ev_tx.send(DirScanEvent::Skip);
+                }
                 _ => unreachable!(),
             },
             Key::Left | Key::Char('h') => self.focus_position = 0,
@@ -93,6 +184,25 @@ impl Component for DlgDirscan {
         }
 
         key_handled
+    }
+
+    fn handle_pubsub(&mut self, event: &PubSub) {
+        match event {
+            PubSub::ComponentThreadEvent => {
+                if let Ok(info) = self.info_rx.try_recv() {
+                    self.current = self
+                        .archive_path(&info.current)
+                        .to_string_lossy()
+                        .to_string();
+                    self.files = info.files;
+                    self.total_size = info.bytes;
+                }
+                if let Ok(result) = self.result_rx.try_recv() {
+                    todo!();
+                }
+            }
+            _ => (),
+        }
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
@@ -165,14 +275,14 @@ impl Component for DlgDirscan {
             upper_area[0].width as usize,
         )));
         let files = Paragraph::new(Span::raw(tilde_layout(
-            &format!("Files: {}", self.files),
+            &format!("Files: {}", self.files.separate_with_commas()),
             upper_area[1].width as usize,
         )));
         let total_size = Paragraph::new(Span::raw(tilde_layout(
             &format!(
                 "Total size: {}",
                 match self.total_size {
-                    Some(size) => size.to_string(),
+                    Some(bytes) => human_readable_size(bytes),
                     None => "n/a".to_string(),
                 }
             ),

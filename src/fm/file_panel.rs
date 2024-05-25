@@ -593,7 +593,7 @@ impl Component for FilePanel {
                             .unwrap();
                     }
                 }
-                Key::Char('v') | Key::F(3) => {
+                Key::Char('v') | Key::F(3) | Key::Char('3') => {
                     if !self.shown_file_list.is_empty() {
                         let entry = self.shown_file_list[self.cursor_position].clone();
 
@@ -678,7 +678,7 @@ impl Component for FilePanel {
                         .send(PubSub::PromptFileFilter(self.file_filter.clone()))
                         .unwrap();
                 }
-                Key::F(7) => self.pubsub_tx.send(PubSub::PromptMkdir).unwrap(),
+                Key::F(7) | Key::Char('7') => self.pubsub_tx.send(PubSub::PromptMkdir).unwrap(),
                 Key::Char('r') => {
                     if !self.shown_file_list.is_empty() {
                         self.pubsub_tx
@@ -719,7 +719,7 @@ impl Component for FilePanel {
                             .unwrap();
                     }
                 }
-                Key::F(8) => {
+                Key::F(8) | Key::Char('8') => {
                     let selected_files = self.get_selected_files();
 
                     if !selected_files.is_empty() {

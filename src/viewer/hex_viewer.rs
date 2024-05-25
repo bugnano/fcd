@@ -360,7 +360,7 @@ impl Component for HexViewer {
 
                 self.search_pos = self.offset;
             }
-            Key::Char('h') | Key::F(4) => {
+            Key::Char('h') | Key::F(4) | Key::Char('4') => {
                 self.pubsub_tx.send(PubSub::ToggleHex).unwrap();
 
                 match self.viewer_type {
@@ -376,13 +376,18 @@ impl Component for HexViewer {
                     }
                 }
             }
-            Key::Char(':') | Key::F(5) => {
+            Key::Char(':') | Key::F(5) | Key::Char('5') => {
                 // TODO: Don't show the dialog if the file size is 0
                 self.pubsub_tx
                     .send(PubSub::DlgGoto(GotoType::HexOffset))
                     .unwrap();
             }
-            Key::Char('/') | Key::Char('?') | Key::Char('f') | Key::Char('F') | Key::F(7) => {
+            Key::Char('/')
+            | Key::Char('?')
+            | Key::Char('f')
+            | Key::Char('F')
+            | Key::F(7)
+            | Key::Char('7') => {
                 // TODO: Don't show the dialog if the file size is 0
                 self.pubsub_tx
                     .send(PubSub::DlgHexSearch(HexSearch {

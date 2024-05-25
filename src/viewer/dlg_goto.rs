@@ -88,7 +88,7 @@ impl Component for DlgGoto {
 
         if !input_handled {
             match key {
-                Key::Esc | Key::Char('q') | Key::Char('Q') | Key::F(10) => {
+                Key::Esc | Key::Char('q') | Key::Char('Q') | Key::F(10) | Key::Char('0') => {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
                 }
                 Key::Char('\n') | Key::Char(' ') => {

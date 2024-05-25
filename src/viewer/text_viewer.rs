@@ -448,7 +448,7 @@ impl Component for TextViewer {
 
                 self.search_pos = self.first_line;
             }
-            Key::Char('h') | Key::F(4) => {
+            Key::Char('h') | Key::F(4) | Key::Char('4') => {
                 self.pubsub_tx.send(PubSub::ToggleHex).unwrap();
                 self.pubsub_tx
                     .send(PubSub::ToHexOffset(
@@ -456,13 +456,18 @@ impl Component for TextViewer {
                     ))
                     .unwrap();
             }
-            Key::Char(':') | Key::F(5) => {
+            Key::Char(':') | Key::F(5) | Key::Char('5') => {
                 // TODO: Don't show the dialog if the file size is 0
                 self.pubsub_tx
                     .send(PubSub::DlgGoto(GotoType::LineNumber))
                     .unwrap();
             }
-            Key::Char('/') | Key::Char('?') | Key::Char('f') | Key::Char('F') | Key::F(7) => {
+            Key::Char('/')
+            | Key::Char('?')
+            | Key::Char('f')
+            | Key::Char('F')
+            | Key::F(7)
+            | Key::Char('7') => {
                 // TODO: Don't show the dialog if the file size is 0
                 self.pubsub_tx
                     .send(PubSub::DlgTextSearch(TextSearch {
@@ -486,7 +491,7 @@ impl Component for TextViewer {
                 false => self.search_prev(),
             },
             Key::Esc => self.expression = None,
-            Key::Char('w') | Key::F(2) => {
+            Key::Char('w') | Key::F(2) | Key::Char('2') => {
                 self.wrap = !self.wrap;
                 self.send_updated_position();
             }

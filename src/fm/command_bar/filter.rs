@@ -42,7 +42,7 @@ impl Component for Filter {
             }
             false => match key {
                 Key::Char('\n') => self.pubsub_tx.send(PubSub::CloseCommandBar).unwrap(),
-                Key::Esc | Key::F(10) => {
+                Key::Esc | Key::F(10) | Key::Char('0') => {
                     self.pubsub_tx.send(PubSub::CloseCommandBar).unwrap();
 
                     self.pubsub_tx

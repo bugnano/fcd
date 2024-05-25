@@ -39,6 +39,7 @@ tempfile = "*"
 shlex = "*"
 pathdiff = "*"
 itertools = "*"
+thousands = "*"
 
 [profile.release]
 strip = true

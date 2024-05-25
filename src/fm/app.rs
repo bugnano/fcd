@@ -33,7 +33,10 @@ use crate::{
             filter::Filter,
             leader::Leader,
         },
-        cp_mv_rm::{dlg_dirscan::DlgDirscan, dlg_question::DlgQuestion},
+        cp_mv_rm::{
+            dlg_dirscan::{DirscanType, DlgDirscan},
+            dlg_question::DlgQuestion,
+        },
         entry::Entry,
         file_panel::FilePanel,
         panel::PanelComponent,
@@ -178,7 +181,10 @@ impl App {
 
                             if !key_handled {
                                 match key {
-                                    Key::Char('q') | Key::Char('Q') | Key::F(10) => {
+                                    Key::Char('q')
+                                    | Key::Char('Q')
+                                    | Key::F(10)
+                                    | Key::Char('0') => {
                                         action = Action::Quit;
 
                                         // This assumes that there are always 2 panels visible
@@ -651,10 +657,17 @@ impl App {
                     on_yes,
                 )));
             }
-            PubSub::Rm(_entries) => {
+            PubSub::Rm(entries) => {
+                let cwd = self.panels[self.panel_focus_position]
+                    .get_cwd()
+                    .expect("BUG: The focused panel has no working directory set");
+
                 self.dialog = Some(Box::new(DlgDirscan::new(
                     &self.config,
                     self.pubsub_tx.clone(),
+                    &cwd,
+                    DirscanType::Rm(entries.clone()),
+                    self.archive_mounter.as_ref(),
                 )));
             }
             _ => (),

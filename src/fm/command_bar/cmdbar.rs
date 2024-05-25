@@ -81,7 +81,9 @@ impl Component for CmdBar {
                         }
                     }
                 }
-                Key::Esc | Key::F(10) => self.pubsub_tx.send(PubSub::CloseCommandBar).unwrap(),
+                Key::Esc | Key::F(10) | Key::Char('0') => {
+                    self.pubsub_tx.send(PubSub::CloseCommandBar).unwrap();
+                }
                 Key::Ctrl('c') => key_handled = false,
                 Key::Ctrl('l') => key_handled = false,
                 Key::Ctrl('z') => key_handled = false,
