@@ -34,6 +34,7 @@ use crate::{
             leader::Leader,
         },
         cp_mv_rm::{
+            database::DataBase,
             dlg_dirscan::{DirscanType, DlgDirscan},
             dlg_question::DlgQuestion,
         },
@@ -99,6 +100,8 @@ impl App {
         let (pubsub_tx, pubsub_rx) = crossbeam_channel::unbounded();
 
         let archive_mounter = ArchiveMounter::new().map(|mounter| Rc::new(RefCell::new(mounter)));
+
+        let _ = DataBase::new("fcd.db");
 
         Ok(App {
             config: Rc::clone(config),
