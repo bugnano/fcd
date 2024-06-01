@@ -198,7 +198,16 @@ impl Component for DlgDirscan {
                     self.total_size = info.bytes;
                 }
                 if let Ok(result) = self.result_rx.try_recv() {
-                    todo!();
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                    match &self.dirscan_type {
+                        DirscanType::Cp => todo!(),
+                        DirscanType::Mv => todo!(),
+                        DirscanType::Rm(entries) => self
+                            .pubsub_tx
+                            .send(PubSub::DoRm(entries.clone(), result))
+                            .unwrap(),
+                    }
                 }
             }
             _ => (),
@@ -286,7 +295,7 @@ impl Component for DlgDirscan {
                     None => "n/a".to_string(),
                 }
             ),
-            upper_area[1].width as usize,
+            upper_area[2].width as usize,
         )));
 
         f.render_widget(upper_block, sections[0]);

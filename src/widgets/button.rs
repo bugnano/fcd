@@ -25,6 +25,10 @@ impl Button {
     pub fn width(&self) -> usize {
         self.label.width() + 4
     }
+
+    pub fn set_label(&mut self, label: &str) {
+        self.label = String::from(label);
+    }
 }
 
 impl Component for Button {

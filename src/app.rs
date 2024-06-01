@@ -9,7 +9,10 @@ use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
 
 use crate::{
-    fm::entry::{Entry, SortBy, SortOrder},
+    fm::{
+        cp_mv_rm::dirscan::DirScanResult,
+        entry::{Entry, SortBy, SortOrder},
+    },
     viewer::{dlg_goto::GotoType, dlg_hex_search::HexSearch, dlg_text_search::TextSearch},
 };
 
@@ -84,6 +87,9 @@ pub enum PubSub {
     UntagGlob(String),
     Mkdir(String),
     Rename(String),
+
+    // Dialog DirScan events
+    DoRm(Vec<Entry>, DirScanResult),
 }
 
 #[derive(Debug, Copy, Clone)]

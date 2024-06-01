@@ -37,6 +37,7 @@ use crate::{
             database::DataBase,
             dlg_dirscan::{DirscanType, DlgDirscan},
             dlg_question::DlgQuestion,
+            dlg_rm_progress::DlgRmProgress,
         },
         entry::Entry,
         file_panel::FilePanel,
@@ -670,6 +671,20 @@ impl App {
                     self.pubsub_tx.clone(),
                     &cwd,
                     DirscanType::Rm(entries.clone()),
+                    self.archive_mounter.as_ref(),
+                )));
+            }
+            PubSub::DoRm(entries, dirscan_result) => {
+                let cwd = self.panels[self.panel_focus_position]
+                    .get_cwd()
+                    .expect("BUG: The focused panel has no working directory set");
+
+                self.dialog = Some(Box::new(DlgRmProgress::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    &cwd,
+                    entries,
+                    dirscan_result,
                     self.archive_mounter.as_ref(),
                 )));
             }

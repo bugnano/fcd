@@ -12,6 +12,7 @@ use ratatui::prelude::*;
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use libc::{S_IXGRP, S_IXOTH, S_IXUSR};
 use path_clean::PathClean;
+use thousands::Separable;
 use uzers::{Groups, Users, UsersCache};
 
 use crate::{
@@ -293,7 +294,7 @@ pub fn count_directories(
                         Ok(entries) => {
                             let num_entries = entries.count();
 
-                            (Some(num_entries as u64), num_entries.to_string())
+                            (Some(num_entries as u64), num_entries.separate_with_commas())
                         }
                         Err(_) => (None, String::from("?")),
                     };

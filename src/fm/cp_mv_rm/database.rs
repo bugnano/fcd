@@ -34,7 +34,7 @@ impl DataBase {
                     })?;
 
             if version != DB_VERSION {
-                if let Err(_) = db.conn.close() {
+                if db.conn.close().is_err() {
                     bail!("Failed to close db");
                 }
 
