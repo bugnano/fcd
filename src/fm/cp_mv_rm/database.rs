@@ -1,10 +1,10 @@
-use std::fs;
+use std::{fs, path::Path};
 
 use anyhow::{bail, Result};
 
 use rusqlite::{params, Connection};
 
-const DB_SIGNATURE: &str = "rnr";
+const DB_SIGNATURE: &str = "fcd";
 const DB_VERSION: &str = "1";
 
 #[derive(Debug)]
@@ -13,7 +13,7 @@ pub struct DataBase {
 }
 
 impl DataBase {
-    pub fn new(file: &str) -> Result<DataBase> {
+    pub fn new(file: &Path) -> Result<DataBase> {
         let mut conn = Connection::open(file)?;
 
         let mut db = DataBase { conn };

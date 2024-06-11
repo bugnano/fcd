@@ -10,7 +10,10 @@ use signal_hook::iterator::Signals;
 
 use crate::{
     fm::{
-        cp_mv_rm::dirscan::DirScanResult,
+        cp_mv_rm::{
+            dirscan::DirScanResult,
+            dlg_cp_mv::{DlgCpMvType, OnConflict},
+        },
         entry::{Entry, SortBy, SortOrder},
     },
     viewer::{dlg_goto::GotoType, dlg_hex_search::HexSearch, dlg_text_search::TextSearch},
@@ -76,6 +79,8 @@ pub enum PubSub {
     PromptRename(String, usize),
     MountArchive(PathBuf),
     Rm(Vec<Entry>),
+    Cp(Vec<Entry>),
+    Mv(Vec<Entry>),
 
     // Quick view events
     ToggleQuickView(Option<Entry>),
@@ -90,6 +95,9 @@ pub enum PubSub {
 
     // Dialog DirScan events
     DoRm(Vec<Entry>, DirScanResult),
+
+    // Dialog CpMv events
+    DoDirscan(PathBuf, String, Vec<Entry>, OnConflict, DlgCpMvType),
 }
 
 #[derive(Debug, Copy, Clone)]

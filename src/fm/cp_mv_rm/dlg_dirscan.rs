@@ -24,7 +24,10 @@ use crate::{
     fm::{
         app::human_readable_size,
         archive_mounter::ArchiveMounter,
-        cp_mv_rm::dirscan::{dirscan, DirScanEvent, DirScanInfo, DirScanResult, ReadMetadata},
+        cp_mv_rm::{
+            dirscan::{dirscan, DirScanEvent, DirScanInfo, DirScanResult, ReadMetadata},
+            dlg_cp_mv::OnConflict,
+        },
         entry::Entry,
     },
     tilde_layout::tilde_layout,
@@ -33,15 +36,16 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub enum DirscanType {
-    Cp,
-    Mv,
-    Rm(Vec<Entry>),
+    Cp(PathBuf, OnConflict),
+    Mv(PathBuf, OnConflict),
+    Rm,
 }
 
 #[derive(Debug)]
 pub struct DlgDirscan {
     config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
+    entries: Vec<Entry>,
     dirscan_type: DirscanType,
     ev_tx: Sender<DirScanEvent>,
     info_rx: Receiver<DirScanInfo>,
@@ -60,6 +64,7 @@ impl DlgDirscan {
         config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
         cwd: &Path,
+        entries: &[Entry],
         dirscan_type: DirscanType,
         archive_mounter: Option<&Rc<RefCell<ArchiveMounter>>>,
     ) -> DlgDirscan {
@@ -79,6 +84,7 @@ impl DlgDirscan {
         let mut dlg = DlgDirscan {
             config: Rc::clone(config),
             pubsub_tx,
+            entries: Vec::from(entries),
             dirscan_type,
             ev_tx,
             info_rx,
@@ -122,10 +128,12 @@ impl DlgDirscan {
         info_tx: Sender<DirScanInfo>,
         result_tx: Sender<DirScanResult>,
     ) {
-        let (entries, read_metadata) = match &self.dirscan_type {
-            DirscanType::Cp => todo!(),
-            DirscanType::Mv => todo!(),
-            DirscanType::Rm(entries) => (entries.clone(), ReadMetadata::No),
+        let entries = self.entries.clone();
+
+        let read_metadata = match &self.dirscan_type {
+            DirscanType::Cp(_dest, _on_conflict) => ReadMetadata::Yes,
+            DirscanType::Mv(_dest, _on_conflict) => ReadMetadata::Yes,
+            DirscanType::Rm => ReadMetadata::No,
         };
 
         let pubsub_tx = self.pubsub_tx.clone();
@@ -201,11 +209,11 @@ impl Component for DlgDirscan {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
 
                     match &self.dirscan_type {
-                        DirscanType::Cp => todo!(),
-                        DirscanType::Mv => todo!(),
-                        DirscanType::Rm(entries) => self
+                        DirscanType::Cp(_dest, _on_conflict) => todo!(),
+                        DirscanType::Mv(_dest, _on_conflict) => todo!(),
+                        DirscanType::Rm => self
                             .pubsub_tx
-                            .send(PubSub::DoRm(entries.clone(), result))
+                            .send(PubSub::DoRm(self.entries.clone(), result))
                             .unwrap(),
                     }
                 }

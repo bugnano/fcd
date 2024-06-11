@@ -737,6 +737,20 @@ impl Component for FilePanel {
                             .unwrap();
                     }
                 }
+                Key::F(5) | Key::Char('5') => {
+                    let selected_files = self.get_selected_files();
+
+                    if !selected_files.is_empty() {
+                        self.pubsub_tx.send(PubSub::Cp(selected_files)).unwrap();
+                    }
+                }
+                Key::F(6) | Key::Char('6') => {
+                    let selected_files = self.get_selected_files();
+
+                    if !selected_files.is_empty() {
+                        self.pubsub_tx.send(PubSub::Mv(selected_files)).unwrap();
+                    }
+                }
                 _ => key_handled = false,
             }
         }

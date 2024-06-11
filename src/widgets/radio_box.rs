@@ -3,6 +3,8 @@ use std::cmp::min;
 use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
+use unicode_width::UnicodeWidthStr;
+
 use crate::component::{Component, Focus};
 
 #[derive(Debug)]
@@ -39,6 +41,14 @@ impl RadioBox {
 
     pub fn value(&mut self) -> usize {
         self.selected_button
+    }
+
+    pub fn width(&self) -> usize {
+        self.buttons
+            .iter()
+            .max_by_key(|label| label.width())
+            .map(|label| label.width() + 4)
+            .unwrap_or_default()
     }
 }
 

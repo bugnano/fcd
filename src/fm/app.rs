@@ -35,6 +35,7 @@ use crate::{
         },
         cp_mv_rm::{
             database::DataBase,
+            dlg_cp_mv::{DlgCpMv, DlgCpMvType},
             dlg_dirscan::{DirscanType, DlgDirscan},
             dlg_question::DlgQuestion,
             dlg_rm_progress::DlgRmProgress,
@@ -102,7 +103,7 @@ impl App {
 
         let archive_mounter = ArchiveMounter::new().map(|mounter| Rc::new(RefCell::new(mounter)));
 
-        let _ = DataBase::new("fcd.db");
+        let _ = DataBase::new(&PathBuf::from("fcd.db"));
 
         Ok(App {
             config: Rc::clone(config),
@@ -670,7 +671,8 @@ impl App {
                     &self.config,
                     self.pubsub_tx.clone(),
                     &cwd,
-                    DirscanType::Rm(entries.clone()),
+                    entries,
+                    DirscanType::Rm,
                     self.archive_mounter.as_ref(),
                 )));
             }
@@ -688,10 +690,79 @@ impl App {
                     self.archive_mounter.as_ref(),
                 )));
             }
+            PubSub::Cp(entries) | PubSub::Mv(entries) => {
+                let (focus_position, other_position) = match self.quickviewer_position {
+                    2 => (self.panel_focus_position, self.panel_focus_position ^ 1),
+                    pos if pos == self.panel_focus_position => (self.panel_focus_position ^ 1, 2),
+                    _ => (self.panel_focus_position, 2),
+                };
+
+                let cwd = self.panels[focus_position]
+                    .get_cwd()
+                    .expect("BUG: The focused panel has no working directory set");
+
+                let other_cwd = self.panels[other_position]
+                    .get_cwd()
+                    .expect("BUG: The other panel has no working directory set");
+
+                let dest = self
+                    .archive_path(&other_cwd)
+                    .to_string_lossy()
+                    .to_string()
+                    .replace('%', "%%");
+
+                let dlg_cp_mv_type = match pubsub {
+                    PubSub::Cp(_entries) => DlgCpMvType::Cp,
+                    PubSub::Mv(_entries) => DlgCpMvType::Mv,
+                    _ => unreachable!(),
+                };
+
+                self.dialog = Some(Box::new(DlgCpMv::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    &cwd,
+                    &dest,
+                    entries,
+                    dlg_cp_mv_type,
+                )));
+            }
+            PubSub::DoDirscan(cwd, dest, entries, on_conflict, dlg_cp_mv_type) => {
+                let dest = self.unarchive_path(&expanduser(&PathBuf::from(
+                    &self.apply_template(dest, Quote::No),
+                )));
+
+                let dirscan_type = match dlg_cp_mv_type {
+                    DlgCpMvType::Cp => DirscanType::Cp(dest, *on_conflict),
+                    DlgCpMvType::Mv => DirscanType::Mv(dest, *on_conflict),
+                };
+
+                self.dialog = Some(Box::new(DlgDirscan::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    cwd,
+                    entries,
+                    dirscan_type,
+                    self.archive_mounter.as_ref(),
+                )));
+            }
             _ => (),
         }
 
         action
+    }
+
+    fn unarchive_path(&self, file: &Path) -> PathBuf {
+        match &self.archive_mounter {
+            Some(mounter) => mounter.borrow().unarchive_path(file),
+            None => PathBuf::from(file),
+        }
+    }
+
+    fn archive_path(&self, file: &Path) -> PathBuf {
+        match &self.archive_mounter {
+            Some(mounter) => mounter.borrow().archive_path(file),
+            None => PathBuf::from(file),
+        }
     }
 
     fn apply_template(&self, s: &str, quote: Quote) -> String {
@@ -801,23 +872,19 @@ impl App {
         // For the base name of the directories, it's more useful to give
         // the archive name instead of the temp. directory name
         let current_base = fn_quote(
-            &match &self.archive_mounter {
-                Some(mounter) => mounter.borrow().archive_path(&cwd),
-                None => cwd.clone(),
-            }
-            .file_name()
-            .map(|base| base.to_string_lossy().to_string())
-            .unwrap_or_default(),
+            &self
+                .archive_path(&cwd)
+                .file_name()
+                .map(|base| base.to_string_lossy().to_string())
+                .unwrap_or_default(),
         );
 
         let other_base = fn_quote(
-            &match &self.archive_mounter {
-                Some(mounter) => mounter.borrow().archive_path(&other_cwd),
-                None => other_cwd.clone(),
-            }
-            .file_name()
-            .map(|base| base.to_string_lossy().to_string())
-            .unwrap_or_default(),
+            &self
+                .archive_path(&other_cwd)
+                .file_name()
+                .map(|base| base.to_string_lossy().to_string())
+                .unwrap_or_default(),
         );
 
         let mapping = [
