@@ -95,6 +95,8 @@ pub enum PubSub {
 
     // Dialog DirScan events
     DoRm(Vec<Entry>, DirScanResult),
+    DoCp(Vec<Entry>, DirScanResult, PathBuf, OnConflict),
+    DoMv(Vec<Entry>, DirScanResult, PathBuf, OnConflict),
 
     // Dialog CpMv events
     DoDirscan(PathBuf, String, Vec<Entry>, OnConflict, DlgCpMvType),

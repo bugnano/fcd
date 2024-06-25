@@ -36,6 +36,7 @@ use crate::{
         cp_mv_rm::{
             database::DataBase,
             dlg_cp_mv::{DlgCpMv, DlgCpMvType},
+            dlg_cp_mv_progress::DlgCpMvProgress,
             dlg_dirscan::{DirscanType, DlgDirscan},
             dlg_question::DlgQuestion,
             dlg_rm_progress::DlgRmProgress,
@@ -742,6 +743,30 @@ impl App {
                     cwd,
                     entries,
                     dirscan_type,
+                    self.archive_mounter.as_ref(),
+                )));
+            }
+            PubSub::DoCp(entries, dirscan_result, dest, on_conflict)
+            | PubSub::DoMv(entries, dirscan_result, dest, on_conflict) => {
+                let cwd = self.panels[self.panel_focus_position]
+                    .get_cwd()
+                    .expect("BUG: The focused panel has no working directory set");
+
+                let dlg_cp_mv_type = match pubsub {
+                    PubSub::DoCp(_entries, _dirscan_result, _dest, _on_conflict) => DlgCpMvType::Cp,
+                    PubSub::DoMv(_entries, _dirscan_result, _dest, _on_conflict) => DlgCpMvType::Mv,
+                    _ => unreachable!(),
+                };
+
+                self.dialog = Some(Box::new(DlgCpMvProgress::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    &cwd,
+                    entries,
+                    dirscan_result,
+                    dest,
+                    *on_conflict,
+                    dlg_cp_mv_type,
                     self.archive_mounter.as_ref(),
                 )));
             }

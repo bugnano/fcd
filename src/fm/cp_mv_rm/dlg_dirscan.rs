@@ -205,16 +205,36 @@ impl Component for DlgDirscan {
                     self.files = info.files;
                     self.total_size = info.bytes;
                 }
+
                 if let Ok(result) = self.result_rx.try_recv() {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
 
                     match &self.dirscan_type {
-                        DirscanType::Cp(_dest, _on_conflict) => todo!(),
-                        DirscanType::Mv(_dest, _on_conflict) => todo!(),
-                        DirscanType::Rm => self
-                            .pubsub_tx
-                            .send(PubSub::DoRm(self.entries.clone(), result))
-                            .unwrap(),
+                        DirscanType::Cp(dest, on_conflict) => {
+                            self.pubsub_tx
+                                .send(PubSub::DoCp(
+                                    self.entries.clone(),
+                                    result,
+                                    dest.clone(),
+                                    *on_conflict,
+                                ))
+                                .unwrap();
+                        }
+                        DirscanType::Mv(dest, on_conflict) => {
+                            self.pubsub_tx
+                                .send(PubSub::DoMv(
+                                    self.entries.clone(),
+                                    result,
+                                    dest.clone(),
+                                    *on_conflict,
+                                ))
+                                .unwrap();
+                        }
+                        DirscanType::Rm => {
+                            self.pubsub_tx
+                                .send(PubSub::DoRm(self.entries.clone(), result))
+                                .unwrap();
+                        }
                     }
                 }
             }
