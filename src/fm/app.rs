@@ -35,7 +35,7 @@ use crate::{
         },
         cp_mv_rm::{
             database::DataBase,
-            dlg_cp_mv::{DlgCpMv, DlgCpMvType},
+            dlg_cp_mv::{DlgCpMv, DlgCpMvType, OnConflict},
             dlg_cp_mv_progress::DlgCpMvProgress,
             dlg_dirscan::{DirscanType, DlgDirscan},
             dlg_question::DlgQuestion,
@@ -668,6 +668,8 @@ impl App {
                     .get_cwd()
                     .expect("BUG: The focused panel has no working directory set");
 
+                // TODO: Unmount all the archives referenced by entries
+
                 self.dialog = Some(Box::new(DlgDirscan::new(
                     &self.config,
                     self.pubsub_tx.clone(),
@@ -727,24 +729,105 @@ impl App {
                     dlg_cp_mv_type,
                 )));
             }
-            PubSub::DoDirscan(cwd, dest, entries, on_conflict, dlg_cp_mv_type) => {
-                let dest = self.unarchive_path(&expanduser(&PathBuf::from(
-                    &self.apply_template(dest, Quote::No),
-                )));
+            PubSub::DoDirscan(cwd, str_dest, entries, on_conflict, dlg_cp_mv_type) => {
+                let archive_dest =
+                    expanduser(&PathBuf::from(&self.apply_template(str_dest, Quote::No)));
 
-                let dirscan_type = match dlg_cp_mv_type {
-                    DlgCpMvType::Cp => DirscanType::Cp(dest, *on_conflict),
-                    DlgCpMvType::Mv => DirscanType::Mv(dest, *on_conflict),
-                };
+                let archive_dest_parent = archive_dest
+                    .parent()
+                    .map(PathBuf::from)
+                    .unwrap_or(PathBuf::from("/"));
 
-                self.dialog = Some(Box::new(DlgDirscan::new(
-                    &self.config,
-                    self.pubsub_tx.clone(),
-                    cwd,
-                    entries,
-                    dirscan_type,
-                    self.archive_mounter.as_ref(),
-                )));
+                let dest = self.unarchive_path(&archive_dest);
+                let dest_parent = self.unarchive_path(&archive_dest_parent);
+
+                let mut do_dirscan = true;
+
+                match dest.is_dir() {
+                    true => {
+                        match (fs::canonicalize(cwd), fs::canonicalize(&dest)) {
+                            (Ok(canonical_cwd), Ok(canonical_dest))
+                                if canonical_cwd == canonical_dest =>
+                            {
+                                if matches!(dlg_cp_mv_type, DlgCpMvType::Mv)
+                                    || matches!(on_conflict, OnConflict::Overwrite)
+                                    || matches!(on_conflict, OnConflict::Skip)
+                                {
+                                    // no-op
+                                    do_dirscan = false;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    false => {
+                        if entries.len() == 1 {
+                            match dest_parent.is_dir() {
+                                true => {
+                                    if entries[0].file.file_name().unwrap_or_default()
+                                        == dest.file_name().unwrap_or_default()
+                                    {
+                                        match (
+                                            fs::canonicalize(cwd),
+                                            fs::canonicalize(&dest_parent),
+                                        ) {
+                                            (Ok(canonical_cwd), Ok(canonical_dest))
+                                                if canonical_cwd == canonical_dest =>
+                                            {
+                                                if matches!(dlg_cp_mv_type, DlgCpMvType::Mv)
+                                                    || matches!(on_conflict, OnConflict::Overwrite)
+                                                    || matches!(on_conflict, OnConflict::Skip)
+                                                {
+                                                    // no-op
+                                                    do_dirscan = false;
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                false => {
+                                    self.pubsub_tx
+                                        .send(PubSub::Error(format!(
+                                            "{} is not a directory",
+                                            archive_dest_parent.to_string_lossy()
+                                        )))
+                                        .unwrap();
+
+                                    do_dirscan = false;
+                                }
+                            }
+                        } else {
+                            self.pubsub_tx
+                                .send(PubSub::Error(format!(
+                                    "{} is not a directory",
+                                    archive_dest.to_string_lossy()
+                                )))
+                                .unwrap();
+
+                            do_dirscan = false;
+                        }
+                    }
+                }
+
+                if do_dirscan {
+                    // TODO: If it's a Mv operation, unmount all the archives referenced by entries
+                    // TODO: Somehow dest_parent should be passed to the dirscan
+
+                    let dirscan_type = match dlg_cp_mv_type {
+                        DlgCpMvType::Cp => DirscanType::Cp(dest, *on_conflict),
+                        DlgCpMvType::Mv => DirscanType::Mv(dest, *on_conflict),
+                    };
+
+                    self.dialog = Some(Box::new(DlgDirscan::new(
+                        &self.config,
+                        self.pubsub_tx.clone(),
+                        cwd,
+                        entries,
+                        dirscan_type,
+                        self.archive_mounter.as_ref(),
+                    )));
+                }
             }
             PubSub::DoCp(entries, dirscan_result, dest, on_conflict)
             | PubSub::DoMv(entries, dirscan_result, dest, on_conflict) => {
