@@ -26,7 +26,7 @@ use crate::{
     config::Config,
     dlg_error::{DialogType, DlgError},
     fm::{
-        archive_mounter::ArchiveMounter,
+        archive_mounter::{self, ArchiveMounterCommand},
         bookmarks::Bookmarks,
         command_bar::{
             cmdbar::{CmdBar, CmdBarType},
@@ -87,7 +87,7 @@ pub struct App {
     printwd: Option<PathBuf>,
     tabsize: u8,
     ctrl_o: bool,
-    archive_mounter: Option<Rc<RefCell<ArchiveMounter>>>,
+    archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
 }
 
 impl App {
@@ -102,7 +102,7 @@ impl App {
     ) -> Result<App> {
         let (pubsub_tx, pubsub_rx) = crossbeam_channel::unbounded();
 
-        let archive_mounter = ArchiveMounter::new().map(|mounter| Rc::new(RefCell::new(mounter)));
+        let archive_mounter_command_tx = archive_mounter::start();
 
         let _ = DataBase::new(&PathBuf::from("fcd.db"));
 
@@ -116,7 +116,7 @@ impl App {
                     bookmarks,
                     pubsub_tx.clone(),
                     initial_path,
-                    archive_mounter.as_ref(),
+                    archive_mounter_command_tx.clone(),
                     Focus::Focused,
                 )),
                 Box::new(FilePanel::new(
@@ -124,7 +124,7 @@ impl App {
                     bookmarks,
                     pubsub_tx.clone(),
                     initial_path,
-                    archive_mounter.as_ref(),
+                    archive_mounter_command_tx.clone(),
                     Focus::Normal,
                 )),
                 Box::new(QuickView::new(
@@ -143,7 +143,7 @@ impl App {
             printwd: printwd.map(PathBuf::from),
             tabsize,
             ctrl_o: false,
-            archive_mounter,
+            archive_mounter_command_tx,
         })
     }
 
@@ -621,10 +621,10 @@ impl App {
                 }
             }
             PubSub::MountArchive(archive) => {
-                if let Some(mounter) = &self.archive_mounter {
+                if let Some(command_tx) = &self.archive_mounter_command_tx {
                     self.pubsub_tx
                         .send(PubSub::Info(
-                            mounter.borrow().get_exe_name(),
+                            archive_mounter::get_exe_name(command_tx),
                             String::from("Opening archive..."),
                         ))
                         .unwrap();
@@ -637,10 +637,14 @@ impl App {
             PubSub::DoMountArchive(archive) => {
                 self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
 
-                if let Some(mounter) = &mut self.archive_mounter {
-                    let shown_archive = mounter.borrow().archive_path(archive);
+                if let Some(command_tx) = &self.archive_mounter_command_tx {
+                    let shown_archive = archive_mounter::archive_path(command_tx, archive);
 
-                    match mounter.borrow_mut().mount_archive(&shown_archive) {
+                    match archive_mounter::mount_archive(command_tx, &shown_archive)
+                        .0
+                        .recv()
+                        .unwrap()
+                    {
                         Ok(temp_dir) => {
                             self.pubsub_tx
                                 .send(PubSub::ArchiveMounted(archive.clone(), temp_dir))
@@ -676,7 +680,7 @@ impl App {
                     &cwd,
                     entries,
                     DirscanType::Rm,
-                    self.archive_mounter.as_ref(),
+                    self.archive_mounter_command_tx.clone(),
                 )));
             }
             PubSub::DoRm(entries, dirscan_result) => {
@@ -690,7 +694,7 @@ impl App {
                     &cwd,
                     entries,
                     dirscan_result,
-                    self.archive_mounter.as_ref(),
+                    self.archive_mounter_command_tx.clone(),
                 )));
             }
             PubSub::Cp(entries) | PubSub::Mv(entries) => {
@@ -825,7 +829,7 @@ impl App {
                         cwd,
                         entries,
                         dirscan_type,
-                        self.archive_mounter.as_ref(),
+                        self.archive_mounter_command_tx.clone(),
                     )));
                 }
             }
@@ -850,7 +854,7 @@ impl App {
                     dest,
                     *on_conflict,
                     dlg_cp_mv_type,
-                    self.archive_mounter.as_ref(),
+                    self.archive_mounter_command_tx.clone(),
                 )));
             }
             _ => (),
@@ -860,15 +864,15 @@ impl App {
     }
 
     fn unarchive_path(&self, file: &Path) -> PathBuf {
-        match &self.archive_mounter {
-            Some(mounter) => mounter.borrow().unarchive_path(file),
+        match &self.archive_mounter_command_tx {
+            Some(command_tx) => archive_mounter::unarchive_path(command_tx, file),
             None => PathBuf::from(file),
         }
     }
 
     fn archive_path(&self, file: &Path) -> PathBuf {
-        match &self.archive_mounter {
-            Some(mounter) => mounter.borrow().archive_path(file),
+        match &self.archive_mounter_command_tx {
+            Some(command_tx) => archive_mounter::archive_path(command_tx, file),
             None => PathBuf::from(file),
         }
     }

@@ -1,5 +1,4 @@
 use std::{
-    cell::RefCell,
     cmp::min,
     path::{Path, PathBuf},
     rc::Rc,
@@ -24,7 +23,7 @@ use crate::{
     config::Config,
     fm::{
         app::human_readable_size,
-        archive_mounter::ArchiveMounter,
+        archive_mounter::{self, ArchiveMounterCommand},
         cp_mv_rm::{
             dirscan::{dirscan, DirScanEvent, DirScanInfo, DirScanResult, ReadMetadata},
             dlg_cp_mv::{DlgCpMvType, OnConflict},
@@ -53,7 +52,7 @@ pub struct DlgCpMvProgress {
     bytes: u64,
     is_suspended: bool,
     focus_position: usize,
-    archive_mounter: Option<Rc<RefCell<ArchiveMounter>>>,
+    archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
 }
 
 impl DlgCpMvProgress {
@@ -66,7 +65,7 @@ impl DlgCpMvProgress {
         dest: &Path,
         on_conflict: OnConflict,
         dlg_cp_mv_type: DlgCpMvType,
-        archive_mounter: Option<&Rc<RefCell<ArchiveMounter>>>,
+        archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
     ) -> DlgCpMvProgress {
         let mut dlg = DlgCpMvProgress {
             config: Rc::clone(config),
@@ -121,7 +120,7 @@ impl DlgCpMvProgress {
             bytes: 0,
             is_suspended: false,
             focus_position: 0,
-            archive_mounter: archive_mounter.cloned(),
+            archive_mounter_command_tx,
         };
 
         //dlg.dirscan_thread(cwd, ev_rx, info_tx, result_tx);
@@ -160,8 +159,8 @@ impl DlgCpMvProgress {
     // }
 
     fn archive_path(&self, file: &Path) -> PathBuf {
-        match &self.archive_mounter {
-            Some(mounter) => mounter.borrow().archive_path(file),
+        match &self.archive_mounter_command_tx {
+            Some(command_tx) => archive_mounter::archive_path(command_tx, file),
             None => PathBuf::from(file),
         }
     }

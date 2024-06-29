@@ -5,14 +5,25 @@ use std::{
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    thread,
 };
 
 use anyhow::{anyhow, Result};
+use crossbeam_channel::{Receiver, Sender};
 
 use path_clean::PathClean;
 use tempfile::tempdir;
 
 use crate::shutil::which;
+
+#[derive(Debug, Clone)]
+pub enum ArchiveMounterCommand {
+    GetExeName(Sender<String>),
+    MountArchive(PathBuf, Sender<Result<PathBuf>>, Receiver<()>),
+    UmountArchive(PathBuf),
+    UnarchivePath(PathBuf, Sender<PathBuf>),
+    ArchivePath(PathBuf, Sender<PathBuf>),
+}
 
 #[derive(Debug, Clone)]
 struct ArchiveEntry {
@@ -21,9 +32,108 @@ struct ArchiveEntry {
 }
 
 #[derive(Debug, Clone)]
-pub struct ArchiveMounter {
+struct ArchiveMounter {
     executable: PathBuf,
     archive_dirs: Vec<ArchiveEntry>,
+}
+
+pub fn start() -> Option<Sender<ArchiveMounterCommand>> {
+    match ArchiveMounter::new() {
+        Some(mut archive_mounter) => {
+            let (command_tx, command_rx) = crossbeam_channel::unbounded();
+            thread::spawn(move || loop {
+                match command_rx.recv() {
+                    Ok(command) => match command {
+                        ArchiveMounterCommand::GetExeName(exe_name_tx) => {
+                            let _ = exe_name_tx.send(archive_mounter.get_exe_name());
+                        }
+                        ArchiveMounterCommand::MountArchive(
+                            archive,
+                            mount_archive_tx,
+                            abort_rx,
+                        ) => {
+                            let _ = mount_archive_tx.send(archive_mounter.mount_archive(&archive));
+                        }
+                        ArchiveMounterCommand::UmountArchive(archive) => {
+                            archive_mounter.umount_archive(&archive);
+                        }
+                        ArchiveMounterCommand::UnarchivePath(file, unarchive_path_tx) => {
+                            let _ = unarchive_path_tx.send(archive_mounter.unarchive_path(&file));
+                        }
+                        ArchiveMounterCommand::ArchivePath(file, archive_path_tx) => {
+                            let _ = archive_path_tx.send(archive_mounter.archive_path(&file));
+                        }
+                    },
+
+                    // When the main thread exits, the channel returns an error
+                    Err(_) => return,
+                }
+            });
+
+            Some(command_tx)
+        }
+        None => None,
+    }
+}
+
+pub fn get_exe_name(command_tx: &Sender<ArchiveMounterCommand>) -> String {
+    let (exe_name_tx, exe_name_rx) = crossbeam_channel::unbounded();
+
+    command_tx
+        .send(ArchiveMounterCommand::GetExeName(exe_name_tx))
+        .unwrap();
+
+    exe_name_rx.recv().unwrap()
+}
+
+pub fn mount_archive(
+    command_tx: &Sender<ArchiveMounterCommand>,
+    archive: &Path,
+) -> (Receiver<Result<PathBuf>>, Sender<()>) {
+    let (mount_archive_tx, mount_archive_rx) = crossbeam_channel::unbounded();
+    let (abort_tx, abort_rx) = crossbeam_channel::unbounded();
+
+    command_tx
+        .send(ArchiveMounterCommand::MountArchive(
+            PathBuf::from(archive),
+            mount_archive_tx,
+            abort_rx,
+        ))
+        .unwrap();
+
+    (mount_archive_rx, abort_tx)
+}
+
+pub fn umount_archive(command_tx: &Sender<ArchiveMounterCommand>, archive: &Path) {
+    command_tx
+        .send(ArchiveMounterCommand::UmountArchive(PathBuf::from(archive)))
+        .unwrap();
+}
+
+pub fn unarchive_path(command_tx: &Sender<ArchiveMounterCommand>, file: &Path) -> PathBuf {
+    let (unarchive_path_tx, unarchive_path_rx) = crossbeam_channel::unbounded();
+
+    command_tx
+        .send(ArchiveMounterCommand::UnarchivePath(
+            PathBuf::from(file),
+            unarchive_path_tx,
+        ))
+        .unwrap();
+
+    unarchive_path_rx.recv().unwrap()
+}
+
+pub fn archive_path(command_tx: &Sender<ArchiveMounterCommand>, file: &Path) -> PathBuf {
+    let (archive_path_tx, archive_path_rx) = crossbeam_channel::unbounded();
+
+    command_tx
+        .send(ArchiveMounterCommand::ArchivePath(
+            PathBuf::from(file),
+            archive_path_tx,
+        ))
+        .unwrap();
+
+    archive_path_rx.recv().unwrap()
 }
 
 impl ArchiveMounter {

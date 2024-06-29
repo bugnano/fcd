@@ -1,5 +1,4 @@
 use std::{
-    cell::RefCell,
     path::{Path, PathBuf},
     rc::Rc,
     thread,
@@ -23,7 +22,7 @@ use crate::{
     config::Config,
     fm::{
         app::human_readable_size,
-        archive_mounter::ArchiveMounter,
+        archive_mounter::{self, ArchiveMounterCommand},
         cp_mv_rm::{
             dirscan::{dirscan, DirScanEvent, DirScanInfo, DirScanResult, ReadMetadata},
             dlg_cp_mv::OnConflict,
@@ -56,7 +55,7 @@ pub struct DlgDirscan {
     files: usize,
     total_size: Option<u64>,
     focus_position: usize,
-    archive_mounter: Option<Rc<RefCell<ArchiveMounter>>>,
+    archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
 }
 
 impl DlgDirscan {
@@ -66,16 +65,14 @@ impl DlgDirscan {
         cwd: &Path,
         entries: &[Entry],
         dirscan_type: DirscanType,
-        archive_mounter: Option<&Rc<RefCell<ArchiveMounter>>>,
+        archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
     ) -> DlgDirscan {
         let (ev_tx, ev_rx) = crossbeam_channel::unbounded();
         let (info_tx, info_rx) = crossbeam_channel::unbounded();
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
-        let current = match &archive_mounter {
-            Some(mounter) => mounter
-                .borrow()
-                .archive_path(cwd)
+        let current = match &archive_mounter_command_tx {
+            Some(command_tx) => archive_mounter::archive_path(command_tx, cwd)
                 .to_string_lossy()
                 .to_string(),
             None => cwd.to_string_lossy().to_string(),
@@ -113,7 +110,7 @@ impl DlgDirscan {
             files: 0,
             total_size: None,
             focus_position: 0,
-            archive_mounter: archive_mounter.cloned(),
+            archive_mounter_command_tx,
         };
 
         dlg.dirscan_thread(cwd, ev_rx, info_tx, result_tx);
@@ -154,8 +151,8 @@ impl DlgDirscan {
     }
 
     fn archive_path(&self, file: &Path) -> PathBuf {
-        match &self.archive_mounter {
-            Some(mounter) => mounter.borrow().archive_path(file),
+        match &self.archive_mounter_command_tx {
+            Some(command_tx) => archive_mounter::archive_path(command_tx, file),
             None => PathBuf::from(file),
         }
     }

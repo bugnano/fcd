@@ -1,5 +1,4 @@
 use std::{
-    cell::RefCell,
     cmp::min,
     path::{Path, PathBuf},
     rc::Rc,
@@ -24,7 +23,7 @@ use crate::{
     config::Config,
     fm::{
         app::human_readable_size,
-        archive_mounter::ArchiveMounter,
+        archive_mounter::{self, ArchiveMounterCommand},
         cp_mv_rm::dirscan::{dirscan, DirScanEvent, DirScanInfo, DirScanResult, ReadMetadata},
         entry::Entry,
     },
@@ -45,7 +44,7 @@ pub struct DlgRmProgress {
     files: usize,
     is_suspended: bool,
     focus_position: usize,
-    archive_mounter: Option<Rc<RefCell<ArchiveMounter>>>,
+    archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
 }
 
 impl DlgRmProgress {
@@ -55,7 +54,7 @@ impl DlgRmProgress {
         cwd: &Path,
         entries: &[Entry],
         dirscan_result: &DirScanResult,
-        archive_mounter: Option<&Rc<RefCell<ArchiveMounter>>>,
+        archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
     ) -> DlgRmProgress {
         let mut dlg = DlgRmProgress {
             config: Rc::clone(config),
@@ -105,7 +104,7 @@ impl DlgRmProgress {
             files: 0,
             is_suspended: false,
             focus_position: 0,
-            archive_mounter: archive_mounter.cloned(),
+            archive_mounter_command_tx,
         };
 
         //dlg.dirscan_thread(cwd, ev_rx, info_tx, result_tx);
@@ -144,8 +143,8 @@ impl DlgRmProgress {
     // }
 
     fn archive_path(&self, file: &Path) -> PathBuf {
-        match &self.archive_mounter {
-            Some(mounter) => mounter.borrow().archive_path(file),
+        match &self.archive_mounter_command_tx {
+            Some(command_tx) => archive_mounter::archive_path(command_tx, file),
             None => PathBuf::from(file),
         }
     }

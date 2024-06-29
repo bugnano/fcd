@@ -27,7 +27,7 @@ use crate::{
     config::Config,
     fm::{
         app::{human_readable_size, tar_stem, tar_suffix, LABELS},
-        archive_mounter::ArchiveMounter,
+        archive_mounter::{self, ArchiveMounterCommand},
         bookmarks::{Bookmarks, BOOKMARK_KEYS},
         entry::{
             count_directories, filter_file_list, get_file_list, sort_by_function,
@@ -78,7 +78,7 @@ pub struct FilePanel {
     sort_order: SortOrder,
     selected_file: Option<PathBuf>,
     focus: Focus,
-    archive_mounter: Option<Rc<RefCell<ArchiveMounter>>>,
+    archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
     archive_mount_request: ArchiveMountRequest,
 }
 
@@ -88,7 +88,7 @@ impl FilePanel {
         bookmarks: &Rc<RefCell<Bookmarks>>,
         pubsub_tx: Sender<PubSub>,
         initial_path: &Path,
-        archive_mounter: Option<&Rc<RefCell<ArchiveMounter>>>,
+        archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
         focus: Focus,
     ) -> FilePanel {
         let (component_pubsub_tx, component_pubsub_rx) = crossbeam_channel::unbounded();
@@ -119,7 +119,7 @@ impl FilePanel {
             sort_order: SortOrder::Normal,
             selected_file: None,
             focus,
-            archive_mounter: archive_mounter.cloned(),
+            archive_mounter_command_tx,
             archive_mount_request: ArchiveMountRequest::None,
         };
 
@@ -294,15 +294,15 @@ impl FilePanel {
     }
 
     fn unarchive_path(&self, file: &Path) -> PathBuf {
-        match &self.archive_mounter {
-            Some(mounter) => mounter.borrow().unarchive_path(file),
+        match &self.archive_mounter_command_tx {
+            Some(command_tx) => archive_mounter::unarchive_path(command_tx, file),
             None => PathBuf::from(file),
         }
     }
 
     fn archive_path(&self, file: &Path) -> PathBuf {
-        match &self.archive_mounter {
-            Some(mounter) => mounter.borrow().archive_path(file),
+        match &self.archive_mounter_command_tx {
+            Some(command_tx) => archive_mounter::archive_path(command_tx, file),
             None => PathBuf::from(file),
         }
     }
@@ -497,7 +497,7 @@ impl Component for FilePanel {
                                     Ok(())
                                 });
                         } else if ARCHIVE_EXTENSIONS.contains(&entry.extension.as_str())
-                            && self.archive_mounter.is_some()
+                            && self.archive_mounter_command_tx.is_some()
                         {
                             self.archive_mount_request =
                                 ArchiveMountRequest::Implicit(entry.file.clone());
@@ -512,7 +512,7 @@ impl Component for FilePanel {
                 }
                 Key::Char('o') => {
                     if !self.shown_file_list.is_empty() {
-                        match &self.archive_mounter {
+                        match &self.archive_mounter_command_tx {
                             Some(_) => {
                                 let entry = &self.shown_file_list[self.cursor_position];
 
