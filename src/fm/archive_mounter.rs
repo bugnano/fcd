@@ -6,13 +6,15 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
+    time::Duration,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use crossbeam_channel::{Receiver, Sender};
 
 use path_clean::PathClean;
 use tempfile::tempdir;
+use wait_timeout::ChildExt;
 
 use crate::shutil::which;
 
@@ -50,9 +52,10 @@ pub fn start() -> Option<Sender<ArchiveMounterCommand>> {
                         ArchiveMounterCommand::MountArchive(
                             archive,
                             mount_archive_tx,
-                            abort_rx,
+                            cancel_rx,
                         ) => {
-                            let _ = mount_archive_tx.send(archive_mounter.mount_archive(&archive));
+                            let _ = mount_archive_tx
+                                .send(archive_mounter.mount_archive(&archive, cancel_rx));
                         }
                         ArchiveMounterCommand::UmountArchive(archive) => {
                             archive_mounter.umount_archive(&archive);
@@ -91,17 +94,17 @@ pub fn mount_archive(
     archive: &Path,
 ) -> (Receiver<Result<PathBuf>>, Sender<()>) {
     let (mount_archive_tx, mount_archive_rx) = crossbeam_channel::unbounded();
-    let (abort_tx, abort_rx) = crossbeam_channel::unbounded();
+    let (cancel_tx, cancel_rx) = crossbeam_channel::unbounded();
 
     command_tx
         .send(ArchiveMounterCommand::MountArchive(
             PathBuf::from(archive),
             mount_archive_tx,
-            abort_rx,
+            cancel_rx,
         ))
         .unwrap();
 
-    (mount_archive_rx, abort_tx)
+    (mount_archive_rx, cancel_tx)
 }
 
 pub fn umount_archive(command_tx: &Sender<ArchiveMounterCommand>, archive: &Path) {
@@ -154,7 +157,7 @@ impl ArchiveMounter {
             .to_string()
     }
 
-    pub fn mount_archive(&mut self, archive: &Path) -> Result<PathBuf> {
+    pub fn mount_archive(&mut self, archive: &Path, cancel_rx: Receiver<()>) -> Result<PathBuf> {
         if let Some(entry) = self
             .archive_dirs
             .iter()
@@ -165,46 +168,71 @@ impl ArchiveMounter {
 
         let temp_dir = tempdir()?.into_path();
 
-        Command::new(&self.executable)
+        let child = Command::new(&self.executable)
             .args(["-o", "ro"])
             .args([archive.file_name().unwrap(), temp_dir.as_os_str()])
             .current_dir(&self.unarchive_path(archive.parent().unwrap()))
             .stderr(Stdio::piped())
-            .spawn()
-            .map_err(anyhow::Error::new)
-            .and_then(|mut child| {
-                child
-                    .wait()
-                    .map_err(anyhow::Error::new)
-                    .and_then(|exit_status| {
-                        exit_status.success().then_some(()).ok_or_else(|| {
-                            let mut stderr = child.stderr.take().unwrap();
-                            let mut buf: Vec<u8> = Vec::new();
+            .spawn();
 
-                            stderr.read_to_end(&mut buf).unwrap_or(0);
+        match child {
+            Ok(mut child) => {
+                loop {
+                    match child.wait_timeout(Duration::from_millis(50)) {
+                        Ok(None) => {
+                            // Still mounting the archive, let's see if there's a Cancel request
+                            if !cancel_rx.is_empty() {
+                                let _ = child.kill();
 
-                            anyhow!("{}", OsStr::from_bytes(&buf).to_string_lossy())
-                        })
-                    })
-            })
-            .map(|()| {
-                self.archive_dirs.push(ArchiveEntry {
-                    archive_file: PathBuf::from(archive),
-                    temp_dir: temp_dir.clone(),
-                });
+                                let _ = Command::new("umount")
+                                    .arg(&temp_dir)
+                                    .current_dir(&self.unarchive_path(archive.parent().unwrap()))
+                                    .output();
 
-                temp_dir.clone()
-            })
-            .map_err(|e| {
-                let _ = Command::new("umount")
-                    .arg(&temp_dir)
-                    .current_dir(&self.unarchive_path(archive.parent().unwrap()))
-                    .output();
+                                let _ = fs::remove_dir(&temp_dir);
 
-                let _ = fs::remove_dir(&temp_dir);
+                                bail!("canceled");
+                            }
+                        }
+                        Ok(Some(exit_status)) => {
+                            break exit_status
+                                .success()
+                                .then_some(())
+                                .ok_or_else(|| {
+                                    let mut stderr = child.stderr.take().unwrap();
+                                    let mut buf: Vec<u8> = Vec::new();
 
-                e
-            })
+                                    stderr.read_to_end(&mut buf).unwrap_or(0);
+
+                                    anyhow!("{}", OsStr::from_bytes(&buf).to_string_lossy())
+                                })
+                                .map(|()| {
+                                    self.archive_dirs.push(ArchiveEntry {
+                                        archive_file: PathBuf::from(archive),
+                                        temp_dir: temp_dir.clone(),
+                                    });
+
+                                    temp_dir.clone()
+                                })
+                                .map_err(|e| {
+                                    let _ = Command::new("umount")
+                                        .arg(&temp_dir)
+                                        .current_dir(
+                                            &self.unarchive_path(archive.parent().unwrap()),
+                                        )
+                                        .output();
+
+                                    let _ = fs::remove_dir(&temp_dir);
+
+                                    e
+                                })
+                        }
+                        Err(e) => break Err(e.into()),
+                    }
+                }
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub fn umount_archive(&mut self, archive: &Path) {

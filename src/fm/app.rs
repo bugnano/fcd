@@ -41,6 +41,7 @@ use crate::{
             dlg_question::DlgQuestion,
             dlg_rm_progress::DlgRmProgress,
         },
+        dlg_mount_archive::DlgMountArchive,
         entry::Entry,
         file_panel::FilePanel,
         panel::PanelComponent,
@@ -622,40 +623,12 @@ impl App {
             }
             PubSub::MountArchive(archive) => {
                 if let Some(command_tx) = &self.archive_mounter_command_tx {
-                    self.pubsub_tx
-                        .send(PubSub::Info(
-                            archive_mounter::get_exe_name(command_tx),
-                            String::from("Opening archive..."),
-                        ))
-                        .unwrap();
-
-                    self.pubsub_tx
-                        .send(PubSub::DoMountArchive(archive.clone()))
-                        .unwrap();
-                }
-            }
-            PubSub::DoMountArchive(archive) => {
-                self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
-
-                if let Some(command_tx) = &self.archive_mounter_command_tx {
-                    let shown_archive = archive_mounter::archive_path(command_tx, archive);
-
-                    match archive_mounter::mount_archive(command_tx, &shown_archive)
-                        .0
-                        .recv()
-                        .unwrap()
-                    {
-                        Ok(temp_dir) => {
-                            self.pubsub_tx
-                                .send(PubSub::ArchiveMounted(archive.clone(), temp_dir))
-                                .unwrap();
-                        }
-                        Err(e) => {
-                            self.pubsub_tx
-                                .send(PubSub::ArchiveMountError(archive.clone(), e.to_string()))
-                                .unwrap();
-                        }
-                    }
+                    self.dialog = Some(Box::new(DlgMountArchive::new(
+                        &self.config,
+                        self.pubsub_tx.clone(),
+                        archive,
+                        command_tx,
+                    )));
                 }
             }
             PubSub::Question(title, question, on_yes) => {

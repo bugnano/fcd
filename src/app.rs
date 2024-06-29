@@ -34,9 +34,6 @@ pub enum PubSub {
     CloseDialog,
     ComponentThreadEvent,
     Esc,
-    DoMountArchive(PathBuf),
-    ArchiveMounted(PathBuf, PathBuf),
-    ArchiveMountError(PathBuf, String),
     Question(String, String, Box<PubSub>),
 
     // Button bar events
@@ -92,6 +89,11 @@ pub enum PubSub {
     UntagGlob(String),
     Mkdir(String),
     Rename(String),
+
+    // Dialog MountArchive events
+    ArchiveMounted(PathBuf, PathBuf),
+    ArchiveMountError(PathBuf, String),
+    ArchiveMountCancel(PathBuf),
 
     // Dialog DirScan events
     DoRm(Vec<Entry>, DirScanResult),

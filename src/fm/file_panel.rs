@@ -63,6 +63,7 @@ pub struct FilePanel {
     file_list_tx: Sender<PathBuf>,
     file_list_rx: Receiver<PathBuf>,
     cwd: PathBuf,
+    shown_cwd: PathBuf,
     old_cwd: PathBuf,
     leader: Option<char>,
     free: u64,
@@ -104,6 +105,7 @@ impl FilePanel {
             file_list_tx,
             file_list_rx,
             cwd: PathBuf::new(),
+            shown_cwd: PathBuf::new(),
             old_cwd: PathBuf::new(),
             leader: None,
             free: 0,
@@ -908,6 +910,14 @@ impl Component for FilePanel {
                 }
                 ArchiveMountRequest::None => (),
             },
+            PubSub::ArchiveMountCancel(archive_file) => match &self.archive_mount_request {
+                ArchiveMountRequest::Explicit(archive) | ArchiveMountRequest::Implicit(archive) => {
+                    if archive == archive_file {
+                        self.archive_mount_request = ArchiveMountRequest::None;
+                    }
+                }
+                ArchiveMountRequest::None => (),
+            },
             _ => (),
         }
     }
@@ -930,7 +940,7 @@ impl Component for FilePanel {
                     Span::raw(symbols::line::NORMAL.horizontal),
                     Span::styled(
                         tilde_layout(
-                            &format!(" {} ", self.archive_path(&self.cwd).to_string_lossy()),
+                            &format!(" {} ", self.shown_cwd.to_string_lossy()),
                             chunk.width.saturating_sub(4).into(),
                         ),
                         match focus {
@@ -1187,6 +1197,7 @@ impl Panel for FilePanel {
 
         if new_cwd != self.cwd {
             self.old_cwd.clone_from(&self.cwd);
+            self.shown_cwd = self.archive_path(&new_cwd);
             self.cwd = new_cwd;
 
             self.file_filter.clear();
