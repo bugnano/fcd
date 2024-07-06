@@ -240,7 +240,7 @@ impl FilePanel {
             filter_file_list(&self.file_list, self.hidden_files, &self.file_filter);
 
         self.shown_file_list
-            .sort_by(|a, b| sort_by_function(self.sort_method)(a, b, self.sort_order));
+            .sort_unstable_by(|a, b| sort_by_function(self.sort_method)(a, b, self.sort_order));
 
         match selected_file {
             Some(file) => match self
@@ -1166,7 +1166,8 @@ impl Panel for FilePanel {
     fn get_tagged_files(&self) -> Vec<Entry> {
         let mut tagged_files = self.tagged_files.clone();
 
-        tagged_files.sort_by(|a, b| sort_by_function(self.sort_method)(a, b, self.sort_order));
+        tagged_files
+            .sort_unstable_by(|a, b| sort_by_function(self.sort_method)(a, b, self.sort_order));
 
         tagged_files
     }

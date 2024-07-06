@@ -34,7 +34,7 @@ use crate::{
             leader::Leader,
         },
         cp_mv_rm::{
-            database::DataBase,
+            database,
             dlg_cp_mv::{DlgCpMv, DlgCpMvType, OnConflict},
             dlg_cp_mv_progress::DlgCpMvProgress,
             dlg_dirscan::{DirscanType, DlgDirscan},
@@ -105,7 +105,7 @@ impl App {
 
         let archive_mounter_command_tx = archive_mounter::start();
 
-        let _ = DataBase::new(&PathBuf::from("fcd.db"));
+        let _ = database::start(&PathBuf::from("fcd.db"));
 
         Ok(App {
             config: Rc::clone(config),

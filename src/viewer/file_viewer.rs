@@ -45,7 +45,9 @@ impl FileViewer {
 
                 // TODO: It would be nice to use the same hidden file filter, sort method and sort
                 // order of the other panel when using the file viewer as a quick preview
-                file_list.sort_by(|a, b| sort_by_function(SortBy::Name)(a, b, SortOrder::Normal));
+                file_list.sort_unstable_by(|a, b| {
+                    sort_by_function(SortBy::Name)(a, b, SortOrder::Normal)
+                });
 
                 Box::new(DirViewer::new(
                     config,
