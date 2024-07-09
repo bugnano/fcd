@@ -84,6 +84,9 @@ pub enum DBCommand {
     GetSkipDirStack(i64, Sender<Vec<DBSkipDirEntry>>),
     GetReplaceFirstPath(i64, Sender<Option<bool>>),
     SetReplaceFirstPath(i64, bool),
+    DeleteJob(i64),
+    PopSkipDirStack(i64),
+    PopRenameDirStack(i64),
 }
 
 #[derive(Debug)]
@@ -112,6 +115,15 @@ pub fn start(file: &Path) -> Result<Sender<DBCommand>> {
                         }
                         DBCommand::SetReplaceFirstPath(job_id, replace_first_path) => {
                             db.set_replace_first_path(job_id, replace_first_path);
+                        }
+                        DBCommand::DeleteJob(job_id) => {
+                            db.delete_job(job_id);
+                        }
+                        DBCommand::PopSkipDirStack(skip_dir_stack_id) => {
+                            db.pop_skip_dir_stack(skip_dir_stack_id);
+                        }
+                        DBCommand::PopRenameDirStack(rename_dir_stack_id) => {
+                            db.pop_rename_dir_stack(rename_dir_stack_id);
                         }
                     },
 
@@ -176,6 +188,22 @@ pub fn set_replace_first_path(
 ) {
     command_tx
         .send(DBCommand::SetReplaceFirstPath(job_id, replace_first_path))
+        .unwrap();
+}
+
+pub fn delete_job(command_tx: &Sender<DBCommand>, job_id: i64) {
+    command_tx.send(DBCommand::DeleteJob(job_id)).unwrap();
+}
+
+pub fn pop_skip_dir_stack(command_tx: &Sender<DBCommand>, skip_dir_stack_id: i64) {
+    command_tx
+        .send(DBCommand::PopSkipDirStack(skip_dir_stack_id))
+        .unwrap();
+}
+
+pub fn pop_rename_dir_stack(command_tx: &Sender<DBCommand>, rename_dir_stack_id: i64) {
+    command_tx
+        .send(DBCommand::PopRenameDirStack(rename_dir_stack_id))
         .unwrap();
 }
 
@@ -406,19 +434,15 @@ impl DataBase {
                     ))
             except sqlite3.OperationalError:
                 pass
+    */
 
-        def delete_job(self, job_id):
-            if self.conn is None:
-                return
+    pub fn delete_job(&self, job_id: i64) {
+        let _ = self
+            .conn
+            .execute("DELETE FROM jobs WHERE id = ?1", [job_id]);
+    }
 
-            try:
-                with self.conn:
-                    self.conn.execute("DELETE FROM jobs WHERE id = ?", (
-                        job_id,
-                    ))
-            except sqlite3.OperationalError:
-                pass
-
+    /*
         def set_dir_list(self, job_id, dir_list):
             if self.conn is None:
                 return
@@ -501,6 +525,13 @@ impl DataBase {
             .unwrap_or_default()
     }
 
+    pub fn pop_rename_dir_stack(&self, rename_dir_stack_id: i64) {
+        let _ = self.conn.execute(
+            "DELETE FROM rename_dir_stack WHERE id = ?1",
+            [rename_dir_stack_id],
+        );
+    }
+
     /*
         def set_skip_dir_stack(self, job_id, skip_dir_stack):
             if self.conn is None:
@@ -535,6 +566,13 @@ impl DataBase {
                 .and_then(|rows| rows.collect())
             })
             .unwrap_or_default()
+    }
+
+    pub fn pop_skip_dir_stack(&self, skip_dir_stack_id: i64) {
+        let _ = self.conn.execute(
+            "DELETE FROM skip_dir_stack WHERE id = ?1",
+            [skip_dir_stack_id],
+        );
     }
 
     pub fn get_replace_first_path(&self, job_id: i64) -> Option<bool> {

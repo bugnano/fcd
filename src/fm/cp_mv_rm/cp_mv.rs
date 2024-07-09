@@ -1,4 +1,11 @@
 
+#[derive(Debug, Clone, Copy)]
+pub enum CpMvEvent {
+    Interrupt,
+    NoDb,
+    Suspend(Receiver<()>),
+}
+
 #[derive(Debug, Clone)]
 pub struct CpMvInfo {
     pub cur_source: PathBuf,
@@ -70,23 +77,17 @@ pub fn cp_mv(
         time: Duration::ZERO,
     };
 
-    let mut timers = Timers {
-        start: Instant::now(),
-        last_write: Instant::now(),
-        cur_start: Instant::now(),
-    };
-
-    let dir_list = match db_command_tx {
+    let dir_list = match &db_command_tx {
         Some(command_tx) => database::get_dir_list(command_tx, job_id),
         None => Vec::new(),
     };
 
-    let rename_dir_stack = match db_command_tx {
+    let rename_dir_stack = match &db_command_tx {
         Some(command_tx) => database::get_rename_dir_stack(command_tx, job_id),
         None => Vec::new(),
     };
 
-    let skip_dir_stack = match db_command_tx {
+    let skip_dir_stack = match &db_command_tx {
         Some(command_tx) => database::get_skip_dir_stack(command_tx, job_id),
         None => Vec::new(),
     };
@@ -96,74 +97,109 @@ pub fn cp_mv(
     let replace_first_path = replace_first_path.unwrap_or_else(|| {
         let replace_first_path = actual_dest.is_dir();
 
-        if let Some(command_tx) = db_command_tx {
-            database.set_replace_first_path(command_tx, job_id, replace_first_path);
+        if let Some(command_tx) = &db_command_tx {
+            database::set_replace_first_path(command_tx, job_id, replace_first_path);
         }
 
         replace_first_path
     });
 
-    total_bytes = 0
-    timers['start'] = time.monotonic()
-    timers['last_write'] = timers['start']
-    for i_file, file in enumerate(file_list):
-        try:
-            if ev_interrupt.is_set():
-                raise InterruptError()
+    let mut total_bytes = 0;
 
-            if dbfile and ev_nodb.is_set():
-                db.delete_job(job_id)
-                del db
-                dbfile = None
+    let now = Instant::now();
+    let mut timers = Timers {
+        start: now.clone(),
+        last_write: now.clone(),
+        cur_start: now,
+    };
 
-            if file['status'] in ('DONE', 'ERROR', 'SKIPPED'):
-                raise SkippedError('no_log')
+    for entry in &file_list {
+        timers.cur_start = Instant::now();
 
-            timers['cur_start'] = time.monotonic()
+        if !ev_rx.is_empty() {
+            if let Ok(event) = ev_rx.try_recv() {
+                match event {
+                    CpMvEvent::Interrupt => {
+                        // TODO: Notify somehow outside the for loop that the operation was interrupted?
+                        break;
+                    },
+                    CpMvEvent::NoDb => {
+                        if let Some(command_tx) = &db_command_tx {
+                            database::delete_job(command_tx, job_id);
+                        }
 
-            t1 = time.monotonic()
-            ev_suspend.wait()
-            t2 = time.monotonic()
-            dt = round(t2 - t1)
-            timers['cur_start'] += dt
-            timers['start'] += dt
+                        db_command_tx = None;
+                    }
+                    CpMvEvent::Suspend(suspend_rx) => {
+                        let t1 = Instant.now();
+                        let _ = suspend_rx.recv();
+                        let t2 = Instant.now();
+                        let dt = t2.duration_since(t1);
+                        timers.cur_start += dt;
+                        timers.start += dt;
+                    }
+                }
+            }
+        }
 
-            cur_file = Path(file['file'])
-            rel_file = cur_file.relative_to(cwd)
+        match entry.status {
+            DBFileStatus::Error | DBFileStatus::Skipped | DBFileStatus::Done => {
+                continue;
+            },
+            _ => {},
+        }
 
-            if replace_first_path:
-                cur_target = dest / os.sep.join(rel_file.parts[1:])
-            else:
-                cur_target = dest / rel_file
+        let cur_file = PathBuf::from(entry.file);
+        let rel_file = diff_paths(cur_file, cwd);
 
-            actual_file = unarchive_path(cur_file, include_self=False)[0]
-            actual_target = unarchive_path(cur_target, include_self=False)[0]
+        let mut skip_dir = false;
+        while !skip_dir_stack.is_empty() {
+            let dir_to_skip = skip_dir_stack.last().unwrap();
+            if cur_file.ancestors().any(|ancestor| ancestor == dir_to_skip.file) {
+                skip_dir = true;
+                break;
+            } else {
+                skip_dir_stack.pop();
 
-            skip_dir_stack_changed = False
-            skip_dir = False
-            while skip_dir_stack:
-                dir_to_skip = skip_dir_stack[-1]
-                if dir_to_skip in cur_file.parents:
-                    skip_dir = True
-                    break
-                else:
-                    skip_dir_stack.pop()
-                    skip_dir_stack_changed = True
+                if let Some(command_tx) = &db_command_tx {
+                    database::pop_skip_dir_stack(command_tx, dir_to_skip.id);
+                }
+            }
+        }
 
-            if skip_dir_stack_changed and dbfile:
-                db.set_skip_dir_stack(job_id, skip_dir_stack)
+        let mut cur_target = match replace_first_path {
+            true => {
+                let components = rel_file.components();
+                components.next();
 
-            rename_dir_stack_changed = False
-            (old_target, new_target) = (None, None)
-            while rename_dir_stack:
-                (old_target, new_target) = rename_dir_stack[-1]
-                if old_target in cur_target.parents:
-                    cur_target = Path(str(cur_target).replace(str(old_target), str(new_target), 1))
-                    actual_target = unarchive_path(cur_target, include_self=False)[0]
-                    break
-                else:
-                    rename_dir_stack.pop()
-                    rename_dir_stack_changed = True
+                dest.join(components.as_path())
+            },
+            false => dest.join(rel_file),
+        };
+
+        while !rename_dir_stack.is_empty() {
+            let rename_dir_entry = rename_dir_stack.last().unwrap();
+            if cur_target.ancestors().any(|ancestor| ancestor == rename_dir_entry.existing_target) {
+                cur_target = rename_dir_entry.cur_target.join(diff_paths(cur_target, rename_dir_entry.existing_target));
+                break;
+            } else {
+                rename_dir_stack.pop();
+
+                if let Some(command_tx) = &db_command_tx {
+                    database::pop_rename_dir_stack(command_tx, rename_dir_entry.id);
+                }
+            }
+        }
+
+        let actual_file = match (cur_file.parent(), cur_file.file_name()) {
+            (Some(parent), Some(file_name)) => unarchive_path(parent).join(file_name),
+            _ => cur_file,
+        };
+
+        let actual_target = match (cur_target.parent(), cur_target.file_name()) {
+            (Some(parent), Some(file_name)) => unarchive_path(parent).join(file_name),
+            _ => cur_target,
+        };
 
             when = ''
             warning = file.get('warning', '')
@@ -257,9 +293,6 @@ pub fn cp_mv(
                 if ev_skip.is_set():
                     ev_skip.clear()
                     raise SkippedError('ev_skip')
-
-                if rename_dir_stack_changed and dbfile:
-                    db.set_rename_dir_stack(job_id, rename_dir_stack)
 
                 info['cur_source'] = str(rel_file)
                 info['cur_target'] = str(cur_target)
@@ -418,6 +451,7 @@ pub fn cp_mv(
         total_bytes += file['lstat'].st_size
         info['bytes'] = total_bytes
         info['files'] += 1
+    }
 
     for entry in reversed(dir_list):
         try:
