@@ -144,6 +144,7 @@ pub fn cp_mv(
 
         match entry.status {
             DBFileStatus::Error | DBFileStatus::Skipped | DBFileStatus::Done => {
+                // TODO: Update total_bytes and info (CpMvInfo) with the number of bytes of this entry, and increment files
                 continue;
             },
             _ => {},
@@ -191,101 +192,159 @@ pub fn cp_mv(
             }
         }
 
-        let actual_file = match (cur_file.parent(), cur_file.file_name()) {
+        let mut actual_file = match (cur_file.parent(), cur_file.file_name()) {
             (Some(parent), Some(file_name)) => unarchive_path(parent).join(file_name),
             _ => cur_file,
         };
 
-        let actual_target = match (cur_target.parent(), cur_target.file_name()) {
+        let mut actual_target = match (cur_target.parent(), cur_target.file_name()) {
             (Some(parent), Some(file_name)) => unarchive_path(parent).join(file_name),
             _ => cur_target,
         };
 
-            when = ''
-            warning = file.get('warning', '')
-            target_is_dir = file.get('target_is_dir', False)
-            target_is_symlink = file.get('target_is_symlink', False)
-            resume = False
-            try:
-                if file['status'] == 'IN_PROGRESS':
-                    x = file.get('cur_target', None)
-                    if x is not None:
-                        cur_target = Path(x)
-                        actual_target = unarchive_path(cur_target, include_self=False)[0]
+        let mut when = "";
+        let mut warning = entry.warning.clone();
+        let mut target_is_dir = entry.target_is_dir;
+        let mut target_is_symlink = entry.target_is_symlink;
+        let mut resume = false;
 
-                    if os.path.lexists(actual_target):
-                        resume = True
+        match &entry.status {
+            DBFileStatus::InProgress => {
+                if let Some(x) = &entry.cur_target {
+                    cur_target = x;
 
-                        if warning:
-                            if not warning.startswith('Resumed'):
-                                warning = f'Resumed -- {warning}'
-                        else:
-                            warning = f'Resumed'
+                    actual_target = match (cur_target.parent(), cur_target.file_name()) {
+                        (Some(parent), Some(file_name)) => unarchive_path(parent).join(file_name),
+                        _ => cur_target,
+                    };
+                }
 
-                        file['warning'] = warning
-                else:
-                    if os.path.lexists(actual_target) and not skip_dir:
-                        when = 'stat_target'
-                        target_is_dir = actual_target.is_dir()
-                        target_is_symlink = actual_target.is_symlink()
+                if actual_target.try_exists().is_ok() {
+                    resume = true;
 
-                        if not (file['is_dir'] and target_is_dir):
-                            when = 'samefile'
-                            if actual_file.resolve() == actual_target.resolve():
-                                if (mode == 'mv') or (on_conflict not in ('rename_existing', 'rename_copy')):
-                                    raise SkippedError('Same file')
+                    if warning.is_empty() {
+                        warning = String::from("Resumed");
+                    } else if !warning.starts_with("Resumed") {
+                        warning = format!("Resumed -- {}", warning);
+                    }
 
-                            if on_conflict == 'overwrite':
-                                if target_is_dir and not target_is_symlink:
-                                    when = 'rmdir'
-                                    os.rmdir(actual_target)
-                                    warning = f'Overwrite'
-                                else:
-                                    when = 'remove'
-                                    os.remove(actual_target)
-                                    warning = f'Overwrite'
-                            elif on_conflict == 'rename_existing':
-                                i = 0
-                                name = actual_target.name
-                                existing_target = actual_target
-                                while os.path.lexists(existing_target):
-                                    new_name = f'{name}.rnrsave{i}'
-                                    existing_target = existing_target.parent / new_name
-                                    i += 1
+                    entry.warning = warning;
+                }
 
-                                when = 'samefile'
-                                if actual_file.resolve() == actual_target.resolve():
-                                    actual_file = existing_target
+            }
+            _ => {
+                if actual_target.try_exists().is_ok() && !skip_dir {
+                    when = "stat_target";
+                    target_is_dir = actual_target.is_dir();
+                    target_is_symlink = actual_target.is_symlink();
 
-                                when = 'rename'
-                                os.rename(actual_target, existing_target)
-                                warning = f'Renamed to {existing_target.name}'
-                            elif on_conflict == 'rename_copy':
-                                i = 0
-                                name = cur_target.name
-                                existing_target = cur_target
-                                while os.path.lexists(unarchive_path(cur_target)[0]):
-                                    new_name = f'{name}.rnrnew{i}'
-                                    cur_target = cur_target.parent / new_name
-                                    i += 1
+                    if !(entry.is_dir && target_is_dir) {
+                        when = "samefile";
+                        match (same_file(&actual_file, &actual_target) {
+                            Ok(true) => {
+                                if matches!(mode, DlgCpMvType::Mv) || !(matches!(on_conflict, OnConflict::RenameExisting) || matches!(on_conflict, OnConflict::RenameCopy)) {
+                                    // TODO: raise SkippedError('Same file')
+                                }
+                            }
+                            Err(e) => {
+                                // TODO: OSError handler from Python
+                            }
+                            _ => {}
+                        }
 
-                                actual_target = unarchive_path(cur_target)[0]
+                        match on_conflict {
+                            OnConflict::Overwrite => {
+                                if target_is_dir && !target_is_symlink {
+                                    when = "rmdir";
+                                    if let Err(e) = fs::remove_dir(actual_target) {
+                                        // TODO: OSError handler from Python
+                                    }
+                                } else {
+                                    when = "remove";
+                                    if let Err(e) = fs::remove_file(actual_target) {
+                                        // TODO: OSError handler from Python
+                                    }
+                                }
+                                warning = String::from("Overwrite");
+                            }
+                            OnConflict::RenameExisting => {
+                                let mut i = 0;
+                                // TODO: I don't like this unwrap() call
+                                let mut name = actual_target.file_name().unwrap().to_string_lossy().to_string();
+                                let mut existing_target = actual_target;
+                                while existing_target.try_exists().is_ok() {
+                                    let new_name = format!("{}.fcdsave{}", name, i);
+                                    // TODO: I don't like this unwrap() call
+                                    existing_target = existing_target.parent().unwrap().join(new_name);
+                                    i += 1;
+                                }
 
-                                warning = f'Renamed to {cur_target.name}'
-                                if file['is_dir']:
-                                    rename_dir_stack.append((existing_target, cur_target))
-                                    if dbfile:
-                                        db.set_rename_dir_stack(job_id, rename_dir_stack)
-                            else:
-                                raise SkippedError('Target exists')
+                                when = "samefile";
+                                match (same_file(&actual_file, &actual_target) {
+                                    Ok(true) => {
+                                        actual_file = existing_target;
+                                    }
+                                    Err(e) => {
+                                        // TODO: OSError handler from Python
+                                    }
+                                    _ => {}
+                                }
 
-                    file['warning'] = warning
-                    file['target_is_dir'] = target_is_dir
-                    file['target_is_symlink'] = target_is_symlink
-                    file['cur_target'] = str(cur_target)
+                                when = "rename"
+                                if let Err(e) = fs::rename(actual_target, existing_target) {
+                                    // TODO: OSError handler from Python
+                                }
 
-                if dbfile:
-                    db.update_file(file, 'IN_PROGRESS')
+                                // TODO: I don't like this unwrap() call
+                                warning = format!("Renamed to {}", existing_target.file_name().unwrap().to_string_lossy())
+                            }
+                            OnConflict::RenameCopy => {
+                                let mut i = 0;
+                                // TODO: I don't like this unwrap() call
+                                let mut name = cur_target.file_name().unwrap().to_string_lossy().to_string();
+                                let mut existing_target = cur_target;
+                                while unarchive_path(cur_target).try_exists().is_ok() {
+                                    let new_name = format!("{}.fcdnew{}" name, i);
+                                    // TODO: I don't like this unwrap() call
+                                    cur_target = cur_target.parent().unwrap().join(new_name);
+                                    i += 1;
+                                }
+
+                                actual_target = unarchive_path(cur_target);
+
+                                // TODO: I don't like this unwrap() call
+                                warning = format!("Renamed to {}", cur_target.file_name().unwrap().to_string_lossy());
+                                if entry.is_dir {
+                                    rename_dir_stack.push(DBRenameDirEntry {
+                                        id: 0,
+                                        job_id,
+                                        existing_target,
+                                        cur_target,
+                                    });
+
+                                    if let Some(command_tx) = &db_command_tx {
+                                        database::push_rename_dir_stack(command_tx, rename_dir_stack.last_mut().unwrap());
+                                    }
+                                }
+                            }
+                            OnConflict::Skip => {
+                                // TODO: raise SkippedError('Target exists')
+                            }
+                        }
+                    }
+                }
+
+                entry.status = DBFileStatus::InProgress;
+                entry.warning = warning;
+                entry.target_is_dir = target_is_dir;
+                entry.target_is_symlink = target_is_symlink;
+                entry.cur_target = Some(cur_target);
+            }
+        }
+
+        if let Some(command_tx) = &db_command_tx {
+            database::update_file(command_tx, &entry);
+        }
 
                 if ev_abort.is_set():
                     raise AbortedError()
@@ -667,3 +726,11 @@ fn copy_file(cur_file, cur_target, file_size, block_size, resume, info, timers, 
             os.close(target_fd)
 }
 
+fn same_file(file1: &Path, file2: &Path) -> Result<bool> {
+    // TODO: Instead of canonicalizing the path it would be more reliable to check the device number and inode number
+    match (fs::canonicalize(&file1), fs::canonicalize(&file2)) {
+        (Ok(file), Ok(target)) if file == target => Ok(true),
+        (e @ Err(_), _) | (_, e @ Err(_)) => Ok(e.map(|_| false)?),
+        _ => Ok(false),
+    }
+}

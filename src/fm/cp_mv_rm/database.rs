@@ -7,7 +7,11 @@ use std::{
 use anyhow::{bail, Result};
 use crossbeam_channel::{Receiver, Sender};
 
-use rusqlite::{params, Connection};
+use rusqlite::{
+    params,
+    types::{ToSql, ToSqlOutput, ValueRef},
+    Connection,
+};
 
 const DB_SIGNATURE: &str = "fcd";
 const DB_VERSION: &str = "1";
@@ -28,11 +32,16 @@ pub enum DBFileStatus {
     Done,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum DBFileType {
-    File,
-    Dir,
-    Symlink,
+impl ToSql for DBFileStatus {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::Borrowed(ValueRef::Text(match &self {
+            DBFileStatus::ToDo => b"TO_DO",
+            DBFileStatus::InProgress => b"IN_PROGRESS",
+            DBFileStatus::Error => b"ERROR",
+            DBFileStatus::Skipped => b"SKIPPED",
+            DBFileStatus::Done => b"DONE",
+        })))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -40,7 +49,9 @@ pub struct DBFileEntry {
     pub id: i64,
     pub job_id: i64,
     pub file: PathBuf,
-    pub file_type: DBFileType,
+    pub is_file: bool,
+    pub is_dir: bool,
+    pub is_symlink: bool,
     pub size: u64,
     pub mtime: i64,
     pub mtime_nsec: i64,
@@ -50,6 +61,12 @@ pub struct DBFileEntry {
     // TODO: st_flags and xattrs
     pub status: DBFileStatus,
     pub message: String,
+
+    // These are set during the Cp/Mv operations
+    pub warning: String,
+    pub target_is_dir: bool,
+    pub target_is_symlink: bool,
+    pub cur_target: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,7 +103,9 @@ pub enum DBCommand {
     SetReplaceFirstPath(i64, bool),
     DeleteJob(i64),
     PopSkipDirStack(i64),
+    PushRenameDirStack(DBRenameDirEntry, Sender<i64>),
     PopRenameDirStack(i64),
+    UpdateFile(DBFileEntry),
 }
 
 #[derive(Debug)]
@@ -122,8 +141,18 @@ pub fn start(file: &Path) -> Result<Sender<DBCommand>> {
                         DBCommand::PopSkipDirStack(skip_dir_stack_id) => {
                             db.pop_skip_dir_stack(skip_dir_stack_id);
                         }
+                        DBCommand::PushRenameDirStack(
+                            mut rename_dir_stack_entry,
+                            rename_dir_stack_id_tx,
+                        ) => {
+                            let _ = rename_dir_stack_id_tx
+                                .send(db.push_rename_dir_stack(&mut rename_dir_stack_entry));
+                        }
                         DBCommand::PopRenameDirStack(rename_dir_stack_id) => {
                             db.pop_rename_dir_stack(rename_dir_stack_id);
+                        }
+                        DBCommand::UpdateFile(file) => {
+                            db.update_file(&file);
                         }
                     },
 
@@ -201,9 +230,35 @@ pub fn pop_skip_dir_stack(command_tx: &Sender<DBCommand>, skip_dir_stack_id: i64
         .unwrap();
 }
 
+pub fn push_rename_dir_stack(
+    command_tx: &Sender<DBCommand>,
+    rename_dir_stack_entry: &mut DBRenameDirEntry,
+) -> i64 {
+    let (rename_dir_stack_id_tx, rename_dir_stack_id_rx) = crossbeam_channel::unbounded();
+
+    command_tx
+        .send(DBCommand::PushRenameDirStack(
+            rename_dir_stack_entry.clone(),
+            rename_dir_stack_id_tx,
+        ))
+        .unwrap();
+
+    let last_id = rename_dir_stack_id_rx.recv().unwrap();
+
+    rename_dir_stack_entry.id = last_id;
+
+    last_id
+}
+
 pub fn pop_rename_dir_stack(command_tx: &Sender<DBCommand>, rename_dir_stack_id: i64) {
     command_tx
         .send(DBCommand::PopRenameDirStack(rename_dir_stack_id))
+        .unwrap();
+}
+
+pub fn update_file(command_tx: &Sender<DBCommand>, file: &DBFileEntry) {
+    command_tx
+        .send(DBCommand::UpdateFile(file.clone()))
         .unwrap();
 }
 
@@ -217,14 +272,14 @@ impl DataBase {
 
         let signature: String =
             db.conn
-                .query_row("SELECT v FROM misc WHERE k = ?1", ["signature"], |row| {
+                .query_row("SELECT v FROM kv WHERE k = ?1", ["signature"], |row| {
                     row.get(0)
                 })?;
 
         if signature == DB_SIGNATURE {
             let version: String =
                 db.conn
-                    .query_row("SELECT v FROM misc WHERE k = ?1", ["version"], |row| {
+                    .query_row("SELECT v FROM kv WHERE k = ?1", ["version"], |row| {
                         row.get(0)
                     })?;
 
@@ -248,76 +303,15 @@ impl DataBase {
     }
 
     fn create_database(&self) -> Result<()> {
-        self.conn.execute_batch(
-            "PRAGMA foreign_keys = ON;
-
-            CREATE TABLE IF NOT EXISTS jobs (
-                id INTEGER NOT NULL PRIMARY KEY,
-                operation TEXT NOT NULL,
-                files TEXT NOT NULL,
-                cwd TEXT NOT NULL,
-                dest TEXT,
-                on_conflict TEXT,
-                archives TEXT,
-                scan_error TEXT,
-                scan_skipped TEXT,
-                replace_first_path INTEGER,
-                status TEXT NOT NULL
-            ) STRICT;
-
-            CREATE TABLE IF NOT EXISTS files (
-                id INTEGER NOT NULL PRIMARY KEY,
-                job_id INTEGER NOT NULL,
-                file TEXT NOT NULL,
-                file_type TEXT NOT NULL,
-                size INTEGER NOT NULL,
-                mtime INTEGER NOT NULL,
-                mtime_nsec INTEGER NOT NULL,
-                mode INTEGER NOT NULL,
-                uid INTEGER NOT NULL,
-                gid INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                message TEXT NOT NULL,
-                FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
-            ) STRICT;
-
-            CREATE TABLE IF NOT EXISTS dir_list (
-                id INTEGER NOT NULL PRIMARY KEY,
-                job_id INTEGER NOT NULL,
-                file TEXT NOT NULL,
-                cur_file TEXT NOT NULL,
-                cur_target TEXT NOT NULL,
-                new_dir INTEGER NOT NULL,
-                FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
-            ) STRICT;
-
-            CREATE TABLE IF NOT EXISTS rename_dir_stack (
-                id INTEGER NOT NULL PRIMARY KEY,
-                job_id INTEGER NOT NULL,
-                existing_target TEXT NOT NULL,
-                cur_target TEXT NOT NULL,
-                FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
-            ) STRICT;
-
-            CREATE TABLE IF NOT EXISTS skip_dir_stack (
-                id INTEGER NOT NULL PRIMARY KEY,
-                job_id INTEGER NOT NULL,
-                file TEXT NOT NULL,
-                FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
-            ) STRICT;
-
-            CREATE TABLE IF NOT EXISTS misc (
-                k TEXT NOT NULL PRIMARY KEY,
-                v TEXT
-            ) STRICT;",
-        )?;
+        self.conn
+            .execute_batch(include_str!("create_database.sql"))?;
 
         self.conn.execute(
-            "INSERT OR IGNORE INTO misc (k, v) VALUES (?1, ?2);",
+            "INSERT OR IGNORE INTO kv (k, v) VALUES (?1, ?2);",
             ("signature", DB_SIGNATURE),
         )?;
         self.conn.execute(
-            "INSERT OR IGNORE INTO misc (k, v) VALUES (?1, ?2);",
+            "INSERT OR IGNORE INTO kv (k, v) VALUES (?1, ?2);",
             ("version", DB_VERSION),
         )?;
 
@@ -375,29 +369,29 @@ impl DataBase {
                 pass
 
             return job_id
+    */
 
-        def update_file(self, file, status=None):
-            if self.conn is None:
-                return
+    pub fn update_file(&self, file: &DBFileEntry) {
+        let _ = self.conn.execute(
+            "UPDATE files
+            SET status = ?1,
+                warning = ?2,
+                target_is_dir = ?3,
+                target_is_symlink = ?4,
+                cur_target = ?5
+            WHERE id = ?6",
+            (
+                file.status,
+                &file.warning,
+                file.target_is_dir,
+                file.target_is_symlink,
+                file.cur_target.as_ref().map(|x| x.to_string_lossy()),
+                file.id,
+            ),
+        );
+    }
 
-            try:
-                with self.conn:
-                    if status is not None:
-                        self.conn.execute("UPDATE files SET file = ?, status = ? WHERE id = ?", (
-                            json.dumps(file),
-                            status,
-                            file["id"],
-                        ))
-
-                        file["status"] = status
-                    else:
-                        self.conn.execute("UPDATE files SET file = ? WHERE id = ?", (
-                            json.dumps(file),
-                            file["id"],
-                        ))
-            except sqlite3.OperationalError:
-                pass
-
+    /*
         def set_file_status(self, file, status, message=None):
             if self.conn is None:
                 return
@@ -488,21 +482,6 @@ impl DataBase {
             .unwrap_or_default()
     }
 
-    /*
-        def set_rename_dir_stack(self, job_id, rename_dir_stack):
-            if self.conn is None:
-                return
-
-            try:
-                with self.conn:
-                    self.conn.execute("UPDATE jobs SET rename_dir_stack = ? WHERE id = ?", (
-                        json.dumps([list(map(str, x)) for x in rename_dir_stack]),
-                        job_id,
-                    ))
-            except sqlite3.OperationalError:
-                pass
-    */
-
     pub fn get_rename_dir_stack(&self, job_id: i64) -> Vec<DBRenameDirEntry> {
         self.conn
             .prepare(
@@ -523,6 +502,26 @@ impl DataBase {
                 .and_then(|rows| rows.collect())
             })
             .unwrap_or_default()
+    }
+
+    pub fn push_rename_dir_stack(&self, rename_dir_stack_entry: &mut DBRenameDirEntry) -> i64 {
+        match self.conn.execute(
+            "INSERT INTO rename_dir_stack (job_id, existing_target, cur_target) VALUES (?1, ?2, ?3)",
+            (
+                rename_dir_stack_entry.job_id,
+                rename_dir_stack_entry.existing_target.to_string_lossy(),
+                rename_dir_stack_entry.cur_target.to_string_lossy(),
+            ),
+        ) {
+            Ok(_) => {
+                let last_id = self.conn.last_insert_rowid();
+
+                rename_dir_stack_entry.id = last_id;
+
+                last_id
+            }
+            Err(_) => 0,
+        }
     }
 
     pub fn pop_rename_dir_stack(&self, rename_dir_stack_id: i64) {
