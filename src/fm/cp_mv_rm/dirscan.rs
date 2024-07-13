@@ -95,9 +95,9 @@ pub fn dirscan(
         };
 
         if last_write.elapsed().as_millis() >= 50 {
+            last_write = Instant::now();
             let _ = info_tx.send(info.clone());
             let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
-            last_write = Instant::now();
         }
 
         result.entries.push(DirScanEntry {
@@ -213,9 +213,9 @@ fn recursive_dirscan(
                     };
 
                     if last_write.elapsed().as_millis() >= 50 {
+                        last_write = Instant::now();
                         let _ = info_tx.send(info.clone());
                         let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
-                        last_write = Instant::now();
                     }
 
                     let file = entry.path();

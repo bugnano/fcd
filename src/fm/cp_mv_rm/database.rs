@@ -8,7 +8,7 @@ use anyhow::{bail, Result};
 use crossbeam_channel::{Receiver, Sender};
 
 use rusqlite::{
-    params,
+    self,
     types::{ToSql, ToSqlOutput, ValueRef},
     Connection,
 };
@@ -73,7 +73,7 @@ pub struct DBFileEntry {
 pub struct DBDirListEntry {
     pub id: i64,
     pub job_id: i64,
-    pub file: PathBuf,
+    pub file_id: i64,
     pub cur_file: PathBuf,
     pub cur_target: PathBuf,
     pub new_dir: bool,
@@ -96,16 +96,19 @@ pub struct DBSkipDirEntry {
 
 #[derive(Debug, Clone)]
 pub enum DBCommand {
-    GetDirList(i64, Sender<Vec<DBDirListEntry>>),
-    GetRenameDirStack(i64, Sender<Vec<DBRenameDirEntry>>),
-    GetSkipDirStack(i64, Sender<Vec<DBSkipDirEntry>>),
     GetReplaceFirstPath(i64, Sender<Option<bool>>),
     SetReplaceFirstPath(i64, bool),
     DeleteJob(i64),
+    GetDirList(i64, Sender<Vec<DBDirListEntry>>),
+    PushDirList(DBDirListEntry, Sender<i64>),
+    GetSkipDirStack(i64, Sender<Vec<DBSkipDirEntry>>),
+    PushSkipDirStack(DBSkipDirEntry, Sender<i64>),
     PopSkipDirStack(i64),
+    GetRenameDirStack(i64, Sender<Vec<DBRenameDirEntry>>),
     PushRenameDirStack(DBRenameDirEntry, Sender<i64>),
     PopRenameDirStack(i64),
     UpdateFile(DBFileEntry),
+    SetFileStatus(DBFileEntry),
 }
 
 #[derive(Debug)]
@@ -120,15 +123,6 @@ pub fn start(file: &Path) -> Result<Sender<DBCommand>> {
             thread::spawn(move || loop {
                 match command_rx.recv() {
                     Ok(command) => match command {
-                        DBCommand::GetDirList(job_id, dir_list_tx) => {
-                            let _ = dir_list_tx.send(db.get_dir_list(job_id));
-                        }
-                        DBCommand::GetRenameDirStack(job_id, rename_dir_stack_tx) => {
-                            let _ = rename_dir_stack_tx.send(db.get_rename_dir_stack(job_id));
-                        }
-                        DBCommand::GetSkipDirStack(job_id, skip_dir_stack_tx) => {
-                            let _ = skip_dir_stack_tx.send(db.get_skip_dir_stack(job_id));
-                        }
                         DBCommand::GetReplaceFirstPath(job_id, replace_first_path_tx) => {
                             let _ = replace_first_path_tx.send(db.get_replace_first_path(job_id));
                         }
@@ -138,8 +132,27 @@ pub fn start(file: &Path) -> Result<Sender<DBCommand>> {
                         DBCommand::DeleteJob(job_id) => {
                             db.delete_job(job_id);
                         }
+                        DBCommand::GetDirList(job_id, dir_list_tx) => {
+                            let _ = dir_list_tx.send(db.get_dir_list(job_id));
+                        }
+                        DBCommand::PushDirList(mut dir_list_entry, dir_list_id_tx) => {
+                            let _ = dir_list_id_tx.send(db.push_dir_list(&mut dir_list_entry));
+                        }
+                        DBCommand::GetSkipDirStack(job_id, skip_dir_stack_tx) => {
+                            let _ = skip_dir_stack_tx.send(db.get_skip_dir_stack(job_id));
+                        }
+                        DBCommand::PushSkipDirStack(
+                            mut skip_dir_stack_entry,
+                            skip_dir_stack_id_tx,
+                        ) => {
+                            let _ = skip_dir_stack_id_tx
+                                .send(db.push_skip_dir_stack(&mut skip_dir_stack_entry));
+                        }
                         DBCommand::PopSkipDirStack(skip_dir_stack_id) => {
                             db.pop_skip_dir_stack(skip_dir_stack_id);
+                        }
+                        DBCommand::GetRenameDirStack(job_id, rename_dir_stack_tx) => {
+                            let _ = rename_dir_stack_tx.send(db.get_rename_dir_stack(job_id));
                         }
                         DBCommand::PushRenameDirStack(
                             mut rename_dir_stack_entry,
@@ -154,6 +167,9 @@ pub fn start(file: &Path) -> Result<Sender<DBCommand>> {
                         DBCommand::UpdateFile(file) => {
                             db.update_file(&file);
                         }
+                        DBCommand::SetFileStatus(file) => {
+                            db.set_file_status(&file);
+                        }
                     },
 
                     // When the main thread exits, the channel returns an error
@@ -165,36 +181,6 @@ pub fn start(file: &Path) -> Result<Sender<DBCommand>> {
         }
         Err(e) => Err(e),
     }
-}
-
-pub fn get_dir_list(command_tx: &Sender<DBCommand>, job_id: i64) -> Vec<DBDirListEntry> {
-    let (dir_list_tx, dir_list_rx) = crossbeam_channel::unbounded();
-
-    command_tx
-        .send(DBCommand::GetDirList(job_id, dir_list_tx))
-        .unwrap();
-
-    dir_list_rx.recv().unwrap()
-}
-
-pub fn get_rename_dir_stack(command_tx: &Sender<DBCommand>, job_id: i64) -> Vec<DBRenameDirEntry> {
-    let (rename_dir_stack_tx, rename_dir_stack_rx) = crossbeam_channel::unbounded();
-
-    command_tx
-        .send(DBCommand::GetRenameDirStack(job_id, rename_dir_stack_tx))
-        .unwrap();
-
-    rename_dir_stack_rx.recv().unwrap()
-}
-
-pub fn get_skip_dir_stack(command_tx: &Sender<DBCommand>, job_id: i64) -> Vec<DBSkipDirEntry> {
-    let (skip_dir_stack_tx, skip_dir_stack_rx) = crossbeam_channel::unbounded();
-
-    command_tx
-        .send(DBCommand::GetSkipDirStack(job_id, skip_dir_stack_tx))
-        .unwrap();
-
-    skip_dir_stack_rx.recv().unwrap()
 }
 
 pub fn get_replace_first_path(command_tx: &Sender<DBCommand>, job_id: i64) -> Option<bool> {
@@ -224,10 +210,77 @@ pub fn delete_job(command_tx: &Sender<DBCommand>, job_id: i64) {
     command_tx.send(DBCommand::DeleteJob(job_id)).unwrap();
 }
 
+pub fn get_dir_list(command_tx: &Sender<DBCommand>, job_id: i64) -> Vec<DBDirListEntry> {
+    let (dir_list_tx, dir_list_rx) = crossbeam_channel::unbounded();
+
+    command_tx
+        .send(DBCommand::GetDirList(job_id, dir_list_tx))
+        .unwrap();
+
+    dir_list_rx.recv().unwrap()
+}
+
+pub fn push_dir_list(command_tx: &Sender<DBCommand>, dir_list_entry: &mut DBDirListEntry) -> i64 {
+    let (dir_list_id_tx, dir_list_id_rx) = crossbeam_channel::unbounded();
+
+    command_tx
+        .send(DBCommand::PushDirList(
+            dir_list_entry.clone(),
+            dir_list_id_tx,
+        ))
+        .unwrap();
+
+    let last_id = dir_list_id_rx.recv().unwrap();
+
+    dir_list_entry.id = last_id;
+
+    last_id
+}
+
+pub fn get_skip_dir_stack(command_tx: &Sender<DBCommand>, job_id: i64) -> Vec<DBSkipDirEntry> {
+    let (skip_dir_stack_tx, skip_dir_stack_rx) = crossbeam_channel::unbounded();
+
+    command_tx
+        .send(DBCommand::GetSkipDirStack(job_id, skip_dir_stack_tx))
+        .unwrap();
+
+    skip_dir_stack_rx.recv().unwrap()
+}
+
+pub fn push_skip_dir_stack(
+    command_tx: &Sender<DBCommand>,
+    skip_dir_stack_entry: &mut DBSkipDirEntry,
+) -> i64 {
+    let (skip_dir_stack_id_tx, skip_dir_stack_id_rx) = crossbeam_channel::unbounded();
+
+    command_tx
+        .send(DBCommand::PushSkipDirStack(
+            skip_dir_stack_entry.clone(),
+            skip_dir_stack_id_tx,
+        ))
+        .unwrap();
+
+    let last_id = skip_dir_stack_id_rx.recv().unwrap();
+
+    skip_dir_stack_entry.id = last_id;
+
+    last_id
+}
+
 pub fn pop_skip_dir_stack(command_tx: &Sender<DBCommand>, skip_dir_stack_id: i64) {
     command_tx
         .send(DBCommand::PopSkipDirStack(skip_dir_stack_id))
         .unwrap();
+}
+
+pub fn get_rename_dir_stack(command_tx: &Sender<DBCommand>, job_id: i64) -> Vec<DBRenameDirEntry> {
+    let (rename_dir_stack_tx, rename_dir_stack_rx) = crossbeam_channel::unbounded();
+
+    command_tx
+        .send(DBCommand::GetRenameDirStack(job_id, rename_dir_stack_tx))
+        .unwrap();
+
+    rename_dir_stack_rx.recv().unwrap()
 }
 
 pub fn push_rename_dir_stack(
@@ -259,6 +312,12 @@ pub fn pop_rename_dir_stack(command_tx: &Sender<DBCommand>, rename_dir_stack_id:
 pub fn update_file(command_tx: &Sender<DBCommand>, file: &DBFileEntry) {
     command_tx
         .send(DBCommand::UpdateFile(file.clone()))
+        .unwrap();
+}
+
+pub fn set_file_status(command_tx: &Sender<DBCommand>, file: &DBFileEntry) {
+    command_tx
+        .send(DBCommand::SetFileStatus(file.clone()))
         .unwrap();
 }
 
@@ -391,31 +450,14 @@ impl DataBase {
         );
     }
 
+    pub fn set_file_status(&self, file: &DBFileEntry) {
+        let _ = self.conn.execute(
+            "UPDATE files SET status = ?1, message = ?2 WHERE id = ?3",
+            (file.status, &file.message, file.id),
+        );
+    }
+
     /*
-        def set_file_status(self, file, status, message=None):
-            if self.conn is None:
-                return
-
-            try:
-                with self.conn:
-                    if message is not None:
-                        self.conn.execute("UPDATE files SET status = ?, message = ? WHERE id = ?", (
-                            status,
-                            message,
-                            file["id"],
-                        ))
-                    else:
-                        self.conn.execute("UPDATE files SET status = ? WHERE id = ?", (
-                            status,
-                            file["id"],
-                        ))
-
-                    file["status"] = status
-                    if message is not None:
-                        file["message"] = message
-            except sqlite3.OperationalError:
-                pass
-
         def set_job_status(self, job_id, status):
             if self.conn is None:
                 return
@@ -436,32 +478,10 @@ impl DataBase {
             .execute("DELETE FROM jobs WHERE id = ?1", [job_id]);
     }
 
-    /*
-        def set_dir_list(self, job_id, dir_list):
-            if self.conn is None:
-                return
-
-            try:
-                with self.conn:
-                    l = []
-                    for x in dir_list:
-                        file = x.copy()
-                        file.update({"file": x["file"].copy(), "cur_file": str(x["cur_file"]), "cur_target": str(x["cur_target"])})
-                        file["file"]["file"] = str(x["file"]["file"])
-                        l.append(file)
-
-                    self.conn.execute("UPDATE jobs SET dir_list = ? WHERE id = ?", (
-                        json.dumps(l),
-                        job_id,
-                    ))
-            except sqlite3.OperationalError:
-                pass
-    */
-
     pub fn get_dir_list(&self, job_id: i64) -> Vec<DBDirListEntry> {
         self.conn
             .prepare(
-                "SELECT id, file, cur_file, cur_target, new_dir
+                "SELECT id, file_id, cur_file, cur_target, new_dir
                 FROM dir_list
                 WHERE job_id = ?1
                 ORDER BY id",
@@ -471,7 +491,7 @@ impl DataBase {
                     Ok(DBDirListEntry {
                         id: row.get(0)?,
                         job_id,
-                        file: PathBuf::from(row.get::<usize, String>(1)?),
+                        file_id: row.get(1)?,
                         cur_file: PathBuf::from(row.get::<usize, String>(2)?),
                         cur_target: PathBuf::from(row.get::<usize, String>(3)?),
                         new_dir: row.get(4)?,
@@ -480,6 +500,28 @@ impl DataBase {
                 .and_then(|rows| rows.collect())
             })
             .unwrap_or_default()
+    }
+
+    pub fn push_dir_list(&self, dir_list_entry: &mut DBDirListEntry) -> i64 {
+        match self.conn.execute(
+            "INSERT INTO dir_list (job_id, file_id, cur_file, cur_target, new_dir) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (
+                dir_list_entry.job_id,
+                dir_list_entry.file_id,
+                dir_list_entry.cur_file.to_string_lossy(),
+                dir_list_entry.cur_target.to_string_lossy(),
+                dir_list_entry.new_dir,
+            ),
+        ) {
+            Ok(_) => {
+                let last_id = self.conn.last_insert_rowid();
+
+                dir_list_entry.id = last_id;
+
+                last_id
+            }
+            Err(_) => 0,
+        }
     }
 
     pub fn get_rename_dir_stack(&self, job_id: i64) -> Vec<DBRenameDirEntry> {
@@ -531,21 +573,6 @@ impl DataBase {
         );
     }
 
-    /*
-        def set_skip_dir_stack(self, job_id, skip_dir_stack):
-            if self.conn is None:
-                return
-
-            try:
-                with self.conn:
-                    self.conn.execute("UPDATE jobs SET skip_dir_stack = ? WHERE id = ?", (
-                        json.dumps([str(x) for x in skip_dir_stack]),
-                        job_id,
-                    ))
-            except sqlite3.OperationalError:
-                pass
-    */
-
     pub fn get_skip_dir_stack(&self, job_id: i64) -> Vec<DBSkipDirEntry> {
         self.conn
             .prepare(
@@ -565,6 +592,25 @@ impl DataBase {
                 .and_then(|rows| rows.collect())
             })
             .unwrap_or_default()
+    }
+
+    pub fn push_skip_dir_stack(&self, skip_dir_stack_entry: &mut DBSkipDirEntry) -> i64 {
+        match self.conn.execute(
+            "INSERT INTO skip_dir_stack (job_id, file) VALUES (?1, ?2)",
+            (
+                skip_dir_stack_entry.job_id,
+                skip_dir_stack_entry.file.to_string_lossy(),
+            ),
+        ) {
+            Ok(_) => {
+                let last_id = self.conn.last_insert_rowid();
+
+                skip_dir_stack_entry.id = last_id;
+
+                last_id
+            }
+            Err(_) => 0,
+        }
     }
 
     pub fn pop_skip_dir_stack(&self, skip_dir_stack_id: i64) {

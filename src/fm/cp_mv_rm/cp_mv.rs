@@ -1,9 +1,10 @@
 
 #[derive(Debug, Clone, Copy)]
 pub enum CpMvEvent {
-    Interrupt,
-    NoDb,
     Suspend(Receiver<()>),
+    Skip,
+    Abort,
+    NoDb,
 }
 
 #[derive(Debug, Clone)]
@@ -115,32 +116,6 @@ pub fn cp_mv(
 
     for entry in &file_list {
         timers.cur_start = Instant::now();
-
-        if !ev_rx.is_empty() {
-            if let Ok(event) = ev_rx.try_recv() {
-                match event {
-                    CpMvEvent::Interrupt => {
-                        // TODO: Notify somehow outside the for loop that the operation was interrupted?
-                        break;
-                    },
-                    CpMvEvent::NoDb => {
-                        if let Some(command_tx) = &db_command_tx {
-                            database::delete_job(command_tx, job_id);
-                        }
-
-                        db_command_tx = None;
-                    }
-                    CpMvEvent::Suspend(suspend_rx) => {
-                        let t1 = Instant.now();
-                        let _ = suspend_rx.recv();
-                        let t2 = Instant.now();
-                        let dt = t2.duration_since(t1);
-                        timers.cur_start += dt;
-                        timers.start += dt;
-                    }
-                }
-            }
-        }
 
         match entry.status {
             DBFileStatus::Error | DBFileStatus::Skipped | DBFileStatus::Done => {
@@ -346,108 +321,175 @@ pub fn cp_mv(
             database::update_file(command_tx, &entry);
         }
 
-                if ev_abort.is_set():
-                    raise AbortedError()
+        if !ev_rx.is_empty() {
+            if let Ok(event) = ev_rx.try_recv() {
+                match event {
+                    CpMvEvent::Suspend(suspend_rx) => {
+                        let t1 = Instant.now();
+                        let _ = suspend_rx.recv();
+                        let t2 = Instant.now();
+                        let dt = t2.duration_since(t1);
+                        timers.cur_start += dt;
+                        timers.start += dt;
+                    }
+                    CpMvEvent::Skip => {
+                        // TODO: raise SkippedError('ev_skip')
+                    },
+                    CpMvEvent::Abort => {
+                        // TODO: raise AbortedError()
+                    },
+                    CpMvEvent::NoDb => {
+                        if let Some(command_tx) = &db_command_tx {
+                            database::delete_job(command_tx, job_id);
+                        }
 
-                if ev_skip.is_set():
-                    ev_skip.clear()
-                    raise SkippedError('ev_skip')
+                        db_command_tx = None;
+                    }
+                }
+            }
+        }
 
-                info['cur_source'] = str(rel_file)
-                info['cur_target'] = str(cur_target)
-                info['cur_size'] = file['lstat'].st_size
-                info['cur_bytes'] = 0
+        info.cur_source = rel_file;
+        info.cur_target = cur_target;
+        info.cur_size = entry.size;
+        info.cur_bytes = 0;
 
-                now = time.monotonic()
-                if (now - timers['last_write']) > 0.05:
-                    timers['last_write'] = now
-                    info['cur_time'] = int(round(now - timers['cur_start']))
-                    info['time'] = int(round(now - timers['start']))
-                    q.put(info.copy())
+        if timers.last_write.elapsed().as_millis() >= 50 {
+            timers.last_write = Instant::now();
+            info.cur_time = timers.last_write.duration_since(timers.cur_start);
+            info.time = timers.last_write.duration_since(timers.start);
+            let _ = info_tx.send(info.clone());
+            let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
+        }
+
+        if skip_dir {
+            // TODO: raise SkippedError('no_log')
+        }
+
+        // TODO: I don't like this unwrap() call
+        let parent_dir = match fs::canonicalize(&actual_target.parent().unwrap()) {
+            Ok(parent) => parent,
+            Err(e) => {
+                // TODO: OSError handler from Python
+                todo!();
+            }
+        };
+
+        let mut perform_copy = true;
+        if matches!(mode, DlgCpMvType::Mv) && !target_is_dir {
+            perform_copy = false;
+            match fs::rename(actual_file, actual_target) {
+                Ok(_) => {
+                    if entry.is_dir {
+                        skip_dir_stack.push(DBSkipDirEntry {
+                            id: 0,
+                            job_id,
+                            file: cur_file,
+                        });
+
+                        if let Some(command_tx) = &db_command_tx {
+                            database::push_skip_dir_stack(command_tx, skip_dir_stack.last_mut().unwrap());
+                        }
+                    }
+                }
+                Err(_e) => {
+                    perform_copy = true;
+                }
+            }
+        }
+
+        let mut in_error = false;
+
+        if perform_copy {
+            if entry.is_symlink {
+                when = "symlink";
+                if let Err(e) = fs::read_link(actual_file).and_then(|link_target| {
+                    symlink(link_target, actual_target)
+                }) {
+                    // TODO: OSError handler from Python
+                }
+            } else if entry.is_dir {
+                let mut new_dir = false;
+                if !target_is_dir {
+                    when = "makedirs";
+                    if let Err(e) = fs::create_dir_all(actual_target) {
+                        // TODO: OSError handler from Python
+                    }
+                    new_dir = true;
+                }
+
+                dir_list.push(DBDirListEntry {
+                    id: 0,
+                    job_id;
+                    // TODO: We should use the whole entry instead, and handle the id relationship at the DB level
+                    file_id: entry.id,
+                    cur_file,
+                    cur_target,
+                    new_dir,
+                });
+
+                if let Some(command_tx) = &db_command_tx {
+                    database::push_dir_list(command_tx, dir_list.last_mut().unwrap());
+                }
+            } else if entry.is_file {
+                when = "copyfile";
+                if let Err(e) = copyfile(actual_file, actual_target, file['lstat'].st_size, block_size, resume, info, timers, fd, q, ev_skip, ev_suspend, ev_interrupt, ev_abort, dbfile) {
+                    // TODO: OSError handler from Python
+                }
+            } else {
+                in_error = true;
+
+                entry.status = DBFileStatus::Error;
+                entry.message = String::from("Special file");
+
+                error_list.push(entry.clone());
+
+                if let Some(command_tx) = &db_command_tx {
+                    database::set_file_status(command_tx, &entry);
+                }
+            }
+
+            if !in_error {
+                if !entry.is_dir {
+                    when = "lchown";
+                    if let Err(e) = lchown(actual_target, Some(entry.uid), Some(entry.gid)) {
+                        match e.kind() {
+                            ErrorKind::PermissionDenied => {
+                                if let Err(e) = lchown(actual_target, None, Some(entry.gid)) {
+                                    match e.kind() {
+                                        ErrorKind::PermissionDenied | ErrorKind::Unsupported => {}
+                                        _ => {
+                                            // TODO: OSError handler from Python
+                                        }
+                                    }
+                                }
+                            }
+                            ErrorKind::Unsupported => {}
+                            _ => {
+                                // TODO: OSError handler from Python
+                            }
+                        }
+                    }
+
+                    when = 'copystat'
                     try:
-                        os.write(fd, b'\n')
-                    except OSError:
-                        pass
-
-                if skip_dir:
-                    raise SkippedError('no_log')
-
-                parent_dir = actual_target.resolve().parent
-
-                if (mode == 'mv') and not target_is_dir:
-                    perform_copy = False
-                    try:
-                        os.rename(actual_file, actual_target)
-                        if file['is_dir']:
-                            skip_dir_stack.append(cur_file)
-                            if dbfile:
-                                db.set_skip_dir_stack(job_id, skip_dir_stack)
+                        shutil.copystat(actual_file, actual_target, follow_symlinks=False)
                     except OSError as e:
-                        perform_copy = True
-                else:
-                    perform_copy = True
+                        if e.errno in (errno.ENOSYS, errno.ENOTSUP):
+                            pass
+                        else:
+                            raise
+                }
 
-                in_error = False
-
-                if perform_copy:
-                    if file['is_symlink']:
-                        when = 'symlink'
-                        os.symlink(os.readlink(actual_file), actual_target)
-                    elif file['is_dir']:
-                        new_dir = False
-                        if not target_is_dir:
-                            when = 'makedirs'
-                            os.makedirs(actual_target, exist_ok=True)
-                            new_dir = True
-
-                        dir_list.append({'file': file, 'cur_file': cur_file, 'cur_target': cur_target, 'new_dir': new_dir})
-                        if dbfile:
-                            db.set_dir_list(job_id, dir_list)
-                    elif file['is_file']:
-                        when = 'copyfile'
-                        rnr_copyfile(actual_file, actual_target, file['lstat'].st_size, block_size, resume, info, timers, fd, q, ev_skip, ev_suspend, ev_interrupt, ev_abort, dbfile)
-                    else:
-                        in_error = True
-                        message = f'Special file'
-                        error_list.append({'file': file['file'], 'message': message})
-                        if dbfile:
-                            db.set_file_status(file, 'ERROR', message)
-
-                    if not in_error:
-                        if not file['is_dir']:
-                            when = 'lchown'
-                            try:
-                                os.lchown(actual_target, file['lstat'].st_uid, file['lstat'].st_gid)
-                            except OSError as e:
-                                if e.errno == errno.EPERM:
-                                    try:
-                                        os.lchown(actual_target, -1, file['lstat'].st_gid)
-                                    except OSError as e:
-                                        if e.errno in (errno.EPERM, errno.ENOSYS, errno.ENOTSUP):
-                                            pass
-                                        else:
-                                            raise
-                                elif e.errno in (errno.ENOSYS, errno.ENOTSUP):
-                                    pass
-                                else:
-                                    raise
-
-                            when = 'copystat'
-                            try:
-                                shutil.copystat(actual_file, actual_target, follow_symlinks=False)
-                            except OSError as e:
-                                if e.errno in (errno.ENOSYS, errno.ENOTSUP):
-                                    pass
-                                else:
-                                    raise
-
-                        when = 'fsync'
-                        parent_fd = os.open(parent_dir, 0)
-                        try:
-                            if dbfile:
-                                os.fsync(parent_fd)
-                        finally:
-                            os.close(parent_fd)
+                when = 'fsync'
+                parent_fd = os.open(parent_dir, 0)
+                try:
+                    if dbfile:
+                        os.fsync(parent_fd)
+                finally:
+                    os.close(parent_fd)
+            }
+        }
 
                 if (mode == 'mv') and not file['is_dir']:
                     if perform_copy:
