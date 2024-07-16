@@ -42,6 +42,7 @@ pathdiff = "*"
 itertools = "*"
 thousands = "*"
 rusqlite = { version = "*", features = ["bundled"] }
+rustix = { version = "*", features = ["fs"] }
 
 [profile.release]
 strip = true

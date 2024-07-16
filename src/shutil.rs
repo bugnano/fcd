@@ -7,6 +7,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use rustix::fs::{
+    fchmod, ioctl_getflags, ioctl_setflags, lgetxattr, llistxattr, lsetxattr, lstat, open,
+    utimensat, AtFlags, FileType, Mode, OFlags, Timespec, Timestamps, XattrFlags, CWD,
+};
 use uzers::{get_current_uid, get_user_by_name, get_user_by_uid, os::unix::UserExt};
 
 #[derive(Debug, Clone, Copy)]
@@ -98,4 +102,56 @@ pub fn expanduser(path: &Path) -> PathBuf {
         true => userhome,
         false => PathBuf::from(path),
     }
+}
+
+/// Copy file metadata
+pub fn copystat(src: &Path, dst: &Path) -> rustix::io::Result<()> {
+    let st = lstat(src)?;
+
+    utimensat(
+        CWD,
+        dst,
+        &Timestamps {
+            last_access: Timespec {
+                tv_sec: st.st_atime as i64,
+                tv_nsec: st.st_atime_nsec as i64,
+            },
+            last_modification: Timespec {
+                tv_sec: st.st_mtime as i64,
+                tv_nsec: st.st_mtime_nsec as i64,
+            },
+        },
+        AtFlags::SYMLINK_NOFOLLOW,
+    )?;
+
+    // We must copy extended attributes before the file is (potentially)
+    // chmod()'ed read-only, otherwise setxattr() will error with -EACCES.
+    let mut names = vec![0; 65536];
+    if let Ok(len_names) = llistxattr(src, &mut names) {
+        let mut value = vec![0; 65536];
+
+        names.resize(len_names, 0);
+        for name in names.split(|c| *c == 0) {
+            if !name.is_empty() {
+                value.resize(65536, 0);
+                if let Ok(len_value) = lgetxattr(src, name, &mut value) {
+                    value.resize(len_value, 0);
+                    let _ = lsetxattr(dst, name, &value, XattrFlags::empty());
+                }
+            }
+        }
+    }
+
+    if FileType::from_raw_mode(st.st_mode) != FileType::Symlink {
+        let fi = open(src, OFlags::RDONLY | OFlags::NOFOLLOW, Mode::RUSR)?;
+        let fo = open(dst, OFlags::WRONLY | OFlags::NOFOLLOW, Mode::WUSR)?;
+
+        let _ = fchmod(&fo, Mode::from_raw_mode(st.st_mode));
+
+        if let Ok(flags) = ioctl_getflags(&fi) {
+            let _ = ioctl_setflags(&fo, flags);
+        }
+    }
+
+    Ok(())
 }
