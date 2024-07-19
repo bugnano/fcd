@@ -18,9 +18,21 @@ const DB_VERSION: &str = "1";
 
 #[derive(Debug, Clone, Copy)]
 pub enum DBJobStatus {
+    DirScan, // TODO
     InProgress,
     Aborted,
     Done,
+}
+
+impl ToSql for DBJobStatus {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::Borrowed(ValueRef::Text(match &self {
+            DBJobStatus::DirScan => b"DIRSCAN",
+            DBJobStatus::InProgress => b"IN_PROGRESS",
+            DBJobStatus::Aborted => b"ABORTED",
+            DBJobStatus::Done => b"DONE",
+        })))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -29,6 +41,7 @@ pub enum DBFileStatus {
     InProgress,
     Error,
     Skipped,
+    Aborted, // Not in rnr
     Done,
 }
 
@@ -39,6 +52,7 @@ impl ToSql for DBFileStatus {
             DBFileStatus::InProgress => b"IN_PROGRESS",
             DBFileStatus::Error => b"ERROR",
             DBFileStatus::Skipped => b"SKIPPED",
+            DBFileStatus::Aborted => b"ABORTED",
             DBFileStatus::Done => b"DONE",
         })))
     }
@@ -53,17 +67,12 @@ pub struct DBFileEntry {
     pub is_dir: bool,
     pub is_symlink: bool,
     pub size: u64,
-    pub mtime: i64,
-    pub mtime_nsec: i64,
-    pub mode: u32,
     pub uid: u32,
     pub gid: u32,
-    // TODO: st_flags and xattrs
     pub status: DBFileStatus,
     pub message: String,
 
     // These are set during the Cp/Mv operations
-    pub warning: String,
     pub target_is_dir: bool,
     pub target_is_symlink: bool,
     pub cur_target: Option<PathBuf>,
@@ -99,6 +108,7 @@ pub enum DBCommand {
     GetReplaceFirstPath(i64, Sender<Option<bool>>),
     SetReplaceFirstPath(i64, bool),
     DeleteJob(i64),
+    SetJobStatus(i64, DBJobStatus),
     GetDirList(i64, Sender<Vec<DBDirListEntry>>),
     PushDirList(DBDirListEntry, Sender<i64>),
     GetSkipDirStack(i64, Sender<Vec<DBSkipDirEntry>>),
@@ -131,6 +141,9 @@ pub fn start(file: &Path) -> Result<Sender<DBCommand>> {
                         }
                         DBCommand::DeleteJob(job_id) => {
                             db.delete_job(job_id);
+                        }
+                        DBCommand::SetJobStatus(job_id, status) => {
+                            db.set_job_status(job_id, status);
                         }
                         DBCommand::GetDirList(job_id, dir_list_tx) => {
                             let _ = dir_list_tx.send(db.get_dir_list(job_id));
@@ -208,6 +221,12 @@ pub fn set_replace_first_path(
 
 pub fn delete_job(command_tx: &Sender<DBCommand>, job_id: i64) {
     command_tx.send(DBCommand::DeleteJob(job_id)).unwrap();
+}
+
+pub fn set_job_status(command_tx: &Sender<DBCommand>, job_id: i64, status: DBJobStatus) {
+    command_tx
+        .send(DBCommand::SetJobStatus(job_id, status))
+        .unwrap();
 }
 
 pub fn get_dir_list(command_tx: &Sender<DBCommand>, job_id: i64) -> Vec<DBDirListEntry> {
@@ -434,14 +453,14 @@ impl DataBase {
         let _ = self.conn.execute(
             "UPDATE files
             SET status = ?1,
-                warning = ?2,
+                message = ?2,
                 target_is_dir = ?3,
                 target_is_symlink = ?4,
                 cur_target = ?5
             WHERE id = ?6",
             (
                 file.status,
-                &file.warning,
+                &file.message,
                 file.target_is_dir,
                 file.target_is_symlink,
                 file.cur_target.as_ref().map(|x| x.to_string_lossy()),
@@ -457,25 +476,17 @@ impl DataBase {
         );
     }
 
-    /*
-        def set_job_status(self, job_id, status):
-            if self.conn is None:
-                return
-
-            try:
-                with self.conn:
-                    self.conn.execute("UPDATE jobs SET status = ? WHERE id = ?", (
-                        status,
-                        job_id,
-                    ))
-            except sqlite3.OperationalError:
-                pass
-    */
-
     pub fn delete_job(&self, job_id: i64) {
         let _ = self
             .conn
             .execute("DELETE FROM jobs WHERE id = ?1", [job_id]);
+    }
+
+    pub fn set_job_status(&self, job_id: i64, status: DBJobStatus) {
+        let _ = self.conn.execute(
+            "UPDATE jobs SET status = ?1 WHERE id = ?2",
+            (status, job_id),
+        );
     }
 
     pub fn get_dir_list(&self, job_id: i64) -> Vec<DBDirListEntry> {
