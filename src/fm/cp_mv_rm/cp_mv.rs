@@ -1,4 +1,39 @@
-#[derive(Debug, Clone, Copy)]
+use std::{
+    fs,
+    io::ErrorKind,
+    os::unix::fs::{lchown, symlink, MetadataExt},
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
+
+use anyhow::{Context, Result};
+use crossbeam_channel::{Receiver, Sender};
+
+use pathdiff::diff_paths;
+use rustix::{
+    fs::{
+        copy_file_range, fallocate, fstat, fsync, open, seek, sendfile, sync, FallocateFlags, Mode,
+        OFlags, SeekFrom,
+    },
+    io::{read, write, Errno},
+};
+
+use crate::{
+    app::PubSub,
+    fm::{
+        archive_mounter::{self, unarchive_path_map, ArchiveEntry},
+        cp_mv_rm::{
+            database::{
+                self, DBCommand, DBDirListEntry, DBFileEntry, DBFileStatus, DBJobStatus,
+                DBRenameDirEntry, DBSkipDirEntry,
+            },
+            dlg_cp_mv::{DlgCpMvType, OnConflict},
+        },
+    },
+    shutil,
+};
+
+#[derive(Debug, Clone)]
 pub enum CpMvEvent {
     Suspend(Receiver<()>),
     Skip,
@@ -33,6 +68,7 @@ struct Timers {
 }
 
 pub fn cp_mv(
+    job_id: i64,
     mode: DlgCpMvType,
     entries: &[DBFileEntry],
     cwd: &Path,
@@ -41,23 +77,17 @@ pub fn cp_mv(
     ev_rx: Receiver<CpMvEvent>,
     info_tx: Sender<CpMvInfo>,
     pubsub_tx: Sender<PubSub>,
-    db_command_tx: Option<Sender<DBCommand>>,
-    job_id: i64,
-    archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
+    mut db_command_tx: Option<Sender<DBCommand>>,
+    archive_dirs: &[ArchiveEntry],
 ) -> (Vec<DBFileEntry>, Vec<DBDirListEntry>) {
-    let file_list = Vec::from(entries);
-    file_list.sort_unstable_by_key(|entry| entry.file);
+    let mut file_list = Vec::from(entries);
+    file_list.sort_unstable_by(|a, b| a.file.cmp(&b.file));
 
-    let unarchive_path = |file| match &archive_mounter_command_tx {
-        Some(command_tx) => archive_mounter::unarchive_path(command_tx, file),
-        None => PathBuf::from(file),
-    };
-
-    let actual_dest = unarchive_path(dest);
+    let actual_dest = unarchive_path_map(&dest, archive_dirs);
 
     // TODO: Find the right block size
     let default_block_size: i64 = 8 * 1024 * 1024;
-    let block_size = match fs::metadata(actual_dest) {
+    let block_size = match fs::metadata(&actual_dest) {
         Ok(metadata) => {
             let fs_block_size = metadata.blksize() as i64;
 
@@ -78,23 +108,24 @@ pub fn cp_mv(
         time: Duration::ZERO,
     };
 
-    let dir_list = match &db_command_tx {
+    let mut dir_list = match &db_command_tx {
         Some(command_tx) => database::get_dir_list(command_tx, job_id),
         None => Vec::new(),
     };
 
-    let rename_dir_stack = match &db_command_tx {
+    let mut rename_dir_stack = match &db_command_tx {
         Some(command_tx) => database::get_rename_dir_stack(command_tx, job_id),
         None => Vec::new(),
     };
 
-    let skip_dir_stack = match &db_command_tx {
+    let mut skip_dir_stack = match &db_command_tx {
         Some(command_tx) => database::get_skip_dir_stack(command_tx, job_id),
         None => Vec::new(),
     };
 
-    let replace_first_path =
-        db_command_tx.and_then(|command_tx| database::get_replace_first_path(command_tx, job_id));
+    let replace_first_path = db_command_tx
+        .as_ref()
+        .and_then(|command_tx| database::get_replace_first_path(&command_tx, job_id));
 
     let replace_first_path = replace_first_path.unwrap_or_else(|| {
         let replace_first_path = actual_dest.is_dir();
@@ -115,7 +146,7 @@ pub fn cp_mv(
 
     let mut total_bytes = 0;
 
-    for entry in &mut file_list {
+    for entry in file_list.iter_mut() {
         match entry.status {
             DBFileStatus::Error | DBFileStatus::Skipped | DBFileStatus::Done => {
                 // Alternatively we can remove the size of this entry from the total size,
@@ -130,7 +161,15 @@ pub fn cp_mv(
         }
 
         match cp_mv_entry(
-            &mut entry,
+            job_id,
+            mode,
+            entry,
+            cwd,
+            dest,
+            on_conflict,
+            &ev_rx,
+            &info_tx,
+            &pubsub_tx,
             block_size,
             &mut info,
             &mut dir_list,
@@ -138,6 +177,8 @@ pub fn cp_mv(
             &mut skip_dir_stack,
             replace_first_path,
             &mut timers,
+            &mut db_command_tx,
+            archive_dirs,
         ) {
             Ok(status) => {
                 entry.status = status;
@@ -177,7 +218,19 @@ pub fn cp_mv(
             _ => {}
         }
 
-        match handle_dir_entry(&entry, &mut info, &mut timers) {
+        match handle_dir_entry(
+            job_id,
+            mode,
+            entry,
+            cwd,
+            &ev_rx,
+            &info_tx,
+            &pubsub_tx,
+            &mut info,
+            &mut timers,
+            &mut db_command_tx,
+            archive_dirs,
+        ) {
             Ok(status) => {
                 entry.status = status;
 
@@ -212,7 +265,15 @@ pub fn cp_mv(
 }
 
 fn cp_mv_entry(
+    job_id: i64,
+    mode: DlgCpMvType,
     entry: &mut DBFileEntry,
+    cwd: &Path,
+    dest: &Path,
+    on_conflict: OnConflict,
+    ev_rx: &Receiver<CpMvEvent>,
+    info_tx: &Sender<CpMvInfo>,
+    pubsub_tx: &Sender<PubSub>,
     block_size: u64,
     info: &mut CpMvInfo,
     dir_list: &mut Vec<DBDirListEntry>,
@@ -220,15 +281,19 @@ fn cp_mv_entry(
     skip_dir_stack: &mut Vec<DBSkipDirEntry>,
     replace_first_path: bool,
     timers: &mut Timers,
+    db_command_tx: &mut Option<Sender<DBCommand>>,
+    archive_dirs: &[ArchiveEntry],
 ) -> Result<DBFileStatus> {
     timers.cur_start = Instant::now();
 
-    let cur_file = PathBuf::from(entry.file);
-    let rel_file = diff_paths(cur_file, cwd);
+    let cur_file = PathBuf::from(&entry.file);
+
+    // TODO: I don't like this unwrap() call
+    let rel_file = diff_paths(&cur_file, cwd).unwrap();
 
     let mut skip_dir = false;
     while !skip_dir_stack.is_empty() {
-        let dir_to_skip = skip_dir_stack.last().unwrap();
+        let dir_to_skip = skip_dir_stack.last().unwrap().clone();
         if cur_file
             .ancestors()
             .any(|ancestor| ancestor == dir_to_skip.file)
@@ -246,23 +311,24 @@ fn cp_mv_entry(
 
     let mut cur_target = match replace_first_path {
         true => {
-            let components = rel_file.components();
+            let mut components = rel_file.components();
             components.next();
 
             dest.join(components.as_path())
         }
-        false => dest.join(rel_file),
+        false => dest.join(&rel_file),
     };
 
     while !rename_dir_stack.is_empty() {
-        let rename_dir_entry = rename_dir_stack.last().unwrap();
+        let rename_dir_entry = rename_dir_stack.last().unwrap().clone();
         if cur_target
             .ancestors()
             .any(|ancestor| ancestor == rename_dir_entry.existing_target)
         {
             cur_target = rename_dir_entry
                 .cur_target
-                .join(diff_paths(cur_target, rename_dir_entry.existing_target));
+                // TODO: I don't like this unwrap() call
+                .join(diff_paths(&cur_target, &rename_dir_entry.existing_target).unwrap());
             break;
         } else {
             rename_dir_stack.pop();
@@ -274,13 +340,17 @@ fn cp_mv_entry(
     }
 
     let mut actual_file = match (cur_file.parent(), cur_file.file_name()) {
-        (Some(parent), Some(file_name)) => unarchive_path(parent).join(file_name),
-        _ => cur_file,
+        (Some(parent), Some(file_name)) => {
+            unarchive_path_map(&parent, archive_dirs).join(file_name)
+        }
+        _ => cur_file.clone(),
     };
 
     let mut actual_target = match (cur_target.parent(), cur_target.file_name()) {
-        (Some(parent), Some(file_name)) => unarchive_path(parent).join(file_name),
-        _ => cur_target,
+        (Some(parent), Some(file_name)) => {
+            unarchive_path_map(&parent, archive_dirs).join(file_name)
+        }
+        _ => cur_target.clone(),
     };
 
     let mut target_is_dir = entry.target_is_dir;
@@ -290,11 +360,13 @@ fn cp_mv_entry(
     match &entry.status {
         DBFileStatus::InProgress | DBFileStatus::Aborted => {
             if let Some(x) = &entry.cur_target {
-                cur_target = x;
+                cur_target = x.clone();
 
                 actual_target = match (cur_target.parent(), cur_target.file_name()) {
-                    (Some(parent), Some(file_name)) => unarchive_path(parent).join(file_name),
-                    _ => cur_target,
+                    (Some(parent), Some(file_name)) => {
+                        unarchive_path_map(&parent, archive_dirs).join(file_name)
+                    }
+                    _ => cur_target.clone(),
                 };
             }
 
@@ -327,15 +399,15 @@ fn cp_mv_entry(
                     match on_conflict {
                         OnConflict::Overwrite => {
                             if target_is_dir && !target_is_symlink {
-                                fs::remove_dir(actual_target).context("rmdir")?;
+                                fs::remove_dir(&actual_target).context("rmdir")?;
                             } else {
-                                fs::remove_file(actual_target).context("remove")?;
+                                fs::remove_file(&actual_target).context("remove")?;
                             }
 
                             if let Some(_command_tx) = &db_command_tx {
                                 // TODO: I don't like this unwrap() call
                                 fsync_parent(
-                                    fs::canonicalize(&actual_target.parent().unwrap())
+                                    &fs::canonicalize(&actual_target.parent().unwrap())
                                         .context("fsync")?,
                                 )
                                 .context("fsync")?;
@@ -351,7 +423,7 @@ fn cp_mv_entry(
                                 .unwrap()
                                 .to_string_lossy()
                                 .to_string();
-                            let mut existing_target = actual_target;
+                            let mut existing_target = actual_target.clone();
                             while existing_target.try_exists().is_ok() {
                                 let new_name = format!("{}.fcdsave{}", name, i);
                                 // TODO: I don't like this unwrap() call
@@ -360,15 +432,15 @@ fn cp_mv_entry(
                             }
 
                             if same_file(&actual_file, &actual_target).context("samefile")? {
-                                actual_file = existing_target;
+                                actual_file = existing_target.clone();
                             }
 
-                            fs::rename(actual_target, existing_target).context("rename")?;
+                            fs::rename(&actual_target, &existing_target).context("rename")?;
 
                             if let Some(_command_tx) = &db_command_tx {
                                 // TODO: I don't like this unwrap() call
                                 fsync_parent(
-                                    fs::canonicalize(&existing_target.parent().unwrap())
+                                    &fs::canonicalize(&existing_target.parent().unwrap())
                                         .context("fsync")?,
                                 )
                                 .context("fsync")?;
@@ -388,15 +460,18 @@ fn cp_mv_entry(
                                 .unwrap()
                                 .to_string_lossy()
                                 .to_string();
-                            let mut existing_target = cur_target;
-                            while unarchive_path(cur_target).try_exists().is_ok() {
+                            let mut existing_target = cur_target.clone();
+                            while unarchive_path_map(&cur_target, archive_dirs)
+                                .try_exists()
+                                .is_ok()
+                            {
                                 let new_name = format!("{}.fcdnew{}", name, i);
                                 // TODO: I don't like this unwrap() call
                                 cur_target = cur_target.parent().unwrap().join(new_name);
                                 i += 1;
                             }
 
-                            actual_target = unarchive_path(cur_target);
+                            actual_target = unarchive_path_map(&cur_target, archive_dirs);
 
                             // TODO: I don't like this unwrap() call
                             entry.message = format!(
@@ -407,8 +482,8 @@ fn cp_mv_entry(
                                 rename_dir_stack.push(DBRenameDirEntry {
                                     id: 0,
                                     job_id,
-                                    existing_target,
-                                    cur_target,
+                                    existing_target: existing_target.clone(),
+                                    cur_target: cur_target.clone(),
                                 });
 
                                 if let Some(command_tx) = &db_command_tx {
@@ -430,7 +505,7 @@ fn cp_mv_entry(
             entry.status = DBFileStatus::InProgress;
             entry.target_is_dir = target_is_dir;
             entry.target_is_symlink = target_is_symlink;
-            entry.cur_target = Some(cur_target);
+            entry.cur_target = Some(cur_target.clone());
         }
     }
 
@@ -442,19 +517,19 @@ fn cp_mv_entry(
         if let Ok(event) = ev_rx.try_recv() {
             match event {
                 CpMvEvent::Suspend(suspend_rx) => {
-                    let t1 = Instant.now();
+                    let t1 = Instant::now();
                     let _ = suspend_rx.recv();
-                    let t2 = Instant.now();
+                    let t2 = Instant::now();
                     let dt = t2.duration_since(t1);
                     timers.cur_start += dt;
                     timers.start += dt;
                 }
                 CpMvEvent::Skip => {
-                    let _ = fs::remove_file(actual_target);
+                    let _ = fs::remove_file(&actual_target);
                     return Ok(DBFileStatus::Skipped);
                 }
                 CpMvEvent::Abort => {
-                    let _ = fs::remove_file(actual_target);
+                    let _ = fs::remove_file(&actual_target);
                     return Ok(DBFileStatus::Aborted);
                 }
                 CpMvEvent::NoDb => {
@@ -462,14 +537,14 @@ fn cp_mv_entry(
                         database::delete_job(command_tx, job_id);
                     }
 
-                    db_command_tx = None;
+                    *db_command_tx = None;
                 }
             }
         }
     }
 
-    info.cur_source = rel_file;
-    info.cur_target = cur_target;
+    info.cur_source = rel_file.clone();
+    info.cur_target = cur_target.clone();
     info.cur_size = entry.size;
     info.cur_bytes = 0;
 
@@ -491,23 +566,23 @@ fn cp_mv_entry(
     let mut perform_copy = true;
     if matches!(mode, DlgCpMvType::Mv) && !target_is_dir {
         perform_copy = false;
-        match fs::rename(actual_file, actual_target) {
+        match fs::rename(&actual_file, &actual_target) {
             Ok(_) => {
                 if entry.is_dir {
                     skip_dir_stack.push(DBSkipDirEntry {
                         id: 0,
                         job_id,
-                        file: cur_file,
+                        file: cur_file.clone(),
                     });
 
                     if let Some(command_tx) = &db_command_tx {
-                        fsync_parent(parent_dir).context("fsync")?;
+                        fsync_parent(&parent_dir).context("fsync")?;
 
                         // TODO: I don't like this unwrap() call
                         let source_parent = fs::canonicalize(&actual_file.parent().unwrap())
                             .context("parent_dir")?;
 
-                        fsync_parent(source_parent).context("fsync")?;
+                        fsync_parent(&source_parent).context("fsync")?;
 
                         database::push_skip_dir_stack(
                             command_tx,
@@ -524,13 +599,13 @@ fn cp_mv_entry(
 
     if perform_copy {
         if entry.is_symlink {
-            fs::read_link(actual_file)
-                .and_then(|link_target| symlink(link_target, actual_target))
+            fs::read_link(&actual_file)
+                .and_then(|link_target| symlink(&link_target, &actual_target))
                 .context("symlink")?;
         } else if entry.is_dir {
             let mut new_dir = false;
             if !target_is_dir {
-                fs::create_dir_all(actual_target).context("makedirs")?;
+                fs::create_dir_all(&actual_target).context("makedirs")?;
                 new_dir = true;
             }
 
@@ -538,8 +613,8 @@ fn cp_mv_entry(
                 id: 0,
                 job_id,
                 file: entry.clone(),
-                cur_file,
-                cur_target,
+                cur_file: cur_file.clone(),
+                cur_target: cur_target.clone(),
                 new_dir,
                 status: DBFileStatus::ToDo,
                 message: String::from(""),
@@ -550,20 +625,25 @@ fn cp_mv_entry(
             }
         } else if entry.is_file {
             match copy_file(
-                actual_file,
-                actual_target,
+                job_id,
+                &actual_file,
+                &actual_target,
                 entry.size,
                 block_size,
                 resume,
+                &ev_rx,
+                &info_tx,
+                &pubsub_tx,
                 info,
                 timers,
+                db_command_tx,
             ) {
                 Ok(DBFileStatus::Skipped) => {
-                    let _ = fs::remove_file(actual_target);
+                    let _ = fs::remove_file(&actual_target);
                     return Ok(DBFileStatus::Skipped);
                 }
                 Ok(DBFileStatus::Aborted) => {
-                    let _ = fs::remove_file(actual_target);
+                    let _ = fs::remove_file(&actual_target);
                     return Ok(DBFileStatus::Aborted);
                 }
                 Ok(_) => {}
@@ -575,10 +655,10 @@ fn cp_mv_entry(
         }
 
         if !entry.is_dir {
-            if let Err(e) = lchown(actual_target, Some(entry.uid), Some(entry.gid)) {
+            if let Err(e) = lchown(&actual_target, Some(entry.uid), Some(entry.gid)) {
                 match e.kind() {
                     ErrorKind::PermissionDenied => {
-                        if let Err(e) = lchown(actual_target, None, Some(entry.gid)) {
+                        if let Err(e) = lchown(&actual_target, None, Some(entry.gid)) {
                             match e.kind() {
                                 ErrorKind::PermissionDenied | ErrorKind::Unsupported => {}
                                 _ => return Err(e).context("lchown"),
@@ -590,23 +670,23 @@ fn cp_mv_entry(
                 }
             }
 
-            shutil::copystat(actual_file, actual_target).context("copystat")?;
+            shutil::copystat(&actual_file, &actual_target).context("copystat")?;
         }
 
         if let Some(command_tx) = &db_command_tx {
-            fsync_parent(parent_dir).context("fsync")?;
+            fsync_parent(&parent_dir).context("fsync")?;
         }
     }
 
     if matches!(mode, DlgCpMvType::Mv) && perform_copy && !entry.is_dir {
-        fs::remove_file(actual_file).context("remove")?;
+        fs::remove_file(&actual_file).context("remove")?;
 
         if let Some(command_tx) = &db_command_tx {
             // TODO: I don't like this unwrap() call
             let source_parent =
                 fs::canonicalize(&actual_file.parent().unwrap()).context("parent_dir")?;
 
-            fsync_parent(source_parent).context("fsync")?;
+            fsync_parent(&source_parent).context("fsync")?;
         }
     }
 
@@ -614,9 +694,17 @@ fn cp_mv_entry(
 }
 
 fn handle_dir_entry(
+    job_id: i64,
+    mode: DlgCpMvType,
     entry: &DBDirListEntry,
+    cwd: &Path,
+    ev_rx: &Receiver<CpMvEvent>,
+    info_tx: &Sender<CpMvInfo>,
+    pubsub_tx: &Sender<PubSub>,
     info: &mut CpMvInfo,
     timers: &mut Timers,
+    db_command_tx: &mut Option<Sender<DBCommand>>,
+    archive_dirs: &[ArchiveEntry],
 ) -> Result<DBFileStatus> {
     timers.cur_start = Instant::now();
 
@@ -624,9 +712,9 @@ fn handle_dir_entry(
         if let Ok(event) = ev_rx.try_recv() {
             match event {
                 CpMvEvent::Suspend(suspend_rx) => {
-                    let t1 = Instant.now();
+                    let t1 = Instant::now();
                     let _ = suspend_rx.recv();
-                    let t2 = Instant.now();
+                    let t2 = Instant::now();
                     let dt = t2.duration_since(t1);
                     timers.cur_start += dt;
                     timers.start += dt;
@@ -642,27 +730,32 @@ fn handle_dir_entry(
                         database::delete_job(command_tx, job_id);
                     }
 
-                    db_command_tx = None;
+                    *db_command_tx = None;
                 }
             }
         }
     }
 
-    let rel_file = diff_paths(entry.cur_file, cwd);
+    // TODO: I don't like this unwrap() call
+    let rel_file = diff_paths(&entry.cur_file, cwd).unwrap();
 
-    info.cur_source = rel_file;
-    info.cur_target = entry.cur_target;
+    info.cur_source = rel_file.clone();
+    info.cur_target = entry.cur_target.clone();
     info.cur_size = entry.file.size;
     info.cur_bytes = 0;
 
     let actual_file = match (entry.cur_file.parent(), entry.cur_file.file_name()) {
-        (Some(parent), Some(file_name)) => unarchive_path(parent).join(file_name),
-        _ => cur_file,
+        (Some(parent), Some(file_name)) => {
+            unarchive_path_map(&parent, archive_dirs).join(file_name)
+        }
+        _ => entry.cur_file.clone(),
     };
 
     let actual_target = match (entry.cur_target.parent(), entry.cur_target.file_name()) {
-        (Some(parent), Some(file_name)) => unarchive_path(parent).join(file_name),
-        _ => cur_target,
+        (Some(parent), Some(file_name)) => {
+            unarchive_path_map(&parent, archive_dirs).join(file_name)
+        }
+        _ => entry.cur_target.clone(),
     };
 
     if timers.last_write.elapsed().as_millis() >= 50 {
@@ -674,10 +767,10 @@ fn handle_dir_entry(
     }
 
     if entry.new_dir {
-        if let Err(e) = lchown(actual_target, Some(entry.file.uid), Some(entry.file.gid)) {
+        if let Err(e) = lchown(&actual_target, Some(entry.file.uid), Some(entry.file.gid)) {
             match e.kind() {
                 ErrorKind::PermissionDenied => {
-                    if let Err(e) = lchown(actual_target, None, Some(entry.file.gid)) {
+                    if let Err(e) = lchown(&actual_target, None, Some(entry.file.gid)) {
                         match e.kind() {
                             ErrorKind::PermissionDenied | ErrorKind::Unsupported => {}
                             _ => return Err(e).context("lchown"),
@@ -689,26 +782,26 @@ fn handle_dir_entry(
             }
         }
 
-        shutil::copystat(actual_file, actual_target).context("copystat")?;
+        shutil::copystat(&actual_file, &actual_target).context("copystat")?;
 
         if let Some(command_tx) = &db_command_tx {
             // TODO: I don't like this unwrap() call
             let parent_dir =
                 fs::canonicalize(&actual_target.parent().unwrap()).context("parent_dir")?;
 
-            fsync_parent(parent_dir).context("fsync")?;
+            fsync_parent(&parent_dir).context("fsync")?;
         }
     }
 
     if let DlgCpMvType::Mv = mode {
-        fs::remove_dir(actual_file).context("rmdir")?;
+        fs::remove_dir(&actual_file).context("rmdir")?;
 
         if let Some(command_tx) = &db_command_tx {
             // TODO: I don't like this unwrap() call
             let source_parent =
                 fs::canonicalize(&actual_file.parent().unwrap()).context("parent_dir")?;
 
-            fsync_parent(source_parent).context("fsync")?;
+            fsync_parent(&source_parent).context("fsync")?;
         }
     }
 
@@ -716,13 +809,18 @@ fn handle_dir_entry(
 }
 
 fn copy_file(
+    job_id: i64,
     actual_file: &Path,
     actual_target: &Path,
     file_size: u64,
     block_size: u64,
     resume: bool,
+    ev_rx: &Receiver<CpMvEvent>,
+    info_tx: &Sender<CpMvInfo>,
+    pubsub_tx: &Sender<PubSub>,
     info: &mut CpMvInfo,
     timers: &mut Timers,
+    db_command_tx: &mut Option<Sender<DBCommand>>,
 ) -> Result<DBFileStatus> {
     let source_fd = open(actual_file, OFlags::RDONLY, Mode::RUSR).context("source_fd")?;
 
@@ -743,16 +841,16 @@ fn copy_file(
             )
             .context("target_fd")?;
 
-            let _ = fallocate(fd, FallocateFlags::KEEP_SIZE, 0, file_size);
+            let _ = fallocate(&fd, FallocateFlags::KEEP_SIZE, 0, file_size);
 
             if let Some(command_tx) = &db_command_tx {
-                fsync(fd).context("fsync")?;
+                fsync(&fd).context("fsync")?;
 
                 // TODO: I don't like this unwrap() call
                 let parent_dir =
                     fs::canonicalize(&actual_target.parent().unwrap()).context("parent_dir")?;
 
-                fsync_parent(parent_dir).context("fsync")?;
+                fsync_parent(&parent_dir).context("fsync")?;
             }
 
             fd
@@ -761,12 +859,12 @@ fn copy_file(
 
     let mut bytes_written = match resume {
         true => {
-            let size = fstat(target_fd)?.st_size as u64;
+            let size = fstat(&target_fd)?.st_size as u64;
             let pos = (size / block_size).saturating_sub(1) * block_size;
 
             if pos != 0 {
-                seek(source_fd, SeekFrom::Start(pos)).context("lseek")?;
-                seek(target_fd, SeekFrom::Start(pos)).context("lseek")?;
+                seek(&source_fd, SeekFrom::Start(pos)).context("lseek")?;
+                seek(&target_fd, SeekFrom::Start(pos)).context("lseek")?;
                 info.cur_bytes += pos;
                 info.bytes += pos;
             }
@@ -778,16 +876,16 @@ fn copy_file(
 
     let mut copy_method = CopyMethod::CopyFileRange;
 
-    let mut buf = vec![0; block_size];
+    let mut buf = vec![0; block_size as usize];
 
     loop {
         if !ev_rx.is_empty() {
             if let Ok(event) = ev_rx.try_recv() {
                 match event {
                     CpMvEvent::Suspend(suspend_rx) => {
-                        let t1 = Instant.now();
+                        let t1 = Instant::now();
                         let _ = suspend_rx.recv();
-                        let t2 = Instant.now();
+                        let t2 = Instant::now();
                         let dt = t2.duration_since(t1);
                         timers.cur_start += dt;
                         timers.start += dt;
@@ -803,7 +901,7 @@ fn copy_file(
                             database::delete_job(command_tx, job_id);
                         }
 
-                        db_command_tx = None;
+                        *db_command_tx = None;
                     }
                 }
             }
@@ -811,7 +909,7 @@ fn copy_file(
 
         let bytes_copied = match copy_method {
             CopyMethod::CopyFileRange => {
-                match copy_file_range(source_fd, None, target_fd, None, block_size) {
+                match copy_file_range(&source_fd, None, &target_fd, None, block_size as usize) {
                     Ok(bytes_copied) => bytes_copied,
                     Err(_) => {
                         copy_method = CopyMethod::Sendfile;
@@ -820,24 +918,26 @@ fn copy_file(
                     }
                 }
             }
-            CopyMethod::Sendfile => match sendfile(target_fd, source_fd, None, block_size) {
-                Ok(bytes_copied) => bytes_copied,
-                Err(_) => {
-                    copy_method = CopyMethod::ReadWrite;
+            CopyMethod::Sendfile => {
+                match sendfile(&target_fd, &source_fd, None, block_size as usize) {
+                    Ok(bytes_copied) => bytes_copied,
+                    Err(_) => {
+                        copy_method = CopyMethod::ReadWrite;
 
-                    0
+                        0
+                    }
                 }
-            },
+            }
             CopyMethod::ReadWrite => {
                 let mut bytes_copied = 0;
 
-                buf.resize(block_size, 0);
-                let bytes_read = read(source_fd, &mut buf).context("read")?;
+                buf.resize(block_size as usize, 0);
+                let bytes_read = read(&source_fd, &mut buf).context("read")?;
                 if bytes_read != 0 {
                     buf.resize(bytes_read, 0);
 
                     while bytes_copied < bytes_read {
-                        bytes_copied += write(target_fd, &buf[bytes_copied..]).context("write")?;
+                        bytes_copied += write(&target_fd, &buf[bytes_copied..]).context("write")?;
                     }
                 }
 
@@ -850,10 +950,10 @@ fn copy_file(
         }
 
         if let Some(command_tx) = &db_command_tx {
-            fsync(target_fd).context("fsync")?
+            fsync(&target_fd).context("fsync")?
         }
 
-        bytes_written += bytes_copied;
+        bytes_written += bytes_copied as u64;
 
         info.cur_bytes += bytes_written;
         info.bytes += bytes_written;
@@ -882,5 +982,5 @@ fn same_file(file1: &Path, file2: &Path) -> Result<bool> {
 fn fsync_parent(parent_dir: &Path) -> rustix::io::Result<()> {
     let parent_fd = open(parent_dir, OFlags::RDONLY | OFlags::DIRECTORY, Mode::RUSR)?;
 
-    fsync(parent_fd)?
+    fsync(parent_fd)
 }

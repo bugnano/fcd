@@ -28,7 +28,7 @@ pub enum ArchiveMounterCommand {
 }
 
 #[derive(Debug, Clone)]
-struct ArchiveEntry {
+pub struct ArchiveEntry {
     archive_file: PathBuf,
     temp_dir: PathBuf,
 }
@@ -137,6 +137,37 @@ pub fn archive_path(command_tx: &Sender<ArchiveMounterCommand>, file: &Path) -> 
         .unwrap();
 
     archive_path_rx.recv().unwrap()
+}
+
+pub fn unarchive_path_map(file: &Path, archive_dirs: &[ArchiveEntry]) -> PathBuf {
+    archive_dirs
+        .iter()
+        .rev()
+        .find(|entry| {
+            file.ancestors()
+                .any(|ancestor| ancestor == entry.archive_file)
+        })
+        .map(|entry| {
+            entry
+                .temp_dir
+                .join(file.strip_prefix(&entry.archive_file).unwrap())
+        })
+        .unwrap_or_else(|| PathBuf::from(file))
+        .clean()
+}
+
+pub fn archive_path_map(file: &Path, archive_dirs: &[ArchiveEntry]) -> PathBuf {
+    archive_dirs
+        .iter()
+        .rev()
+        .find(|entry| file.ancestors().any(|ancestor| ancestor == entry.temp_dir))
+        .map(|entry| {
+            entry
+                .archive_file
+                .join(file.strip_prefix(&entry.temp_dir).unwrap())
+        })
+        .unwrap_or_else(|| PathBuf::from(file))
+        .clean()
 }
 
 impl ArchiveMounter {
@@ -256,34 +287,11 @@ impl ArchiveMounter {
     }
 
     pub fn unarchive_path(&self, file: &Path) -> PathBuf {
-        self.archive_dirs
-            .iter()
-            .rev()
-            .find(|entry| {
-                file.ancestors()
-                    .any(|ancestor| ancestor == entry.archive_file)
-            })
-            .map(|entry| {
-                entry
-                    .temp_dir
-                    .join(file.strip_prefix(&entry.archive_file).unwrap())
-            })
-            .unwrap_or_else(|| PathBuf::from(file))
-            .clean()
+        unarchive_path_map(file, &self.archive_dirs)
     }
 
     pub fn archive_path(&self, file: &Path) -> PathBuf {
-        self.archive_dirs
-            .iter()
-            .rev()
-            .find(|entry| file.ancestors().any(|ancestor| ancestor == entry.temp_dir))
-            .map(|entry| {
-                entry
-                    .archive_file
-                    .join(file.strip_prefix(&entry.temp_dir).unwrap())
-            })
-            .unwrap_or_else(|| PathBuf::from(file))
-            .clean()
+        archive_path_map(file, &self.archive_dirs)
     }
 }
 

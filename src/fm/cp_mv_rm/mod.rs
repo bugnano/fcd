@@ -1,3 +1,4 @@
+pub mod cp_mv;
 pub mod database;
 pub mod dirscan;
 pub mod dlg_cp_mv;
