@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS dir_list (
     cur_file TEXT NOT NULL,
     cur_target TEXT NOT NULL,
     new_dir INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    message TEXT NOT NULL,
     FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
     FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
 ) STRICT;

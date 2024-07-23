@@ -9,7 +9,7 @@ use crossbeam_channel::{Receiver, Sender};
 
 use rusqlite::{
     self,
-    types::{ToSql, ToSqlOutput, ValueRef},
+    types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef},
     Connection,
 };
 
@@ -43,6 +43,20 @@ pub enum DBFileStatus {
     Skipped,
     Aborted, // Not in rnr
     Done,
+}
+
+impl FromSql for DBFileStatus {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        match value {
+            ValueRef::Text(b"TO_DO") => Ok(DBFileStatus::ToDo),
+            ValueRef::Text(b"IN_PROGRESS") => Ok(DBFileStatus::InProgress),
+            ValueRef::Text(b"ERROR") => Ok(DBFileStatus::Error),
+            ValueRef::Text(b"SKIPPED") => Ok(DBFileStatus::Skipped),
+            ValueRef::Text(b"ABORTED") => Ok(DBFileStatus::Aborted),
+            ValueRef::Text(b"DONE") => Ok(DBFileStatus::Done),
+            _ => Err(FromSqlError::InvalidType),
+        }
+    }
 }
 
 impl ToSql for DBFileStatus {
@@ -82,10 +96,12 @@ pub struct DBFileEntry {
 pub struct DBDirListEntry {
     pub id: i64,
     pub job_id: i64,
-    pub file_id: i64,
+    pub file: DBFileEntry,
     pub cur_file: PathBuf,
     pub cur_target: PathBuf,
     pub new_dir: bool,
+    pub status: DBFileStatus,
+    pub message: String,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +127,7 @@ pub enum DBCommand {
     SetJobStatus(i64, DBJobStatus),
     GetDirList(i64, Sender<Vec<DBDirListEntry>>),
     PushDirList(DBDirListEntry, Sender<i64>),
+    SetDirListEntryStatus(DBDirListEntry),
     GetSkipDirStack(i64, Sender<Vec<DBSkipDirEntry>>),
     PushSkipDirStack(DBSkipDirEntry, Sender<i64>),
     PopSkipDirStack(i64),
@@ -150,6 +167,9 @@ pub fn start(file: &Path) -> Result<Sender<DBCommand>> {
                         }
                         DBCommand::PushDirList(mut dir_list_entry, dir_list_id_tx) => {
                             let _ = dir_list_id_tx.send(db.push_dir_list(&mut dir_list_entry));
+                        }
+                        DBCommand::SetDirListEntryStatus(dir_list_entry) => {
+                            db.set_dir_list_entry_status(&dir_list_entry);
                         }
                         DBCommand::GetSkipDirStack(job_id, skip_dir_stack_tx) => {
                             let _ = skip_dir_stack_tx.send(db.get_skip_dir_stack(job_id));
@@ -254,6 +274,12 @@ pub fn push_dir_list(command_tx: &Sender<DBCommand>, dir_list_entry: &mut DBDirL
     dir_list_entry.id = last_id;
 
     last_id
+}
+
+pub fn set_dir_list_entry_status(command_tx: &Sender<DBCommand>, dir_list_entry: &DBDirListEntry) {
+    command_tx
+        .send(DBCommand::SetDirListEntryStatus(dir_list_entry.clone()))
+        .unwrap();
 }
 
 pub fn get_skip_dir_stack(command_tx: &Sender<DBCommand>, job_id: i64) -> Vec<DBSkipDirEntry> {
@@ -492,8 +518,28 @@ impl DataBase {
     pub fn get_dir_list(&self, job_id: i64) -> Vec<DBDirListEntry> {
         self.conn
             .prepare(
-                "SELECT id, file_id, cur_file, cur_target, new_dir
+                "SELECT dir_list.id,
+                        dir_list.cur_file,
+                        dir_list.cur_target,
+                        dir_list.new_dir,
+                        dir_list.status,
+                        dir_list.message,
+                        files.id,
+                        files.job_id,
+                        files.file,
+                        files.is_file,
+                        files.is_dir,
+                        files.is_symlink,
+                        files.size,
+                        files.uid,
+                        files.gid,
+                        files.status,
+                        files.message,
+                        files.target_is_dir,
+                        files.target_is_symlink,
+                        files.cur_target,
                 FROM dir_list
+                JOIN files ON files.id = dir_list.file_id
                 WHERE job_id = ?1
                 ORDER BY id",
             )
@@ -502,10 +548,27 @@ impl DataBase {
                     Ok(DBDirListEntry {
                         id: row.get(0)?,
                         job_id,
-                        file_id: row.get(1)?,
-                        cur_file: PathBuf::from(row.get::<usize, String>(2)?),
-                        cur_target: PathBuf::from(row.get::<usize, String>(3)?),
-                        new_dir: row.get(4)?,
+                        cur_file: PathBuf::from(row.get::<usize, String>(1)?),
+                        cur_target: PathBuf::from(row.get::<usize, String>(2)?),
+                        new_dir: row.get(3)?,
+                        status: row.get(4)?,
+                        message: row.get(5)?,
+                        file: DBFileEntry {
+                            id: row.get(6)?,
+                            job_id: row.get(7)?,
+                            file: PathBuf::from(row.get::<usize, String>(8)?),
+                            is_file: row.get(9)?,
+                            is_dir: row.get(10)?,
+                            is_symlink: row.get(11)?,
+                            size: row.get(12)?,
+                            uid: row.get(13)?,
+                            gid: row.get(14)?,
+                            status: row.get(15)?,
+                            message: row.get(16)?,
+                            target_is_dir: row.get(17)?,
+                            target_is_symlink: row.get(18)?,
+                            cur_target: row.get::<usize, Option<String>>(19)?.map(PathBuf::from),
+                        },
                     })
                 })
                 .and_then(|rows| rows.collect())
@@ -515,13 +578,31 @@ impl DataBase {
 
     pub fn push_dir_list(&self, dir_list_entry: &mut DBDirListEntry) -> i64 {
         match self.conn.execute(
-            "INSERT INTO dir_list (job_id, file_id, cur_file, cur_target, new_dir) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO dir_list (
+                job_id,
+                file_id,
+                cur_file,
+                cur_target,
+                new_dir,
+                status,
+                message
+            ) VALUES (
+                ?1,
+                ?2,
+                ?3,
+                ?4,
+                ?5,
+                ?6,
+                ?7
+            )",
             (
                 dir_list_entry.job_id,
-                dir_list_entry.file_id,
+                dir_list_entry.file.id,
                 dir_list_entry.cur_file.to_string_lossy(),
                 dir_list_entry.cur_target.to_string_lossy(),
                 dir_list_entry.new_dir,
+                dir_list_entry.status,
+                &dir_list_entry.message,
             ),
         ) {
             Ok(_) => {
@@ -533,6 +614,17 @@ impl DataBase {
             }
             Err(_) => 0,
         }
+    }
+
+    pub fn set_dir_list_entry_status(&self, dir_list_entry: &DBDirListEntry) {
+        let _ = self.conn.execute(
+            "UPDATE dir_list SET status = ?1, message = ?2 WHERE id = ?3",
+            (
+                dir_list_entry.status,
+                &dir_list_entry.message,
+                dir_list_entry.id,
+            ),
+        );
     }
 
     pub fn get_rename_dir_stack(&self, job_id: i64) -> Vec<DBRenameDirEntry> {
