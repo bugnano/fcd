@@ -25,9 +25,9 @@ use crate::{
         cp_mv_rm::{
             database::{
                 DBDirListEntry, DBFileEntry, DBFileStatus, DBJobStatus, DBRenameDirEntry,
-                DBSkipDirEntry, DataBase,
+                DBSkipDirEntry, DataBase, OnConflict,
             },
-            dlg_cp_mv::{DlgCpMvType, OnConflict},
+            dlg_cp_mv::DlgCpMvType,
         },
     },
     shutil,

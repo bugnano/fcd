@@ -34,8 +34,8 @@ use crate::{
             leader::Leader,
         },
         cp_mv_rm::{
-            database::DataBase,
-            dlg_cp_mv::{DlgCpMv, DlgCpMvType, OnConflict},
+            database::{DataBase, OnConflict},
+            dlg_cp_mv::{DlgCpMv, DlgCpMvType},
             dlg_cp_mv_progress::DlgCpMvProgress,
             dlg_dirscan::{DirscanType, DlgDirscan},
             dlg_question::DlgQuestion,
@@ -774,12 +774,9 @@ impl App {
                 }
 
                 if do_dirscan {
-                    // TODO: If it's a Mv operation, unmount all the archives referenced by entries
-                    // TODO: Somehow dest_parent should be passed to the dirscan
-
                     let dirscan_type = match dlg_cp_mv_type {
-                        DlgCpMvType::Cp => DirscanType::Cp(dest, *on_conflict),
-                        DlgCpMvType::Mv => DirscanType::Mv(dest, *on_conflict),
+                        DlgCpMvType::Cp => DirscanType::Cp(archive_dest, *on_conflict),
+                        DlgCpMvType::Mv => DirscanType::Mv(archive_dest, *on_conflict),
                     };
 
                     self.dialog = Some(Box::new(DlgDirscan::new(

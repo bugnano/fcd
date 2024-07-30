@@ -1,7 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    thread,
+    process, thread,
 };
 
 use anyhow::{bail, Result};
@@ -17,9 +17,46 @@ const DB_SIGNATURE: &str = "fcd";
 const DB_VERSION: &str = "1";
 
 #[derive(Debug, Clone, Copy)]
+pub enum OnConflict {
+    Overwrite,
+    Skip,
+    RenameExisting,
+    RenameCopy,
+}
+
+impl ToSql for OnConflict {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::Borrowed(ValueRef::Text(match &self {
+            OnConflict::Overwrite => b"OVERWRITE",
+            OnConflict::Skip => b"SKIP",
+            OnConflict::RenameExisting => b"RENAME_EXISTING",
+            OnConflict::RenameCopy => b"RENAME_COPY",
+        })))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DBJobOperation {
+    Cp,
+    Mv,
+    Rm,
+}
+
+impl ToSql for DBJobOperation {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::Borrowed(ValueRef::Text(match &self {
+            DBJobOperation::Cp => b"CP",
+            DBJobOperation::Mv => b"MV",
+            DBJobOperation::Rm => b"RM",
+        })))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum DBJobStatus {
-    DirScan, // TODO
+    Dirscan, // TODO
     InProgress,
+    AbortedDirscan, // TODO -- Not sure if useful
     Aborted,
     Done,
 }
@@ -27,8 +64,9 @@ pub enum DBJobStatus {
 impl ToSql for DBJobStatus {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
         Ok(ToSqlOutput::Borrowed(ValueRef::Text(match &self {
-            DBJobStatus::DirScan => b"DIRSCAN",
+            DBJobStatus::Dirscan => b"DIRSCAN",
             DBJobStatus::InProgress => b"IN_PROGRESS",
+            DBJobStatus::AbortedDirscan => b"ABORTED_DIRSCAN",
             DBJobStatus::Aborted => b"ABORTED",
             DBJobStatus::Done => b"DONE",
         })))
@@ -70,6 +108,19 @@ impl ToSql for DBFileStatus {
             DBFileStatus::Done => b"DONE",
         })))
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct DBEntriesEntry {
+    pub id: i64,
+    pub job_id: i64,
+    pub file: PathBuf,
+    pub is_file: bool,
+    pub is_dir: bool,
+    pub is_symlink: bool,
+    pub size: u64,
+    pub uid: u32,
+    pub gid: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -169,69 +220,130 @@ impl DataBase {
             .execute_batch(include_str!("create_database.sql"))?;
 
         self.conn.execute(
-            "INSERT OR IGNORE INTO kv (k, v) VALUES (?1, ?2);",
+            "INSERT OR IGNORE INTO kv (k, v) VALUES (?1, ?2)",
             ("signature", DB_SIGNATURE),
         )?;
         self.conn.execute(
-            "INSERT OR IGNORE INTO kv (k, v) VALUES (?1, ?2);",
+            "INSERT OR IGNORE INTO kv (k, v) VALUES (?1, ?2)",
             ("version", DB_VERSION),
         )?;
 
         Ok(())
     }
 
-    /*
-        def new_job(self, operation, file_list, scan_error, scan_skipped, files, cwd, dest=None, on_conflict=None, archives=None):
-            job_id = None
-
-            if self.conn is None:
-                return job_id
-
-            try:
-                with self.conn:
-                    c = self.conn.execute("SELECT MAX(id) FROM jobs")
-                    job_id = c.fetchone()[0] or 0
-                    job_id += 1
-                    c.close()
-                    self.conn.execute("INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (
-                        job_id,
+    pub fn new_job<T: AsRef<Path>>(
+        &mut self,
+        operation: DBJobOperation,
+        cwd: &Path,
+        entries: &mut [DBEntriesEntry],
+        dest: Option<&Path>,
+        on_conflict: Option<OnConflict>,
+        archives: &[T],
+    ) -> i64 {
+        match self.conn.transaction() {
+            Ok(tx) => {
+                let job_id = match tx.execute(
+                    "INSERT INTO jobs (
+                        pid,
                         operation,
-                        json.dumps([str(x) for x in files]),
                         cwd,
                         dest,
                         on_conflict,
-                        json.dumps(archives),
-                        json.dumps(scan_error),
-                        json.dumps(scan_skipped),
-                        None,
-                        None,
-                        None,
-                        None,
-                        "IN_PROGRESS",
-                    ))
+                        status
+                    ) VALUES (
+                        ?1,
+                        ?2,
+                        ?3,
+                        ?4,
+                        ?5,
+                        ?6
+                    )",
+                    (
+                        process::id(),
+                        operation,
+                        cwd.to_string_lossy(),
+                        dest.map(|x| x.to_string_lossy()),
+                        on_conflict,
+                        DBJobStatus::Dirscan,
+                    ),
+                ) {
+                    Ok(_) => tx.last_insert_rowid(),
+                    Err(_) => return 0,
+                };
 
-                    c = self.conn.execute("SELECT MAX(id) FROM files")
-                    file_id = c.fetchone()[0] or 0
-                    file_id += 1
-                    c.close()
-                    for file in file_list:
-                        self.conn.execute("INSERT INTO files VALUES (?, ?, ?, ?, ?)", (
-                            file_id,
+                for entry in entries.iter_mut() {
+                    match tx.execute(
+                        "INSERT INTO entries (
                             job_id,
-                            json.dumps(file),
-                            "TO_DO",
-                            None,
-                        ))
+                            file,
+                            is_file,
+                            is_dir,
+                            is_symlink,
+                            size,
+                            uid,
+                            gid
+                        ) VALUES (
+                            ?1,
+                            ?2,
+                            ?3,
+                            ?4,
+                            ?5,
+                            ?6,
+                            ?7,
+                            ?8
+                        )",
+                        (
+                            job_id,
+                            entry.file.to_string_lossy(),
+                            entry.is_file,
+                            entry.is_dir,
+                            entry.is_symlink,
+                            entry.size,
+                            entry.uid,
+                            entry.gid,
+                        ),
+                    ) {
+                        Ok(_) => {
+                            entry.id = tx.last_insert_rowid();
+                            entry.job_id = job_id;
+                        }
+                        Err(_) => {
+                            return 0;
+                        }
+                    }
+                }
 
-                        file["id"] = file_id
-                        file["status"] = "TO_DO"
+                for archive in archives.iter() {
+                    if let Err(_) = tx.execute(
+                        "INSERT INTO archives (job_id, archive) VALUES (?1, ?2)",
+                        (job_id, archive.as_ref().to_string_lossy()),
+                    ) {
+                        return 0;
+                    }
+                }
 
-                        file_id += 1
-            except sqlite3.OperationalError:
-                pass
+                if let Err(_) = tx.commit() {
+                    return 0;
+                }
 
-            return job_id
-    */
+                job_id
+            }
+            Err(_) => 0,
+        }
+    }
+
+    pub fn delete_job(&self, job_id: i64) {
+        let _ = self
+            .conn
+            .execute("DELETE FROM jobs WHERE id = ?1", [job_id]);
+    }
+
+    pub fn set_job_status(&self, job_id: i64, status: DBJobStatus) {
+        let _ = self.conn.execute(
+            "UPDATE jobs SET status = ?1 WHERE id = ?2",
+            (status, job_id),
+        );
+    }
 
     pub fn update_file(&self, file: &DBFileEntry) {
         let _ = self.conn.execute(
@@ -257,19 +369,6 @@ impl DataBase {
         let _ = self.conn.execute(
             "UPDATE files SET status = ?1, message = ?2 WHERE id = ?3",
             (file.status, &file.message, file.id),
-        );
-    }
-
-    pub fn delete_job(&self, job_id: i64) {
-        let _ = self
-            .conn
-            .execute("DELETE FROM jobs WHERE id = ?1", [job_id]);
-    }
-
-    pub fn set_job_status(&self, job_id: i64, status: DBJobStatus) {
-        let _ = self.conn.execute(
-            "UPDATE jobs SET status = ?1 WHERE id = ?2",
-            (status, job_id),
         );
     }
 

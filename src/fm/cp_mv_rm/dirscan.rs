@@ -15,10 +15,12 @@ pub enum ReadMetadata {
     No,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum DirScanEvent {
-    Abort,
+    Suspend(Receiver<()>),
     Skip,
+    Abort,
+    NoDb,
 }
 
 #[derive(Debug, Clone)]
@@ -70,7 +72,9 @@ pub fn dirscan(
         if !ev_rx.is_empty() {
             if let Ok(event) = ev_rx.try_recv() {
                 match event {
-                    DirScanEvent::Abort => break,
+                    DirScanEvent::Suspend(suspend_rx) => {
+                        let _ = suspend_rx.recv();
+                    }
                     DirScanEvent::Skip => {
                         result.entries.clear();
                         result.errors.clear();
@@ -82,6 +86,10 @@ pub fn dirscan(
                             ReadMetadata::No => None,
                         };
                         break;
+                    }
+                    DirScanEvent::Abort => break,
+                    DirScanEvent::NoDb => {
+                        todo!();
                     }
                 }
             }
@@ -177,7 +185,9 @@ fn recursive_dirscan(
         if !ev_rx.is_empty() {
             if let Ok(event) = ev_rx.try_recv() {
                 match event {
-                    DirScanEvent::Abort => return Ok(None),
+                    DirScanEvent::Suspend(suspend_rx) => {
+                        let _ = suspend_rx.recv();
+                    }
                     DirScanEvent::Skip => {
                         result.entries.clear();
                         result.errors.clear();
@@ -186,6 +196,10 @@ fn recursive_dirscan(
                         info.files = old_files;
                         info.bytes = old_bytes;
                         return Ok(Some((result, last_write)));
+                    }
+                    DirScanEvent::Abort => return Ok(None),
+                    DirScanEvent::NoDb => {
+                        todo!();
                     }
                 }
             }

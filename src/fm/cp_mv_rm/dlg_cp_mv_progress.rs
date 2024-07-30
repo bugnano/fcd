@@ -25,8 +25,9 @@ use crate::{
         app::human_readable_size,
         archive_mounter::{self, ArchiveMounterCommand},
         cp_mv_rm::{
+            database::OnConflict,
             dirscan::{dirscan, DirScanEvent, DirScanInfo, DirScanResult, ReadMetadata},
-            dlg_cp_mv::{DlgCpMvType, OnConflict},
+            dlg_cp_mv::DlgCpMvType,
         },
         entry::Entry,
     },

@@ -1,17 +1,39 @@
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS kv (
+    k TEXT NOT NULL PRIMARY KEY,
+    v TEXT
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER NOT NULL PRIMARY KEY,
+    pid INTEGER NOT NULL,
     operation TEXT NOT NULL,
-    files TEXT NOT NULL,
     cwd TEXT NOT NULL,
     dest TEXT,
     on_conflict TEXT,
-    archives TEXT,
-    scan_error TEXT,
-    scan_skipped TEXT,
     replace_first_path INTEGER,
     status TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS entries (
+    id INTEGER NOT NULL PRIMARY KEY,
+    job_id INTEGER NOT NULL,
+    file TEXT NOT NULL,
+    is_file INTEGER NOT NULL,
+    is_dir INTEGER NOT NULL,
+    is_symlink INTEGER NOT NULL,
+    size INTEGER NOT NULL,
+    uid INTEGER NOT NULL,
+    gid INTEGER NOT NULL,
+    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS archives (
+    id INTEGER NOT NULL PRIMARY KEY,
+    job_id INTEGER NOT NULL,
+    archive TEXT NOT NULL,
+    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS files (
@@ -59,9 +81,4 @@ CREATE TABLE IF NOT EXISTS skip_dir_stack (
     job_id INTEGER NOT NULL,
     file TEXT NOT NULL,
     FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
-) STRICT;
-
-CREATE TABLE IF NOT EXISTS kv (
-    k TEXT NOT NULL PRIMARY KEY,
-    v TEXT
 ) STRICT;

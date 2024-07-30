@@ -20,7 +20,7 @@ use crate::{
     app::{centered_rect, render_shadow, PubSub},
     component::{Component, Focus},
     config::Config,
-    fm::entry::Entry,
+    fm::{cp_mv_rm::database::OnConflict, entry::Entry},
     tilde_layout::tilde_layout,
     widgets::{button::Button, input::Input, radio_box::RadioBox},
 };
@@ -29,14 +29,6 @@ use crate::{
 pub enum DlgCpMvType {
     Cp,
     Mv,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum OnConflict {
-    Overwrite,
-    Skip,
-    RenameExisting,
-    RenameCopy,
 }
 
 #[derive(Debug)]

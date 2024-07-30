@@ -10,10 +10,7 @@ use signal_hook::iterator::Signals;
 
 use crate::{
     fm::{
-        cp_mv_rm::{
-            dirscan::DirScanResult,
-            dlg_cp_mv::{DlgCpMvType, OnConflict},
-        },
+        cp_mv_rm::{database::OnConflict, dirscan::DirScanResult, dlg_cp_mv::DlgCpMvType},
         entry::{Entry, SortBy, SortOrder},
     },
     viewer::{dlg_goto::GotoType, dlg_hex_search::HexSearch, dlg_text_search::TextSearch},
