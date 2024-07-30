@@ -75,9 +75,9 @@ pub enum PubSub {
     PromptMkdir,
     PromptRename(String, usize),
     MountArchive(PathBuf),
-    Rm(Vec<Entry>),
-    Cp(Vec<Entry>),
-    Mv(Vec<Entry>),
+    Rm(PathBuf, Vec<Entry>),
+    Cp(PathBuf, Vec<Entry>),
+    Mv(PathBuf, Vec<Entry>),
 
     // Quick view events
     ToggleQuickView(Option<Entry>),
@@ -96,12 +96,12 @@ pub enum PubSub {
     ArchiveMountCancel(PathBuf),
 
     // Dialog DirScan events
-    DoRm(Vec<Entry>, DirScanResult),
-    DoCp(Vec<Entry>, DirScanResult, PathBuf, OnConflict),
-    DoMv(Vec<Entry>, DirScanResult, PathBuf, OnConflict),
+    DoRm(PathBuf, Vec<Entry>, DirScanResult),
+    DoCp(PathBuf, Vec<Entry>, PathBuf, OnConflict, DirScanResult),
+    DoMv(PathBuf, Vec<Entry>, PathBuf, OnConflict, DirScanResult),
 
     // Dialog CpMv events
-    DoDirscan(PathBuf, String, Vec<Entry>, OnConflict, DlgCpMvType),
+    DoDirscan(PathBuf, Vec<Entry>, String, OnConflict, DlgCpMvType),
 }
 
 #[derive(Debug, Copy, Clone)]

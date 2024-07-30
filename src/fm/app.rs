@@ -639,11 +639,7 @@ impl App {
                     on_yes,
                 )));
             }
-            PubSub::Rm(entries) => {
-                let cwd = self.panels[self.panel_focus_position]
-                    .get_cwd()
-                    .expect("BUG: The focused panel has no working directory set");
-
+            PubSub::Rm(cwd, entries) => {
                 // TODO: Unmount all the archives referenced by entries
 
                 self.dialog = Some(Box::new(DlgDirscan::new(
@@ -655,11 +651,7 @@ impl App {
                     self.archive_mounter_command_tx.clone(),
                 )));
             }
-            PubSub::DoRm(entries, dirscan_result) => {
-                let cwd = self.panels[self.panel_focus_position]
-                    .get_cwd()
-                    .expect("BUG: The focused panel has no working directory set");
-
+            PubSub::DoRm(cwd, entries, dirscan_result) => {
                 self.dialog = Some(Box::new(DlgRmProgress::new(
                     &self.config,
                     self.pubsub_tx.clone(),
@@ -669,16 +661,11 @@ impl App {
                     self.archive_mounter_command_tx.clone(),
                 )));
             }
-            PubSub::Cp(entries) | PubSub::Mv(entries) => {
-                let (focus_position, other_position) = match self.quickviewer_position {
-                    2 => (self.panel_focus_position, self.panel_focus_position ^ 1),
-                    pos if pos == self.panel_focus_position => (self.panel_focus_position ^ 1, 2),
-                    _ => (self.panel_focus_position, 2),
+            PubSub::Cp(cwd, entries) | PubSub::Mv(cwd, entries) => {
+                let other_position = match self.quickviewer_position {
+                    2 => self.panel_focus_position ^ 1,
+                    _ => 2,
                 };
-
-                let cwd = self.panels[focus_position]
-                    .get_cwd()
-                    .expect("BUG: The focused panel has no working directory set");
 
                 let other_cwd = self.panels[other_position]
                     .get_cwd()
@@ -691,8 +678,8 @@ impl App {
                     .replace('%', "%%");
 
                 let dlg_cp_mv_type = match pubsub {
-                    PubSub::Cp(_entries) => DlgCpMvType::Cp,
-                    PubSub::Mv(_entries) => DlgCpMvType::Mv,
+                    PubSub::Cp(_cwd, _entries) => DlgCpMvType::Cp,
+                    PubSub::Mv(_cwd, _entries) => DlgCpMvType::Mv,
                     _ => unreachable!(),
                 };
 
@@ -700,12 +687,12 @@ impl App {
                     &self.config,
                     self.pubsub_tx.clone(),
                     &cwd,
-                    &dest,
                     entries,
+                    &dest,
                     dlg_cp_mv_type,
                 )));
             }
-            PubSub::DoDirscan(cwd, str_dest, entries, on_conflict, dlg_cp_mv_type) => {
+            PubSub::DoDirscan(cwd, entries, str_dest, on_conflict, dlg_cp_mv_type) => {
                 let archive_dest =
                     expanduser(&PathBuf::from(&self.apply_template(str_dest, Quote::No)));
 
@@ -805,15 +792,15 @@ impl App {
                     )));
                 }
             }
-            PubSub::DoCp(entries, dirscan_result, dest, on_conflict)
-            | PubSub::DoMv(entries, dirscan_result, dest, on_conflict) => {
-                let cwd = self.panels[self.panel_focus_position]
-                    .get_cwd()
-                    .expect("BUG: The focused panel has no working directory set");
-
+            PubSub::DoCp(cwd, entries, dest, on_conflict, dirscan_result)
+            | PubSub::DoMv(cwd, entries, dest, on_conflict, dirscan_result) => {
                 let dlg_cp_mv_type = match pubsub {
-                    PubSub::DoCp(_entries, _dirscan_result, _dest, _on_conflict) => DlgCpMvType::Cp,
-                    PubSub::DoMv(_entries, _dirscan_result, _dest, _on_conflict) => DlgCpMvType::Mv,
+                    PubSub::DoCp(_cwd, _entries, _dest, _on_conflict, _dirscan_result) => {
+                        DlgCpMvType::Cp
+                    }
+                    PubSub::DoMv(_cwd, _entries, _dest, _on_conflict, _dirscan_result) => {
+                        DlgCpMvType::Mv
+                    }
                     _ => unreachable!(),
                 };
 

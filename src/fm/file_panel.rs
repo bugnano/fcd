@@ -734,7 +734,7 @@ impl Component for FilePanel {
                             .send(PubSub::Question(
                                 String::from("Delete"),
                                 question,
-                                Box::new(PubSub::Rm(selected_files)),
+                                Box::new(PubSub::Rm(self.cwd.clone(), selected_files)),
                             ))
                             .unwrap();
                     }
@@ -743,14 +743,18 @@ impl Component for FilePanel {
                     let selected_files = self.get_selected_files();
 
                     if !selected_files.is_empty() {
-                        self.pubsub_tx.send(PubSub::Cp(selected_files)).unwrap();
+                        self.pubsub_tx
+                            .send(PubSub::Cp(self.cwd.clone(), selected_files))
+                            .unwrap();
                     }
                 }
                 Key::F(6) | Key::Char('6') => {
                     let selected_files = self.get_selected_files();
 
                     if !selected_files.is_empty() {
-                        self.pubsub_tx.send(PubSub::Mv(selected_files)).unwrap();
+                        self.pubsub_tx
+                            .send(PubSub::Mv(self.cwd.clone(), selected_files))
+                            .unwrap();
                     }
                 }
                 _ => key_handled = false,

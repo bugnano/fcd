@@ -44,6 +44,7 @@ pub enum DirscanType {
 pub struct DlgDirscan {
     config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
+    cwd: PathBuf,
     entries: Vec<Entry>,
     dirscan_type: DirscanType,
     ev_tx: Sender<DirScanEvent>,
@@ -81,6 +82,7 @@ impl DlgDirscan {
         let mut dlg = DlgDirscan {
             config: Rc::clone(config),
             pubsub_tx,
+            cwd: PathBuf::from(cwd),
             entries: Vec::from(entries),
             dirscan_type,
             ev_tx,
@@ -210,26 +212,28 @@ impl Component for DlgDirscan {
                         DirscanType::Cp(dest, on_conflict) => {
                             self.pubsub_tx
                                 .send(PubSub::DoCp(
+                                    self.cwd.clone(),
                                     self.entries.clone(),
-                                    result,
                                     dest.clone(),
                                     *on_conflict,
+                                    result,
                                 ))
                                 .unwrap();
                         }
                         DirscanType::Mv(dest, on_conflict) => {
                             self.pubsub_tx
                                 .send(PubSub::DoMv(
+                                    self.cwd.clone(),
                                     self.entries.clone(),
-                                    result,
                                     dest.clone(),
                                     *on_conflict,
+                                    result,
                                 ))
                                 .unwrap();
                         }
                         DirscanType::Rm => {
                             self.pubsub_tx
-                                .send(PubSub::DoRm(self.entries.clone(), result))
+                                .send(PubSub::DoRm(self.cwd.clone(), self.entries.clone(), result))
                                 .unwrap();
                         }
                     }

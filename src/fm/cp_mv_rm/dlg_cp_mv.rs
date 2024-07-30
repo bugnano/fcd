@@ -59,8 +59,8 @@ impl DlgCpMv {
         config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
         cwd: &Path,
-        dest: &str,
         entries: &[Entry],
+        dest: &str,
         dlg_cp_mv_type: DlgCpMvType,
     ) -> DlgCpMv {
         DlgCpMv {
@@ -141,8 +141,8 @@ impl Component for DlgCpMv {
                         self.pubsub_tx
                             .send(PubSub::DoDirscan(
                                 self.cwd.clone(),
-                                self.input.value(),
                                 self.entries.clone(),
+                                self.input.value(),
                                 on_conflict,
                                 self.dlg_cp_mv_type,
                             ))
