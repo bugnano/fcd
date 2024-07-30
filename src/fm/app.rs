@@ -34,7 +34,7 @@ use crate::{
             leader::Leader,
         },
         cp_mv_rm::{
-            database,
+            database::DataBase,
             dlg_cp_mv::{DlgCpMv, DlgCpMvType, OnConflict},
             dlg_cp_mv_progress::DlgCpMvProgress,
             dlg_dirscan::{DirscanType, DlgDirscan},
@@ -86,6 +86,7 @@ pub struct App {
     panel_focus_position: usize,
     quickviewer_position: usize,
     printwd: Option<PathBuf>,
+    db_file: Option<PathBuf>,
     tabsize: u8,
     ctrl_o: bool,
     archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
@@ -97,15 +98,12 @@ impl App {
         bookmarks: &Rc<RefCell<Bookmarks>>,
         initial_path: &Path,
         printwd: Option<&Path>,
-        database: Option<&Path>,
-        use_db: bool,
+        db_file: Option<&Path>,
         tabsize: u8,
     ) -> Result<App> {
         let (pubsub_tx, pubsub_rx) = crossbeam_channel::unbounded();
 
         let archive_mounter_command_tx = archive_mounter::start();
-
-        let _ = database::start(&PathBuf::from("fcd.db"));
 
         Ok(App {
             config: Rc::clone(config),
@@ -142,6 +140,7 @@ impl App {
             panel_focus_position: 0,
             quickviewer_position: 2,
             printwd: printwd.map(PathBuf::from),
+            db_file: db_file.map(PathBuf::from),
             tabsize,
             ctrl_o: false,
             archive_mounter_command_tx,

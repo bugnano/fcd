@@ -24,8 +24,8 @@ use crate::{
         archive_mounter::{self, unarchive_path_map, ArchiveEntry},
         cp_mv_rm::{
             database::{
-                self, DBCommand, DBDirListEntry, DBFileEntry, DBFileStatus, DBJobStatus,
-                DBRenameDirEntry, DBSkipDirEntry,
+                DBDirListEntry, DBFileEntry, DBFileStatus, DBJobStatus, DBRenameDirEntry,
+                DBSkipDirEntry, DataBase,
             },
             dlg_cp_mv::{DlgCpMvType, OnConflict},
         },
@@ -77,7 +77,7 @@ pub fn cp_mv(
     ev_rx: Receiver<CpMvEvent>,
     info_tx: Sender<CpMvInfo>,
     pubsub_tx: Sender<PubSub>,
-    mut db_command_tx: Option<Sender<DBCommand>>,
+    db_file: Option<&Path>,
     archive_dirs: &[ArchiveEntry],
 ) -> (Vec<DBFileEntry>, Vec<DBDirListEntry>) {
     let mut file_list = Vec::from(entries);
@@ -108,30 +108,32 @@ pub fn cp_mv(
         time: Duration::ZERO,
     };
 
-    let mut dir_list = match &db_command_tx {
-        Some(command_tx) => database::get_dir_list(command_tx, job_id),
+    let mut database = db_file.and_then(|db_file| DataBase::new(db_file).ok());
+
+    let mut dir_list = match &database {
+        Some(db) => db.get_dir_list(job_id),
         None => Vec::new(),
     };
 
-    let mut rename_dir_stack = match &db_command_tx {
-        Some(command_tx) => database::get_rename_dir_stack(command_tx, job_id),
+    let mut rename_dir_stack = match &database {
+        Some(db) => db.get_rename_dir_stack(job_id),
         None => Vec::new(),
     };
 
-    let mut skip_dir_stack = match &db_command_tx {
-        Some(command_tx) => database::get_skip_dir_stack(command_tx, job_id),
+    let mut skip_dir_stack = match &database {
+        Some(db) => db.get_skip_dir_stack(job_id),
         None => Vec::new(),
     };
 
-    let replace_first_path = db_command_tx
+    let replace_first_path = database
         .as_ref()
-        .and_then(|command_tx| database::get_replace_first_path(&command_tx, job_id));
+        .and_then(|db| db.get_replace_first_path(job_id));
 
     let replace_first_path = replace_first_path.unwrap_or_else(|| {
         let replace_first_path = actual_dest.is_dir();
 
-        if let Some(command_tx) = &db_command_tx {
-            database::set_replace_first_path(command_tx, job_id, replace_first_path);
+        if let Some(db) = &database {
+            db.set_replace_first_path(job_id, replace_first_path);
         }
 
         replace_first_path
@@ -177,19 +179,19 @@ pub fn cp_mv(
             &mut skip_dir_stack,
             replace_first_path,
             &mut timers,
-            &mut db_command_tx,
+            &mut database,
             archive_dirs,
         ) {
             Ok(status) => {
                 entry.status = status;
 
-                if let Some(command_tx) = &db_command_tx {
-                    database::set_file_status(command_tx, &entry);
+                if let Some(db) = &database {
+                    db.set_file_status(&entry);
                 }
 
                 if let DBFileStatus::Aborted = status {
-                    if let Some(command_tx) = &db_command_tx {
-                        database::set_job_status(command_tx, job_id, DBJobStatus::Aborted);
+                    if let Some(db) = &database {
+                        db.set_job_status(job_id, DBJobStatus::Aborted);
                     }
 
                     break;
@@ -199,8 +201,8 @@ pub fn cp_mv(
                 // TODO -- entry.message = f'({when}) {e.strerror} ({e.errno})'
                 entry.status = DBFileStatus::Error;
 
-                if let Some(command_tx) = &db_command_tx {
-                    database::set_file_status(command_tx, &entry);
+                if let Some(db) = &database {
+                    db.set_file_status(&entry);
                 }
             }
         }
@@ -228,19 +230,19 @@ pub fn cp_mv(
             &pubsub_tx,
             &mut info,
             &mut timers,
-            &mut db_command_tx,
+            &mut database,
             archive_dirs,
         ) {
             Ok(status) => {
                 entry.status = status;
 
-                if let Some(command_tx) = &db_command_tx {
-                    database::set_dir_list_entry_status(command_tx, &entry);
+                if let Some(db) = &database {
+                    db.set_dir_list_entry_status(&entry);
                 }
 
                 if let DBFileStatus::Aborted = status {
-                    if let Some(command_tx) = &db_command_tx {
-                        database::set_job_status(command_tx, job_id, DBJobStatus::Aborted);
+                    if let Some(db) = &database {
+                        db.set_job_status(job_id, DBJobStatus::Aborted);
                     }
 
                     break;
@@ -250,14 +252,14 @@ pub fn cp_mv(
                 // TODO -- entry.message = f'({when}) {e.strerror} ({e.errno})'
                 entry.status = DBFileStatus::Error;
 
-                if let Some(command_tx) = &db_command_tx {
-                    database::set_dir_list_entry_status(command_tx, &entry);
+                if let Some(db) = &database {
+                    db.set_dir_list_entry_status(&entry);
                 }
             }
         }
     }
 
-    if let None = &db_command_tx {
+    if let None = &database {
         sync();
     }
 
@@ -281,7 +283,7 @@ fn cp_mv_entry(
     skip_dir_stack: &mut Vec<DBSkipDirEntry>,
     replace_first_path: bool,
     timers: &mut Timers,
-    db_command_tx: &mut Option<Sender<DBCommand>>,
+    database: &mut Option<DataBase>,
     archive_dirs: &[ArchiveEntry],
 ) -> Result<DBFileStatus> {
     timers.cur_start = Instant::now();
@@ -303,8 +305,8 @@ fn cp_mv_entry(
         } else {
             skip_dir_stack.pop();
 
-            if let Some(command_tx) = &db_command_tx {
-                database::pop_skip_dir_stack(command_tx, dir_to_skip.id);
+            if let Some(db) = &database {
+                db.pop_skip_dir_stack(dir_to_skip.id);
             }
         }
     }
@@ -333,8 +335,8 @@ fn cp_mv_entry(
         } else {
             rename_dir_stack.pop();
 
-            if let Some(command_tx) = &db_command_tx {
-                database::pop_rename_dir_stack(command_tx, rename_dir_entry.id);
+            if let Some(db) = &database {
+                db.pop_rename_dir_stack(rename_dir_entry.id);
             }
         }
     }
@@ -404,7 +406,7 @@ fn cp_mv_entry(
                                 fs::remove_file(&actual_target).context("remove")?;
                             }
 
-                            if let Some(_command_tx) = &db_command_tx {
+                            if let Some(_db) = &database {
                                 // TODO: I don't like this unwrap() call
                                 fsync_parent(
                                     &fs::canonicalize(&actual_target.parent().unwrap())
@@ -437,7 +439,7 @@ fn cp_mv_entry(
 
                             fs::rename(&actual_target, &existing_target).context("rename")?;
 
-                            if let Some(_command_tx) = &db_command_tx {
+                            if let Some(_db) = &database {
                                 // TODO: I don't like this unwrap() call
                                 fsync_parent(
                                     &fs::canonicalize(&existing_target.parent().unwrap())
@@ -486,11 +488,8 @@ fn cp_mv_entry(
                                     cur_target: cur_target.clone(),
                                 });
 
-                                if let Some(command_tx) = &db_command_tx {
-                                    database::push_rename_dir_stack(
-                                        command_tx,
-                                        rename_dir_stack.last_mut().unwrap(),
-                                    );
+                                if let Some(db) = &database {
+                                    db.push_rename_dir_stack(rename_dir_stack.last_mut().unwrap());
                                 }
                             }
                         }
@@ -509,8 +508,8 @@ fn cp_mv_entry(
         }
     }
 
-    if let Some(command_tx) = &db_command_tx {
-        database::update_file(command_tx, &entry);
+    if let Some(db) = &database {
+        db.update_file(&entry);
     }
 
     if !ev_rx.is_empty() {
@@ -533,11 +532,11 @@ fn cp_mv_entry(
                     return Ok(DBFileStatus::Aborted);
                 }
                 CpMvEvent::NoDb => {
-                    if let Some(command_tx) = &db_command_tx {
-                        database::delete_job(command_tx, job_id);
+                    if let Some(db) = &database {
+                        db.delete_job(job_id);
                     }
 
-                    *db_command_tx = None;
+                    *database = None;
                 }
             }
         }
@@ -575,7 +574,7 @@ fn cp_mv_entry(
                         file: cur_file.clone(),
                     });
 
-                    if let Some(command_tx) = &db_command_tx {
+                    if let Some(db) = &database {
                         fsync_parent(&parent_dir).context("fsync")?;
 
                         // TODO: I don't like this unwrap() call
@@ -584,10 +583,7 @@ fn cp_mv_entry(
 
                         fsync_parent(&source_parent).context("fsync")?;
 
-                        database::push_skip_dir_stack(
-                            command_tx,
-                            skip_dir_stack.last_mut().unwrap(),
-                        );
+                        db.push_skip_dir_stack(skip_dir_stack.last_mut().unwrap());
                     }
                 }
             }
@@ -620,8 +616,8 @@ fn cp_mv_entry(
                 message: String::from(""),
             });
 
-            if let Some(command_tx) = &db_command_tx {
-                database::push_dir_list(command_tx, dir_list.last_mut().unwrap());
+            if let Some(db) = &database {
+                db.push_dir_list(dir_list.last_mut().unwrap());
             }
         } else if entry.is_file {
             match copy_file(
@@ -636,7 +632,7 @@ fn cp_mv_entry(
                 &pubsub_tx,
                 info,
                 timers,
-                db_command_tx,
+                database,
             ) {
                 Ok(DBFileStatus::Skipped) => {
                     let _ = fs::remove_file(&actual_target);
@@ -673,7 +669,7 @@ fn cp_mv_entry(
             shutil::copystat(&actual_file, &actual_target).context("copystat")?;
         }
 
-        if let Some(command_tx) = &db_command_tx {
+        if let Some(_db) = &database {
             fsync_parent(&parent_dir).context("fsync")?;
         }
     }
@@ -681,7 +677,7 @@ fn cp_mv_entry(
     if matches!(mode, DlgCpMvType::Mv) && perform_copy && !entry.is_dir {
         fs::remove_file(&actual_file).context("remove")?;
 
-        if let Some(command_tx) = &db_command_tx {
+        if let Some(_db) = &database {
             // TODO: I don't like this unwrap() call
             let source_parent =
                 fs::canonicalize(&actual_file.parent().unwrap()).context("parent_dir")?;
@@ -703,7 +699,7 @@ fn handle_dir_entry(
     pubsub_tx: &Sender<PubSub>,
     info: &mut CpMvInfo,
     timers: &mut Timers,
-    db_command_tx: &mut Option<Sender<DBCommand>>,
+    database: &mut Option<DataBase>,
     archive_dirs: &[ArchiveEntry],
 ) -> Result<DBFileStatus> {
     timers.cur_start = Instant::now();
@@ -726,11 +722,11 @@ fn handle_dir_entry(
                     return Ok(DBFileStatus::Aborted);
                 }
                 CpMvEvent::NoDb => {
-                    if let Some(command_tx) = &db_command_tx {
-                        database::delete_job(command_tx, job_id);
+                    if let Some(db) = &database {
+                        db.delete_job(job_id);
                     }
 
-                    *db_command_tx = None;
+                    *database = None;
                 }
             }
         }
@@ -784,7 +780,7 @@ fn handle_dir_entry(
 
         shutil::copystat(&actual_file, &actual_target).context("copystat")?;
 
-        if let Some(command_tx) = &db_command_tx {
+        if let Some(_db) = &database {
             // TODO: I don't like this unwrap() call
             let parent_dir =
                 fs::canonicalize(&actual_target.parent().unwrap()).context("parent_dir")?;
@@ -796,7 +792,7 @@ fn handle_dir_entry(
     if let DlgCpMvType::Mv = mode {
         fs::remove_dir(&actual_file).context("rmdir")?;
 
-        if let Some(command_tx) = &db_command_tx {
+        if let Some(_db) = &database {
             // TODO: I don't like this unwrap() call
             let source_parent =
                 fs::canonicalize(&actual_file.parent().unwrap()).context("parent_dir")?;
@@ -820,7 +816,7 @@ fn copy_file(
     pubsub_tx: &Sender<PubSub>,
     info: &mut CpMvInfo,
     timers: &mut Timers,
-    db_command_tx: &mut Option<Sender<DBCommand>>,
+    database: &mut Option<DataBase>,
 ) -> Result<DBFileStatus> {
     let source_fd = open(actual_file, OFlags::RDONLY, Mode::RUSR).context("source_fd")?;
 
@@ -843,7 +839,7 @@ fn copy_file(
 
             let _ = fallocate(&fd, FallocateFlags::KEEP_SIZE, 0, file_size);
 
-            if let Some(command_tx) = &db_command_tx {
+            if let Some(_db) = &database {
                 fsync(&fd).context("fsync")?;
 
                 // TODO: I don't like this unwrap() call
@@ -897,11 +893,11 @@ fn copy_file(
                         return Ok(DBFileStatus::Aborted);
                     }
                     CpMvEvent::NoDb => {
-                        if let Some(command_tx) = &db_command_tx {
-                            database::delete_job(command_tx, job_id);
+                        if let Some(db) = &database {
+                            db.delete_job(job_id);
                         }
 
-                        *db_command_tx = None;
+                        *database = None;
                     }
                 }
             }
@@ -949,7 +945,7 @@ fn copy_file(
             break;
         }
 
-        if let Some(command_tx) = &db_command_tx {
+        if let Some(_db) = &database {
             fsync(&target_fd).context("fsync")?
         }
 

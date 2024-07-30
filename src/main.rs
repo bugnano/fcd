@@ -42,8 +42,8 @@ struct Cli {
     printwd: Option<PathBuf>,
 
     /// Specify database file to use
-    #[arg(short = 'D', long, value_name = "FILE")]
-    database: Option<PathBuf>,
+    #[arg(short = 'D', long = "database", value_name = "FILE")]
+    db_file: Option<PathBuf>,
 
     /// Do not use database
     #[arg(short = 'n', long = "nodb", action = ArgAction::SetFalse)]
@@ -118,7 +118,7 @@ fn main() -> Result<()> {
         None => {
             let bookmark_path = xdg::BaseDirectories::with_prefix(crate_name!())
                 .ok()
-                .and_then(|xdg_dirs| xdg_dirs.place_config_file(PathBuf::from("bookmarks")).ok());
+                .and_then(|xdg_dirs| xdg_dirs.place_config_file("bookmarks").ok());
 
             let bookmarks = Rc::new(RefCell::new(Bookmarks::new(bookmark_path.as_deref())));
 
@@ -132,13 +132,24 @@ fn main() -> Result<()> {
                 _ => env::current_dir().context("failed to get current working directory")?,
             };
 
+            let db_file = cli.use_db.then_some(true).and_then(|_| {
+                cli.db_file.or_else(|| {
+                    xdg::BaseDirectories::with_prefix(crate_name!())
+                        .ok()
+                        .and_then(|xdg_dirs| {
+                            xdg_dirs
+                                .place_state_file(&format!("{}.db", crate_name!()))
+                                .ok()
+                        })
+                })
+            });
+
             Box::new(fm::app::App::new(
                 &config,
                 &bookmarks,
                 &initial_path,
                 cli.printwd.as_deref(),
-                cli.database.as_deref(),
-                cli.use_db,
+                db_file.as_deref(),
                 cli.tabsize,
             )?) as Box<dyn App>
         }
