@@ -21,7 +21,7 @@ use rustix::{
 use crate::{
     app::PubSub,
     fm::{
-        archive_mounter::{self, unarchive_path_map, ArchiveEntry},
+        archive_mounter::{self, unarchive_parent_map, unarchive_path_map, ArchiveEntry},
         cp_mv_rm::{
             database::{
                 DBDirListEntry, DBFileEntry, DBFileStatus, DBJobStatus, DBRenameDirEntry,
@@ -341,19 +341,8 @@ fn cp_mv_entry(
         }
     }
 
-    let mut actual_file = match (cur_file.parent(), cur_file.file_name()) {
-        (Some(parent), Some(file_name)) => {
-            unarchive_path_map(&parent, archive_dirs).join(file_name)
-        }
-        _ => cur_file.clone(),
-    };
-
-    let mut actual_target = match (cur_target.parent(), cur_target.file_name()) {
-        (Some(parent), Some(file_name)) => {
-            unarchive_path_map(&parent, archive_dirs).join(file_name)
-        }
-        _ => cur_target.clone(),
-    };
+    let mut actual_file = unarchive_parent_map(&cur_file, archive_dirs);
+    let mut actual_target = unarchive_parent_map(&cur_target, archive_dirs);
 
     let mut target_is_dir = entry.target_is_dir;
     let mut target_is_symlink = entry.target_is_symlink;
@@ -363,13 +352,7 @@ fn cp_mv_entry(
         DBFileStatus::InProgress | DBFileStatus::Aborted => {
             if let Some(x) = &entry.cur_target {
                 cur_target = x.clone();
-
-                actual_target = match (cur_target.parent(), cur_target.file_name()) {
-                    (Some(parent), Some(file_name)) => {
-                        unarchive_path_map(&parent, archive_dirs).join(file_name)
-                    }
-                    _ => cur_target.clone(),
-                };
+                actual_target = unarchive_parent_map(&cur_target, archive_dirs);
             }
 
             if actual_target.try_exists().is_ok() {
@@ -740,19 +723,8 @@ fn handle_dir_entry(
     info.cur_size = entry.file.size;
     info.cur_bytes = 0;
 
-    let actual_file = match (entry.cur_file.parent(), entry.cur_file.file_name()) {
-        (Some(parent), Some(file_name)) => {
-            unarchive_path_map(&parent, archive_dirs).join(file_name)
-        }
-        _ => entry.cur_file.clone(),
-    };
-
-    let actual_target = match (entry.cur_target.parent(), entry.cur_target.file_name()) {
-        (Some(parent), Some(file_name)) => {
-            unarchive_path_map(&parent, archive_dirs).join(file_name)
-        }
-        _ => entry.cur_target.clone(),
-    };
+    let actual_file = unarchive_parent_map(&entry.cur_file, archive_dirs);
+    let actual_target = unarchive_parent_map(&entry.cur_target, archive_dirs);
 
     if timers.last_write.elapsed().as_millis() >= 50 {
         timers.last_write = Instant::now();

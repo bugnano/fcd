@@ -25,11 +25,12 @@ pub enum ArchiveMounterCommand {
     UmountArchive(PathBuf),
     UnarchivePath(PathBuf, Sender<PathBuf>),
     ArchivePath(PathBuf, Sender<PathBuf>),
+    GetArchiveDirs(Sender<Vec<ArchiveEntry>>),
 }
 
 #[derive(Debug, Clone)]
 pub struct ArchiveEntry {
-    archive_file: PathBuf,
+    pub archive_file: PathBuf,
     temp_dir: PathBuf,
 }
 
@@ -65,6 +66,9 @@ pub fn start() -> Option<Sender<ArchiveMounterCommand>> {
                         }
                         ArchiveMounterCommand::ArchivePath(file, archive_path_tx) => {
                             let _ = archive_path_tx.send(archive_mounter.archive_path(&file));
+                        }
+                        ArchiveMounterCommand::GetArchiveDirs(archive_dirs_tx) => {
+                            let _ = archive_dirs_tx.send(archive_mounter.get_archive_dirs());
                         }
                     },
 
@@ -139,6 +143,16 @@ pub fn archive_path(command_tx: &Sender<ArchiveMounterCommand>, file: &Path) -> 
     archive_path_rx.recv().unwrap()
 }
 
+pub fn get_archive_dirs(command_tx: &Sender<ArchiveMounterCommand>) -> Vec<ArchiveEntry> {
+    let (archive_dirs_tx, archive_dirs_rx) = crossbeam_channel::unbounded();
+
+    command_tx
+        .send(ArchiveMounterCommand::GetArchiveDirs(archive_dirs_tx))
+        .unwrap();
+
+    archive_dirs_rx.recv().unwrap()
+}
+
 pub fn unarchive_path_map(file: &Path, archive_dirs: &[ArchiveEntry]) -> PathBuf {
     archive_dirs
         .iter()
@@ -168,6 +182,22 @@ pub fn archive_path_map(file: &Path, archive_dirs: &[ArchiveEntry]) -> PathBuf {
         })
         .unwrap_or_else(|| PathBuf::from(file))
         .clean()
+}
+
+pub fn unarchive_parent_map(file: &Path, archive_dirs: &[ArchiveEntry]) -> PathBuf {
+    match (file.parent(), file.file_name()) {
+        (Some(parent), Some(file_name)) => {
+            unarchive_path_map(&parent, archive_dirs).join(file_name)
+        }
+        _ => PathBuf::from(file),
+    }
+}
+
+pub fn archive_parent_map(file: &Path, archive_dirs: &[ArchiveEntry]) -> PathBuf {
+    match (file.parent(), file.file_name()) {
+        (Some(parent), Some(file_name)) => archive_path_map(&parent, archive_dirs).join(file_name),
+        _ => PathBuf::from(file),
+    }
 }
 
 impl ArchiveMounter {
@@ -292,6 +322,10 @@ impl ArchiveMounter {
 
     pub fn archive_path(&self, file: &Path) -> PathBuf {
         archive_path_map(file, &self.archive_dirs)
+    }
+
+    pub fn get_archive_dirs(&self) -> Vec<ArchiveEntry> {
+        self.archive_dirs.clone()
     }
 }
 

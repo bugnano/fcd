@@ -271,8 +271,8 @@ impl DataBase {
                     Err(_) => return 0,
                 };
 
-                for entry in entries.iter_mut() {
-                    match tx.execute(
+                {
+                    let Ok(mut stmt) = tx.prepare(
                         "INSERT INTO entries (
                             job_id,
                             file,
@@ -292,7 +292,12 @@ impl DataBase {
                             ?7,
                             ?8
                         )",
-                        (
+                    ) else {
+                        return 0;
+                    };
+
+                    for entry in entries.iter_mut() {
+                        match stmt.execute((
                             job_id,
                             entry.file.to_string_lossy(),
                             entry.is_file,
@@ -301,24 +306,29 @@ impl DataBase {
                             entry.size,
                             entry.uid,
                             entry.gid,
-                        ),
-                    ) {
-                        Ok(_) => {
-                            entry.id = tx.last_insert_rowid();
-                            entry.job_id = job_id;
-                        }
-                        Err(_) => {
-                            return 0;
+                        )) {
+                            Ok(_) => {
+                                entry.id = tx.last_insert_rowid();
+                                entry.job_id = job_id;
+                            }
+                            Err(_) => {
+                                return 0;
+                            }
                         }
                     }
                 }
 
-                for archive in archives.iter() {
-                    if let Err(_) = tx.execute(
-                        "INSERT INTO archives (job_id, archive) VALUES (?1, ?2)",
-                        (job_id, archive.as_ref().to_string_lossy()),
-                    ) {
+                {
+                    let Ok(mut stmt) =
+                        tx.prepare("INSERT INTO archives (job_id, archive) VALUES (?1, ?2)")
+                    else {
                         return 0;
+                    };
+
+                    for archive in archives.iter() {
+                        if let Err(_) = stmt.execute((job_id, archive.as_ref().to_string_lossy())) {
+                            return 0;
+                        }
                     }
                 }
 
@@ -346,7 +356,7 @@ impl DataBase {
     }
 
     pub fn update_file(&self, file: &DBFileEntry) {
-        let _ = self.conn.execute(
+        if let Ok(mut stmt) = self.conn.prepare_cached(
             "UPDATE files
             SET status = ?1,
                 message = ?2,
@@ -354,22 +364,25 @@ impl DataBase {
                 target_is_symlink = ?4,
                 cur_target = ?5
             WHERE id = ?6",
-            (
+        ) {
+            let _ = stmt.execute((
                 file.status,
                 &file.message,
                 file.target_is_dir,
                 file.target_is_symlink,
                 file.cur_target.as_ref().map(|x| x.to_string_lossy()),
                 file.id,
-            ),
-        );
+            ));
+        }
     }
 
     pub fn set_file_status(&self, file: &DBFileEntry) {
-        let _ = self.conn.execute(
-            "UPDATE files SET status = ?1, message = ?2 WHERE id = ?3",
-            (file.status, &file.message, file.id),
-        );
+        if let Ok(mut stmt) = self
+            .conn
+            .prepare_cached("UPDATE files SET status = ?1, message = ?2 WHERE id = ?3")
+        {
+            let _ = stmt.execute((file.status, &file.message, file.id));
+        }
     }
 
     pub fn get_dir_list(&self, job_id: i64) -> Vec<DBDirListEntry> {
@@ -434,54 +447,58 @@ impl DataBase {
     }
 
     pub fn push_dir_list(&self, dir_list_entry: &mut DBDirListEntry) -> i64 {
-        match self.conn.execute(
-            "INSERT INTO dir_list (
-                job_id,
-                file_id,
-                cur_file,
-                cur_target,
-                new_dir,
-                status,
-                message
-            ) VALUES (
-                ?1,
-                ?2,
-                ?3,
-                ?4,
-                ?5,
-                ?6,
-                ?7
-            )",
-            (
-                dir_list_entry.job_id,
-                dir_list_entry.file.id,
-                dir_list_entry.cur_file.to_string_lossy(),
-                dir_list_entry.cur_target.to_string_lossy(),
-                dir_list_entry.new_dir,
-                dir_list_entry.status,
-                &dir_list_entry.message,
-            ),
-        ) {
-            Ok(_) => {
+        self.conn
+            .prepare_cached(
+                "INSERT INTO dir_list (
+                    job_id,
+                    file_id,
+                    cur_file,
+                    cur_target,
+                    new_dir,
+                    status,
+                    message
+                ) VALUES (
+                    ?1,
+                    ?2,
+                    ?3,
+                    ?4,
+                    ?5,
+                    ?6,
+                    ?7
+                )",
+            )
+            .and_then(|mut stmt| {
+                stmt.execute((
+                    dir_list_entry.job_id,
+                    dir_list_entry.file.id,
+                    dir_list_entry.cur_file.to_string_lossy(),
+                    dir_list_entry.cur_target.to_string_lossy(),
+                    dir_list_entry.new_dir,
+                    dir_list_entry.status,
+                    &dir_list_entry.message,
+                ))
+            })
+            .map(|_| {
                 let last_id = self.conn.last_insert_rowid();
 
                 dir_list_entry.id = last_id;
 
                 last_id
-            }
-            Err(_) => 0,
-        }
+            })
+            .unwrap_or(0)
     }
 
     pub fn set_dir_list_entry_status(&self, dir_list_entry: &DBDirListEntry) {
-        let _ = self.conn.execute(
-            "UPDATE dir_list SET status = ?1, message = ?2 WHERE id = ?3",
-            (
+        if let Ok(mut stmt) = self
+            .conn
+            .prepare_cached("UPDATE dir_list SET status = ?1, message = ?2 WHERE id = ?3")
+        {
+            let _ = stmt.execute((
                 dir_list_entry.status,
                 &dir_list_entry.message,
                 dir_list_entry.id,
-            ),
-        );
+            ));
+        }
     }
 
     pub fn get_rename_dir_stack(&self, job_id: i64) -> Vec<DBRenameDirEntry> {
@@ -507,30 +524,32 @@ impl DataBase {
     }
 
     pub fn push_rename_dir_stack(&self, rename_dir_stack_entry: &mut DBRenameDirEntry) -> i64 {
-        match self.conn.execute(
-            "INSERT INTO rename_dir_stack (job_id, existing_target, cur_target) VALUES (?1, ?2, ?3)",
-            (
-                rename_dir_stack_entry.job_id,
-                rename_dir_stack_entry.existing_target.to_string_lossy(),
-                rename_dir_stack_entry.cur_target.to_string_lossy(),
-            ),
-        ) {
-            Ok(_) => {
+        self.conn
+            .prepare_cached("INSERT INTO rename_dir_stack (job_id, existing_target, cur_target) VALUES (?1, ?2, ?3)")
+            .and_then(|mut stmt| {
+                stmt.execute((
+                    rename_dir_stack_entry.job_id,
+                    rename_dir_stack_entry.existing_target.to_string_lossy(),
+                    rename_dir_stack_entry.cur_target.to_string_lossy(),
+                ))
+            })
+            .map(|_| {
                 let last_id = self.conn.last_insert_rowid();
 
                 rename_dir_stack_entry.id = last_id;
 
                 last_id
-            }
-            Err(_) => 0,
-        }
+            })
+            .unwrap_or(0)
     }
 
     pub fn pop_rename_dir_stack(&self, rename_dir_stack_id: i64) {
-        let _ = self.conn.execute(
-            "DELETE FROM rename_dir_stack WHERE id = ?1",
-            [rename_dir_stack_id],
-        );
+        if let Ok(mut stmt) = self
+            .conn
+            .prepare_cached("DELETE FROM rename_dir_stack WHERE id = ?1")
+        {
+            let _ = stmt.execute([rename_dir_stack_id]);
+        }
     }
 
     pub fn get_skip_dir_stack(&self, job_id: i64) -> Vec<DBSkipDirEntry> {
@@ -555,29 +574,31 @@ impl DataBase {
     }
 
     pub fn push_skip_dir_stack(&self, skip_dir_stack_entry: &mut DBSkipDirEntry) -> i64 {
-        match self.conn.execute(
-            "INSERT INTO skip_dir_stack (job_id, file) VALUES (?1, ?2)",
-            (
-                skip_dir_stack_entry.job_id,
-                skip_dir_stack_entry.file.to_string_lossy(),
-            ),
-        ) {
-            Ok(_) => {
+        self.conn
+            .prepare_cached("INSERT INTO skip_dir_stack (job_id, file) VALUES (?1, ?2)")
+            .and_then(|mut stmt| {
+                stmt.execute((
+                    skip_dir_stack_entry.job_id,
+                    skip_dir_stack_entry.file.to_string_lossy(),
+                ))
+            })
+            .map(|_| {
                 let last_id = self.conn.last_insert_rowid();
 
                 skip_dir_stack_entry.id = last_id;
 
                 last_id
-            }
-            Err(_) => 0,
-        }
+            })
+            .unwrap_or(0)
     }
 
     pub fn pop_skip_dir_stack(&self, skip_dir_stack_id: i64) {
-        let _ = self.conn.execute(
-            "DELETE FROM skip_dir_stack WHERE id = ?1",
-            [skip_dir_stack_id],
-        );
+        if let Ok(mut stmt) = self
+            .conn
+            .prepare_cached("DELETE FROM skip_dir_stack WHERE id = ?1")
+        {
+            let _ = stmt.execute([skip_dir_stack_id]);
+        }
     }
 
     pub fn get_replace_first_path(&self, job_id: i64) -> Option<bool> {

@@ -2,6 +2,7 @@ use std::{
     cell::RefCell,
     cmp::max,
     fs,
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     rc::Rc,
     time::SystemTime,
@@ -26,7 +27,7 @@ use crate::{
     config::Config,
     dlg_error::{DialogType, DlgError},
     fm::{
-        archive_mounter::{self, ArchiveMounterCommand},
+        archive_mounter::{self, ArchiveEntry, ArchiveMounterCommand},
         bookmarks::Bookmarks,
         command_bar::{
             cmdbar::{CmdBar, CmdBarType},
@@ -34,7 +35,7 @@ use crate::{
             leader::Leader,
         },
         cp_mv_rm::{
-            database::{DataBase, OnConflict},
+            database::{DBEntriesEntry, DBJobOperation, DataBase, OnConflict},
             dlg_cp_mv::{DlgCpMv, DlgCpMvType},
             dlg_cp_mv_progress::DlgCpMvProgress,
             dlg_dirscan::{DirscanType, DlgDirscan},
@@ -642,6 +643,34 @@ impl App {
             PubSub::Rm(cwd, entries) => {
                 // TODO: Unmount all the archives referenced by entries
 
+                let archive_dirs = match &self.archive_mounter_command_tx {
+                    Some(command_tx) => archive_mounter::get_archive_dirs(command_tx),
+                    None => Vec::new(),
+                };
+
+                let archives: Vec<PathBuf> = archive_dirs
+                    .iter()
+                    .map(|archive_dir| archive_dir.archive_file.clone())
+                    .collect();
+
+                let archive_cwd = archive_mounter::archive_path_map(cwd, &archive_dirs);
+                let mut db_entries = self.db_entries_from_entries(entries, &archive_dirs);
+                let job_id = self
+                    .db_file
+                    .as_deref()
+                    .and_then(|db_file| DataBase::new(db_file).ok())
+                    .map(|mut db| {
+                        db.new_job(
+                            DBJobOperation::Rm,
+                            &archive_cwd,
+                            &mut db_entries,
+                            None,
+                            None,
+                            &archives,
+                        )
+                    })
+                    .unwrap_or(0);
+
                 self.dialog = Some(Box::new(DlgDirscan::new(
                     &self.config,
                     self.pubsub_tx.clone(),
@@ -774,6 +803,39 @@ impl App {
                 }
 
                 if do_dirscan {
+                    let operation = match dlg_cp_mv_type {
+                        DlgCpMvType::Cp => DBJobOperation::Cp,
+                        DlgCpMvType::Mv => DBJobOperation::Mv,
+                    };
+
+                    let archive_dirs = match &self.archive_mounter_command_tx {
+                        Some(command_tx) => archive_mounter::get_archive_dirs(command_tx),
+                        None => Vec::new(),
+                    };
+
+                    let archives: Vec<PathBuf> = archive_dirs
+                        .iter()
+                        .map(|archive_dir| archive_dir.archive_file.clone())
+                        .collect();
+
+                    let archive_cwd = archive_mounter::archive_path_map(cwd, &archive_dirs);
+                    let mut db_entries = self.db_entries_from_entries(entries, &archive_dirs);
+                    let job_id = self
+                        .db_file
+                        .as_deref()
+                        .and_then(|db_file| DataBase::new(db_file).ok())
+                        .map(|mut db| {
+                            db.new_job(
+                                operation,
+                                &archive_cwd,
+                                &mut db_entries,
+                                Some(&archive_dest),
+                                Some(*on_conflict),
+                                &archives,
+                            )
+                        })
+                        .unwrap_or(0);
+
                     let dirscan_type = match dlg_cp_mv_type {
                         DlgCpMvType::Cp => DirscanType::Cp(archive_dest, *on_conflict),
                         DlgCpMvType::Mv => DirscanType::Mv(archive_dest, *on_conflict),
@@ -973,6 +1035,27 @@ impl App {
         ];
 
         template::substitute(s, mapping, '%')
+    }
+
+    fn db_entries_from_entries(
+        &self,
+        entries: &[Entry],
+        archive_dirs: &[ArchiveEntry],
+    ) -> Vec<DBEntriesEntry> {
+        entries
+            .iter()
+            .map(|entry| DBEntriesEntry {
+                id: 0,
+                job_id: 0,
+                file: archive_mounter::archive_parent_map(&entry.file, archive_dirs),
+                is_file: entry.lstat.is_file(),
+                is_dir: entry.lstat.is_dir(),
+                is_symlink: entry.lstat.is_symlink(),
+                size: entry.lstat.len(),
+                uid: entry.lstat.uid(),
+                gid: entry.lstat.gid(),
+            })
+            .collect()
     }
 }
 
