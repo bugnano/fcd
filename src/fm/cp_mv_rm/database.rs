@@ -1,7 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    process, thread,
+    thread,
 };
 
 use anyhow::{bail, Result};
@@ -170,6 +170,20 @@ pub struct DBSkipDirEntry {
     pub file: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+pub struct DBJobEntry {
+    pub id: i64,
+    pub pid: i64,
+    pub operation: DBJobOperation,
+    pub cwd: PathBuf,
+    pub entries: Vec<DBEntriesEntry>,
+    pub dest: Option<PathBuf>,
+    pub on_conflict: Option<OnConflict>,
+    pub archives: Vec<PathBuf>,
+    pub replace_first_path: Option<bool>,
+    pub status: DBJobStatus,
+}
+
 #[derive(Debug)]
 pub struct DataBase {
     conn: Connection,
@@ -231,15 +245,7 @@ impl DataBase {
         Ok(())
     }
 
-    pub fn new_job<T: AsRef<Path>>(
-        &mut self,
-        operation: DBJobOperation,
-        cwd: &Path,
-        entries: &mut [DBEntriesEntry],
-        dest: Option<&Path>,
-        on_conflict: Option<OnConflict>,
-        archives: &[T],
-    ) -> i64 {
+    pub fn new_job(&mut self, &mut job: DBJobEntry) -> i64 {
         match self.conn.transaction() {
             Ok(tx) => {
                 let job_id = match tx.execute(
@@ -259,12 +265,12 @@ impl DataBase {
                         ?6
                     )",
                     (
-                        process::id(),
-                        operation,
-                        cwd.to_string_lossy(),
-                        dest.map(|x| x.to_string_lossy()),
-                        on_conflict,
-                        DBJobStatus::Dirscan,
+                        job.pid,
+                        job.operation,
+                        job.cwd.to_string_lossy(),
+                        job.dest.map(|x| x.to_string_lossy()),
+                        job.on_conflict,
+                        job.status,
                     ),
                 ) {
                     Ok(_) => tx.last_insert_rowid(),
@@ -296,7 +302,7 @@ impl DataBase {
                         return 0;
                     };
 
-                    for entry in entries.iter_mut() {
+                    for entry in job.entries.iter_mut() {
                         match stmt.execute((
                             job_id,
                             entry.file.to_string_lossy(),
@@ -325,7 +331,7 @@ impl DataBase {
                         return 0;
                     };
 
-                    for archive in archives.iter() {
+                    for archive in job.archives.iter() {
                         if let Err(_) = stmt.execute((job_id, archive.as_ref().to_string_lossy())) {
                             return 0;
                         }
@@ -336,10 +342,96 @@ impl DataBase {
                     return 0;
                 }
 
+                job.id = job_id;
+
                 job_id
             }
             Err(_) => 0,
         }
+    }
+
+    pub fn get_jobs(&self) -> Vec<DBJobEntry> {
+        let mut jobs = self
+            .conn
+            .prepare(
+                "SELECT id,
+                        pid,
+                        operation,
+                        cwd,
+                        dest,
+                        on_conflict,
+                        replace_first_path,
+                        status,
+                FROM jobs
+                ORDER BY id",
+            )
+            .and_then(|mut stmt| {
+                stmt.query_map([], |row| {
+                    Ok(DBJobEntry {
+                        id: row.get(0)?,
+                        pid: row.get(1)?,
+                        operation: row.get(2)?,
+                        cwd: PathBuf::from(row.get::<usize, String>(3)?),
+                        entries: Vec::new(),
+                        dest: PathBuf::from(row.get::<usize, String>(4)?),
+                        on_conflict: row.get(5)?,
+                        archives: Vec::new(),
+                        replace_first_path: row.get(6)?,
+                        status: row.get(7)?,
+                    })
+                })
+                .and_then(|rows| rows.collect())
+            })
+            .unwrap_or_default();
+
+        if let Ok(mut stmt) = self.conn.prepare(
+            "SELECT id,
+                    file,
+                    is_file,
+                    is_dir,
+                    is_symlink,
+                    size,
+                    uid,
+                    gid
+            FROM entries
+            WHERE job_id = ?1
+            ORDER BY id",
+        ) {
+            for job in jobs.iter_mut() {
+                job.entries = stmt
+                    .query_map([job.id], |row| {
+                        Ok(DBEntriesEntry {
+                            id: row.get(0)?,
+                            job_id: job.id,
+                            file: PathBuf::from(row.get::<usize, String>(1)?),
+                            is_file: row.get(2)?,
+                            is_dir: row.get(3)?,
+                            is_symlink: row.get(4)?,
+                            size: row.get(5)?,
+                            uid: row.get(6)?,
+                            gid: row.get(7)?,
+                        })
+                    })
+                    .and_then(|rows| rows.collect())
+                    .unwrap_or_default();
+            }
+        }
+
+        if let Ok(mut stmt) = self.conn.prepare(
+            "SELECT archive,
+            FROM archives
+            WHERE job_id = ?1
+            ORDER BY id",
+        ) {
+            for job in jobs.iter_mut() {
+                job.archives = stmt
+                    .query_map([job.id], |row| PathBuf::from(row.get::<usize, String>(0)?))
+                    .and_then(|rows| rows.collect())
+                    .unwrap_or_default();
+            }
+        }
+
+        jobs
     }
 
     pub fn delete_job(&self, job_id: i64) {
@@ -621,22 +713,6 @@ impl DataBase {
     }
 
     /*
-        def get_jobs(self):
-            jobs = []
-
-            if self.conn is None:
-                return jobs
-
-            try:
-                with self.conn:
-                    c = self.conn.execute("SELECT * FROM jobs")
-                    jobs.extend(c.fetchall())
-                    c.close()
-            except sqlite3.OperationalError:
-                pass
-
-            return jobs
-
         def get_file_list(self, job_id):
             file_list = []
 

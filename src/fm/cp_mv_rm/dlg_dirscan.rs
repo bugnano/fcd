@@ -23,9 +23,9 @@ use crate::{
     config::Config,
     fm::{
         app::human_readable_size,
-        archive_mounter::{self, ArchiveMounterCommand},
+        archive_mounter::{self, ArchiveEntry, ArchiveMounterCommand},
         cp_mv_rm::{
-            database::{DBEntriesEntry, DataBase, OnConflict},
+            database::{DBJobEntry, DataBase},
             dirscan::{dirscan, DirScanEvent, DirScanInfo, DirScanResult, ReadMetadata},
         },
         entry::Entry,
@@ -34,20 +34,12 @@ use crate::{
     widgets::button::Button,
 };
 
-#[derive(Debug, Clone)]
-pub enum DirscanType {
-    Cp(PathBuf, OnConflict),
-    Mv(PathBuf, OnConflict),
-    Rm,
-}
-
 #[derive(Debug)]
 pub struct DlgDirscan {
     config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
-    cwd: PathBuf,
-    entries: Vec<Entry>,
-    dirscan_type: DirscanType,
+    job: DBJobEntry,
+    archive_dirs: Vec<ArchiveEntry>,
     ev_tx: Sender<DirScanEvent>,
     info_rx: Receiver<DirScanInfo>,
     result_rx: Receiver<DirScanResult>,
@@ -59,35 +51,25 @@ pub struct DlgDirscan {
     files: usize,
     total_size: Option<u64>,
     focus_position: usize,
-    archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
+    db_file: Option<PathBuf>,
 }
 
 impl DlgDirscan {
     pub fn new(
         config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
-        cwd: &Path,
-        entries: &[Entry],
-        dirscan_type: DirscanType,
-        archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
+        job: &DBJobEntry,
+        archive_dirs: &[ArchiveEntry],
+        db_file: Option<&Path>,
     ) -> DlgDirscan {
         let (ev_tx, ev_rx) = crossbeam_channel::unbounded();
         let (info_tx, info_rx) = crossbeam_channel::unbounded();
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
-        let current = match &archive_mounter_command_tx {
-            Some(command_tx) => archive_mounter::archive_path(command_tx, cwd)
-                .to_string_lossy()
-                .to_string(),
-            None => cwd.to_string_lossy().to_string(),
-        };
-
         let mut dlg = DlgDirscan {
             config: Rc::clone(config),
             pubsub_tx,
-            cwd: PathBuf::from(cwd),
-            entries: Vec::from(entries),
-            dirscan_type,
+            job: job.clone(),
             ev_tx,
             info_rx,
             result_rx,
@@ -131,40 +113,42 @@ impl DlgDirscan {
                     .fg(config.dialog.title_fg)
                     .bg(config.dialog.bg),
             ),
-            current,
+            current: job.cwd.clone(),
             files: 0,
             total_size: None,
             focus_position: 0,
             archive_mounter_command_tx,
+            db_file: db_file.clone(),
         };
 
-        dlg.dirscan_thread(cwd, ev_rx, info_tx, result_tx);
+        dlg.dirscan_thread(ev_rx, info_tx, result_tx);
 
         dlg
     }
 
     fn dirscan_thread(
         &mut self,
-        cwd: &Path,
         ev_rx: Receiver<DirScanEvent>,
         info_tx: Sender<DirScanInfo>,
         result_tx: Sender<DirScanResult>,
     ) {
-        let entries = self.entries.clone();
+        let cwd = self.job.cwd.clone();
+        let entries = self.job.entries.clone();
+        let archive_dirs = self.archive_dirs.clone();
 
-        let read_metadata = match &self.dirscan_type {
-            DirscanType::Cp(_dest, _on_conflict) => ReadMetadata::Yes,
-            DirscanType::Mv(_dest, _on_conflict) => ReadMetadata::Yes,
-            DirscanType::Rm => ReadMetadata::No,
+        let read_metadata = match &self.job.operation {
+            DBJobOperation::Cp => ReadMetadata::Yes,
+            DBJobOperation::Mv => ReadMetadata::Yes,
+            DBJobOperation::Rm => ReadMetadata::No,
         };
 
         let pubsub_tx = self.pubsub_tx.clone();
-        let cwd = PathBuf::from(cwd);
 
         thread::spawn(move || {
             let result = dirscan(
-                &entries,
                 &cwd,
+                &entries,
+                &archive_dirs,
                 read_metadata,
                 ev_rx,
                 info_tx,
@@ -173,13 +157,6 @@ impl DlgDirscan {
             let _ = result_tx.send(result);
             let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
         });
-    }
-
-    fn archive_path(&self, file: &Path) -> PathBuf {
-        match &self.archive_mounter_command_tx {
-            Some(command_tx) => archive_mounter::archive_path(command_tx, file),
-            None => PathBuf::from(file),
-        }
     }
 }
 
@@ -228,10 +205,7 @@ impl Component for DlgDirscan {
         match event {
             PubSub::ComponentThreadEvent => {
                 if let Ok(info) = self.info_rx.try_recv() {
-                    self.current = self
-                        .archive_path(&info.current)
-                        .to_string_lossy()
-                        .to_string();
+                    self.current = info.current.to_string_lossy().to_string();
                     self.files = info.files;
                     self.total_size = info.bytes;
                 }

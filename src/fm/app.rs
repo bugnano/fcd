@@ -4,6 +4,7 @@ use std::{
     fs,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
+    process,
     rc::Rc,
     time::SystemTime,
 };
@@ -35,10 +36,12 @@ use crate::{
             leader::Leader,
         },
         cp_mv_rm::{
-            database::{DBEntriesEntry, DBJobOperation, DataBase, OnConflict},
+            database::{
+                DBEntriesEntry, DBJobEntry, DBJobOperation, DBJobStatus, DataBase, OnConflict,
+            },
             dlg_cp_mv::{DlgCpMv, DlgCpMvType},
             dlg_cp_mv_progress::DlgCpMvProgress,
-            dlg_dirscan::{DirscanType, DlgDirscan},
+            dlg_dirscan::DlgDirscan,
             dlg_question::DlgQuestion,
             dlg_rm_progress::DlgRmProgress,
         },
@@ -648,36 +651,35 @@ impl App {
                     None => Vec::new(),
                 };
 
-                let archives: Vec<PathBuf> = archive_dirs
-                    .iter()
-                    .map(|archive_dir| archive_dir.archive_file.clone())
-                    .collect();
+                let mut job = DBJobEntry {
+                    id: 0,
+                    pid: process::id(),
+                    operation: DBJobOperation::Rm,
+                    cwd: archive_mounter::archive_path_map(cwd, &archive_dirs),
+                    entries: self.db_entries_from_entries(entries, &archive_dirs),
+                    dest: None,
+                    on_conflict: None,
+                    archives: archive_dirs
+                        .iter()
+                        .map(|archive_dir| archive_dir.archive_file.clone())
+                        .collect(),
+                    replace_first_path: None,
+                    status: DBJobStatus::Dirscan,
+                };
 
-                let archive_cwd = archive_mounter::archive_path_map(cwd, &archive_dirs);
-                let mut db_entries = self.db_entries_from_entries(entries, &archive_dirs);
                 let job_id = self
                     .db_file
                     .as_deref()
                     .and_then(|db_file| DataBase::new(db_file).ok())
-                    .map(|mut db| {
-                        db.new_job(
-                            DBJobOperation::Rm,
-                            &archive_cwd,
-                            &mut db_entries,
-                            None,
-                            None,
-                            &archives,
-                        )
-                    })
+                    .map(|mut db| db.new_job(&mut job))
                     .unwrap_or(0);
 
                 self.dialog = Some(Box::new(DlgDirscan::new(
                     &self.config,
                     self.pubsub_tx.clone(),
-                    &cwd,
-                    entries,
-                    DirscanType::Rm,
-                    self.archive_mounter_command_tx.clone(),
+                    &job,
+                    &archive_dirs,
+                    self.db_file.as_deref(),
                 )));
             }
             PubSub::DoRm(cwd, entries, dirscan_result) => {
@@ -803,51 +805,43 @@ impl App {
                 }
 
                 if do_dirscan {
-                    let operation = match dlg_cp_mv_type {
-                        DlgCpMvType::Cp => DBJobOperation::Cp,
-                        DlgCpMvType::Mv => DBJobOperation::Mv,
-                    };
-
                     let archive_dirs = match &self.archive_mounter_command_tx {
                         Some(command_tx) => archive_mounter::get_archive_dirs(command_tx),
                         None => Vec::new(),
                     };
 
-                    let archives: Vec<PathBuf> = archive_dirs
-                        .iter()
-                        .map(|archive_dir| archive_dir.archive_file.clone())
-                        .collect();
+                    let mut job = DBJobEntry {
+                        id: 0,
+                        pid: process::id(),
+                        operation: match dlg_cp_mv_type {
+                            DlgCpMvType::Cp => DBJobOperation::Cp,
+                            DlgCpMvType::Mv => DBJobOperation::Mv,
+                        },
+                        cwd: archive_mounter::archive_path_map(cwd, &archive_dirs),
+                        entries: self.db_entries_from_entries(entries, &archive_dirs),
+                        dest: Some(&archive_dest),
+                        on_conflict: Some(*on_conflict),
+                        archives: archive_dirs
+                            .iter()
+                            .map(|archive_dir| archive_dir.archive_file.clone())
+                            .collect(),
+                        replace_first_path: None,
+                        status: DBJobStatus::Dirscan,
+                    };
 
-                    let archive_cwd = archive_mounter::archive_path_map(cwd, &archive_dirs);
-                    let mut db_entries = self.db_entries_from_entries(entries, &archive_dirs);
                     let job_id = self
                         .db_file
                         .as_deref()
                         .and_then(|db_file| DataBase::new(db_file).ok())
-                        .map(|mut db| {
-                            db.new_job(
-                                operation,
-                                &archive_cwd,
-                                &mut db_entries,
-                                Some(&archive_dest),
-                                Some(*on_conflict),
-                                &archives,
-                            )
-                        })
+                        .map(|mut db| db.new_job(&mut job))
                         .unwrap_or(0);
-
-                    let dirscan_type = match dlg_cp_mv_type {
-                        DlgCpMvType::Cp => DirscanType::Cp(archive_dest, *on_conflict),
-                        DlgCpMvType::Mv => DirscanType::Mv(archive_dest, *on_conflict),
-                    };
 
                     self.dialog = Some(Box::new(DlgDirscan::new(
                         &self.config,
                         self.pubsub_tx.clone(),
-                        cwd,
-                        entries,
-                        dirscan_type,
-                        self.archive_mounter_command_tx.clone(),
+                        &job,
+                        &archive_dirs,
+                        self.db_file.as_deref(),
                     )));
                 }
             }
