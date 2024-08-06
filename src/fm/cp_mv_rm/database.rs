@@ -24,6 +24,18 @@ pub enum OnConflict {
     RenameCopy,
 }
 
+impl FromSql for OnConflict {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        match value {
+            ValueRef::Text(b"OVERWRITE") => Ok(OnConflict::Overwrite),
+            ValueRef::Text(b"SKIP") => Ok(OnConflict::Skip),
+            ValueRef::Text(b"RENAME_EXISTING") => Ok(OnConflict::RenameExisting),
+            ValueRef::Text(b"RENAME_COPY") => Ok(OnConflict::RenameCopy),
+            _ => Err(FromSqlError::InvalidType),
+        }
+    }
+}
+
 impl ToSql for OnConflict {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
         Ok(ToSqlOutput::Borrowed(ValueRef::Text(match &self {
@@ -40,6 +52,17 @@ pub enum DBJobOperation {
     Cp,
     Mv,
     Rm,
+}
+
+impl FromSql for DBJobOperation {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        match value {
+            ValueRef::Text(b"CP") => Ok(DBJobOperation::Cp),
+            ValueRef::Text(b"MV") => Ok(DBJobOperation::Mv),
+            ValueRef::Text(b"RM") => Ok(DBJobOperation::Rm),
+            _ => Err(FromSqlError::InvalidType),
+        }
+    }
 }
 
 impl ToSql for DBJobOperation {
@@ -59,6 +82,19 @@ pub enum DBJobStatus {
     AbortedDirscan, // TODO -- Not sure if useful
     Aborted,
     Done,
+}
+
+impl FromSql for DBJobStatus {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        match value {
+            ValueRef::Text(b"DIRSCAN") => Ok(DBJobStatus::Dirscan),
+            ValueRef::Text(b"IN_PROGRESS") => Ok(DBJobStatus::InProgress),
+            ValueRef::Text(b"ABORTED_DIRSCAN") => Ok(DBJobStatus::AbortedDirscan),
+            ValueRef::Text(b"ABORTED") => Ok(DBJobStatus::Aborted),
+            ValueRef::Text(b"DONE") => Ok(DBJobStatus::Done),
+            _ => Err(FromSqlError::InvalidType),
+        }
+    }
 }
 
 impl ToSql for DBJobStatus {
@@ -173,7 +209,7 @@ pub struct DBSkipDirEntry {
 #[derive(Debug, Clone)]
 pub struct DBJobEntry {
     pub id: i64,
-    pub pid: i64,
+    pub pid: u32,
     pub operation: DBJobOperation,
     pub cwd: PathBuf,
     pub entries: Vec<DBEntriesEntry>,
@@ -245,7 +281,7 @@ impl DataBase {
         Ok(())
     }
 
-    pub fn new_job(&mut self, &mut job: DBJobEntry) -> i64 {
+    pub fn new_job(&mut self, job: &mut DBJobEntry) -> i64 {
         match self.conn.transaction() {
             Ok(tx) => {
                 let job_id = match tx.execute(
@@ -268,7 +304,7 @@ impl DataBase {
                         job.pid,
                         job.operation,
                         job.cwd.to_string_lossy(),
-                        job.dest.map(|x| x.to_string_lossy()),
+                        job.dest.as_ref().map(|x| x.to_string_lossy()),
                         job.on_conflict,
                         job.status,
                     ),
@@ -332,7 +368,7 @@ impl DataBase {
                     };
 
                     for archive in job.archives.iter() {
-                        if let Err(_) = stmt.execute((job_id, archive.as_ref().to_string_lossy())) {
+                        if let Err(_) = stmt.execute((job_id, archive.to_string_lossy())) {
                             return 0;
                         }
                     }
@@ -351,7 +387,7 @@ impl DataBase {
     }
 
     pub fn get_jobs(&self) -> Vec<DBJobEntry> {
-        let mut jobs = self
+        let mut jobs: Vec<DBJobEntry> = self
             .conn
             .prepare(
                 "SELECT id,
@@ -373,7 +409,7 @@ impl DataBase {
                         operation: row.get(2)?,
                         cwd: PathBuf::from(row.get::<usize, String>(3)?),
                         entries: Vec::new(),
-                        dest: PathBuf::from(row.get::<usize, String>(4)?),
+                        dest: row.get::<usize, Option<String>>(4)?.map(PathBuf::from),
                         on_conflict: row.get(5)?,
                         archives: Vec::new(),
                         replace_first_path: row.get(6)?,
@@ -425,7 +461,9 @@ impl DataBase {
         ) {
             for job in jobs.iter_mut() {
                 job.archives = stmt
-                    .query_map([job.id], |row| PathBuf::from(row.get::<usize, String>(0)?))
+                    .query_map([job.id], |row| {
+                        Ok(PathBuf::from(row.get::<usize, String>(0)?))
+                    })
                     .and_then(|rows| rows.collect())
                     .unwrap_or_default();
             }

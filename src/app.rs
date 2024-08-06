@@ -11,8 +11,7 @@ use signal_hook::iterator::Signals;
 use crate::{
     fm::{
         cp_mv_rm::{
-            database::{DBJobEntry, OnConflict},
-            dirscan::DirScanResult,
+            database::{DBFileEntry, DBJobEntry, OnConflict},
             dlg_cp_mv::DlgCpMvType,
         },
         entry::{Entry, SortBy, SortOrder},
@@ -97,9 +96,9 @@ pub enum PubSub {
     ArchiveMountCancel(PathBuf),
 
     // Dialog DirScan events
-    DoRm(DBJobEntry, DirScanResult),
-    DoCp(DBJobEntry, DirScanResult),
-    DoMv(DBJobEntry, DirScanResult),
+    DoRm(DBJobEntry, Vec<DBFileEntry>),
+    DoCp(DBJobEntry, Vec<DBFileEntry>),
+    DoMv(DBJobEntry, Vec<DBFileEntry>),
 
     // Dialog CpMv events
     DoDirscan(PathBuf, Vec<Entry>, String, OnConflict, DlgCpMvType),

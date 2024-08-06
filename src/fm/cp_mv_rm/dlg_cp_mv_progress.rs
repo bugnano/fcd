@@ -25,8 +25,8 @@ use crate::{
         app::human_readable_size,
         archive_mounter::{self, ArchiveMounterCommand},
         cp_mv_rm::{
-            database::OnConflict,
-            dirscan::{dirscan, DirScanEvent, DirScanInfo, DirScanResult, ReadMetadata},
+            database::{DBFileEntry, DBJobEntry, OnConflict},
+            dirscan::{dirscan, DirScanEvent, DirScanInfo, ReadMetadata},
             dlg_cp_mv::DlgCpMvType,
         },
         entry::Entry,
@@ -39,7 +39,8 @@ use crate::{
 pub struct DlgCpMvProgress {
     config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
-    dirscan_result: DirScanResult,
+    job: DBJobEntry,
+    files: Vec<DBFileEntry>,
     dlg_cp_mv_type: DlgCpMvType,
     btn_suspend: Button,
     btn_skip: Button,
@@ -49,7 +50,7 @@ pub struct DlgCpMvProgress {
     target: String,
     cur_size: u64,
     cur_bytes: u64,
-    files: usize,
+    num_files: usize,
     bytes: u64,
     is_suspended: bool,
     focus_position: usize,
@@ -60,18 +61,16 @@ impl DlgCpMvProgress {
     pub fn new(
         config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
-        cwd: &Path,
-        entries: &[Entry],
-        dirscan_result: &DirScanResult,
-        dest: &Path,
-        on_conflict: OnConflict,
+        job: &DBJobEntry,
+        files: &[DBFileEntry],
         dlg_cp_mv_type: DlgCpMvType,
         archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
     ) -> DlgCpMvProgress {
         let mut dlg = DlgCpMvProgress {
             config: Rc::clone(config),
             pubsub_tx,
-            dirscan_result: dirscan_result.clone(),
+            job: job.clone(),
+            files: Vec::from(files),
             dlg_cp_mv_type,
             btn_suspend: Button::new(
                 "Suspend ",
@@ -117,7 +116,7 @@ impl DlgCpMvProgress {
             target: String::from(""),
             cur_size: 1,
             cur_bytes: 0,
-            files: 0,
+            num_files: 0,
             bytes: 0,
             is_suspended: false,
             focus_position: 0,
@@ -214,7 +213,7 @@ impl Component for DlgCpMvProgress {
         //                 .archive_path(&info.current)
         //                 .to_string_lossy()
         //                 .to_string();
-        //             self.files = info.files;
+        //             self.num_files = info.files;
         //             self.total_size = info.bytes;
         //         }
         //         if let Ok(result) = self.result_rx.try_recv() {
@@ -401,7 +400,7 @@ impl Component for DlgCpMvProgress {
             ])
             .split(middle_area[0]);
 
-        let ratio = (self.files as f64) / (self.dirscan_result.entries.len() as f64);
+        let ratio = (self.num_files as f64) / (self.files.len() as f64);
         let gauge = Gauge::default()
             .gauge_style(
                 Style::default()
@@ -417,11 +416,11 @@ impl Component for DlgCpMvProgress {
         let gauge_left = Paragraph::new(Span::raw("["));
         let gauge_right = Paragraph::new(Span::raw("]"));
 
-        let files = Paragraph::new(Span::raw(tilde_layout(
+        let num_files = Paragraph::new(Span::raw(tilde_layout(
             &format!(
                 "Files processed: {}/{}",
-                self.files.separate_with_commas(),
-                self.dirscan_result.entries.len().separate_with_commas()
+                self.num_files.separate_with_commas(),
+                self.files.len().separate_with_commas()
             ),
             middle_area[1].width as usize,
         )));
@@ -435,7 +434,7 @@ impl Component for DlgCpMvProgress {
         f.render_widget(gauge_left, gauge_area[0]);
         f.render_widget(gauge, gauge_area[1]);
         f.render_widget(gauge_right, gauge_area[2]);
-        f.render_widget(files, middle_area[1]);
+        f.render_widget(num_files, middle_area[1]);
         f.render_widget(time, middle_area[2]);
 
         // Lower section

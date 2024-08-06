@@ -24,7 +24,10 @@ use crate::{
     fm::{
         app::human_readable_size,
         archive_mounter::{self, ArchiveMounterCommand},
-        cp_mv_rm::dirscan::{dirscan, DirScanEvent, DirScanInfo, DirScanResult, ReadMetadata},
+        cp_mv_rm::{
+            database::{DBFileEntry, DBJobEntry},
+            dirscan::{dirscan, DirScanEvent, DirScanInfo, ReadMetadata},
+        },
         entry::Entry,
     },
     tilde_layout::tilde_layout,
@@ -35,13 +38,14 @@ use crate::{
 pub struct DlgRmProgress {
     config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
-    dirscan_result: DirScanResult,
+    job: DBJobEntry,
+    files: Vec<DBFileEntry>,
     btn_suspend: Button,
     btn_skip: Button,
     btn_abort: Button,
     btn_no_db: Button,
     current: String,
-    files: usize,
+    num_files: usize,
     is_suspended: bool,
     focus_position: usize,
     archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
@@ -51,15 +55,15 @@ impl DlgRmProgress {
     pub fn new(
         config: &Rc<Config>,
         pubsub_tx: Sender<PubSub>,
-        cwd: &Path,
-        entries: &[Entry],
-        dirscan_result: &DirScanResult,
+        job: &DBJobEntry,
+        files: &[DBFileEntry],
         archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
     ) -> DlgRmProgress {
         let mut dlg = DlgRmProgress {
             config: Rc::clone(config),
             pubsub_tx,
-            dirscan_result: dirscan_result.clone(),
+            job: job.clone(),
+            files: Vec::from(files),
             btn_suspend: Button::new(
                 "Suspend ",
                 &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
@@ -101,7 +105,7 @@ impl DlgRmProgress {
                     .bg(config.dialog.bg),
             ),
             current: String::from(""),
-            files: 0,
+            num_files: 0,
             is_suspended: false,
             focus_position: 0,
             archive_mounter_command_tx,
@@ -197,7 +201,7 @@ impl Component for DlgRmProgress {
         //                 .archive_path(&info.current)
         //                 .to_string_lossy()
         //                 .to_string();
-        //             self.files = info.files;
+        //             self.num_files = info.files;
         //             self.total_size = info.bytes;
         //         }
         //         if let Ok(result) = self.result_rx.try_recv() {
@@ -285,8 +289,8 @@ impl Component for DlgRmProgress {
                 Title::from(Span::raw(tilde_layout(
                     &format!(
                         " Total: {}/{} ",
-                        self.files.separate_with_commas(),
-                        self.dirscan_result.entries.len().separate_with_commas()
+                        self.num_files.separate_with_commas(),
+                        self.files.len().separate_with_commas()
                     ),
                     sections[0].width as usize,
                 )))
@@ -320,7 +324,7 @@ impl Component for DlgRmProgress {
             ])
             .split(middle_area[0]);
 
-        let ratio = (self.files as f64) / (self.dirscan_result.entries.len() as f64);
+        let ratio = (self.num_files as f64) / (self.files.len() as f64);
         let gauge = Gauge::default()
             .gauge_style(
                 Style::default()
@@ -336,11 +340,11 @@ impl Component for DlgRmProgress {
         let gauge_left = Paragraph::new(Span::raw("["));
         let gauge_right = Paragraph::new(Span::raw("]"));
 
-        let files = Paragraph::new(Span::raw(tilde_layout(
+        let num_files = Paragraph::new(Span::raw(tilde_layout(
             &format!(
                 "Files processed: {}/{}",
-                self.files.separate_with_commas(),
-                self.dirscan_result.entries.len().separate_with_commas()
+                self.num_files.separate_with_commas(),
+                self.files.len().separate_with_commas()
             ),
             middle_area[1].width as usize,
         )));
@@ -353,7 +357,7 @@ impl Component for DlgRmProgress {
         f.render_widget(gauge_left, gauge_area[0]);
         f.render_widget(gauge, gauge_area[1]);
         f.render_widget(gauge_right, gauge_area[2]);
-        f.render_widget(files, middle_area[1]);
+        f.render_widget(num_files, middle_area[1]);
         f.render_widget(time, middle_area[2]);
 
         // Lower section

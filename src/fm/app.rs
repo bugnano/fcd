@@ -682,13 +682,12 @@ impl App {
                     self.db_file.as_deref(),
                 )));
             }
-            PubSub::DoRm(cwd, entries, dirscan_result) => {
+            PubSub::DoRm(job, files) => {
                 self.dialog = Some(Box::new(DlgRmProgress::new(
                     &self.config,
                     self.pubsub_tx.clone(),
-                    &cwd,
-                    entries,
-                    dirscan_result,
+                    &job,
+                    files,
                     self.archive_mounter_command_tx.clone(),
                 )));
             }
@@ -819,7 +818,7 @@ impl App {
                         },
                         cwd: archive_mounter::archive_path_map(cwd, &archive_dirs),
                         entries: self.db_entries_from_entries(entries, &archive_dirs),
-                        dest: Some(&archive_dest),
+                        dest: Some(archive_dest.clone()),
                         on_conflict: Some(*on_conflict),
                         archives: archive_dirs
                             .iter()
@@ -845,26 +844,18 @@ impl App {
                     )));
                 }
             }
-            PubSub::DoCp(cwd, entries, dest, on_conflict, dirscan_result)
-            | PubSub::DoMv(cwd, entries, dest, on_conflict, dirscan_result) => {
+            PubSub::DoCp(job, files) | PubSub::DoMv(job, files) => {
                 let dlg_cp_mv_type = match pubsub {
-                    PubSub::DoCp(_cwd, _entries, _dest, _on_conflict, _dirscan_result) => {
-                        DlgCpMvType::Cp
-                    }
-                    PubSub::DoMv(_cwd, _entries, _dest, _on_conflict, _dirscan_result) => {
-                        DlgCpMvType::Mv
-                    }
+                    PubSub::DoCp(_job, _files) => DlgCpMvType::Cp,
+                    PubSub::DoMv(_job, _files) => DlgCpMvType::Mv,
                     _ => unreachable!(),
                 };
 
                 self.dialog = Some(Box::new(DlgCpMvProgress::new(
                     &self.config,
                     self.pubsub_tx.clone(),
-                    &cwd,
-                    entries,
-                    dirscan_result,
-                    dest,
-                    *on_conflict,
+                    &job,
+                    files,
                     dlg_cp_mv_type,
                     self.archive_mounter_command_tx.clone(),
                 )));
