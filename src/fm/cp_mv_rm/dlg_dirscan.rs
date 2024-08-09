@@ -25,7 +25,7 @@ use crate::{
         app::human_readable_size,
         archive_mounter::{self, ArchiveEntry, ArchiveMounterCommand},
         cp_mv_rm::{
-            database::{DBFileEntry, DBJobEntry, DBJobOperation, DataBase},
+            database::{DBFileEntry, DBJobEntry, DBJobOperation, DBJobStatus, DataBase},
             dirscan::{dirscan, DirScanEvent, DirScanInfo, ReadMetadata},
         },
         entry::Entry,
@@ -47,10 +47,11 @@ pub struct DlgDirscan {
     btn_skip: Button,
     btn_abort: Button,
     current: String,
-    files: usize,
+    num_files: usize,
     total_size: Option<u64>,
     focus_position: usize,
     db_file: Option<PathBuf>,
+    suspend_tx: Option<Sender<()>>,
 }
 
 impl DlgDirscan {
@@ -104,10 +105,11 @@ impl DlgDirscan {
                     .bg(config.dialog.bg),
             ),
             current: job.cwd.to_string_lossy().to_string(),
-            files: 0,
+            num_files: 0,
             total_size: None,
             focus_position: 0,
             db_file: db_file.map(PathBuf::from),
+            suspend_tx: None,
         };
 
         dlg.dirscan_thread(ev_rx, info_tx, result_tx);
@@ -121,7 +123,6 @@ impl DlgDirscan {
         info_tx: Sender<DirScanInfo>,
         result_tx: Sender<Option<Vec<DBFileEntry>>>,
     ) {
-        let job_id = self.job.id;
         let cwd = self.job.cwd.clone();
         let entries = self.job.entries.clone();
         let archive_dirs = self.archive_dirs.clone();
@@ -136,7 +137,6 @@ impl DlgDirscan {
 
         thread::spawn(move || {
             let result = dirscan(
-                job_id,
                 &cwd,
                 &entries,
                 &archive_dirs,
@@ -149,6 +149,13 @@ impl DlgDirscan {
             let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
         });
     }
+
+    fn delete_job(&self) {
+        self.db_file
+            .as_deref()
+            .and_then(|db_file| DataBase::new(db_file).ok())
+            .map(|mut db| db.delete_job(self.job.id));
+    }
 }
 
 impl Component for DlgDirscan {
@@ -160,11 +167,28 @@ impl Component for DlgDirscan {
                 self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
 
                 let _ = self.ev_tx.send(DirScanEvent::Abort);
+
+                self.delete_job();
             }
             Key::Char('\n') | Key::Char(' ') => match self.focus_position {
-                0 => {
-                    todo!();
-                }
+                0 => match &self.suspend_tx {
+                    Some(suspend_tx) => {
+                        let _ = suspend_tx.send(());
+
+                        self.btn_suspend.set_label("Suspend ");
+
+                        self.suspend_tx = None;
+                    }
+                    None => {
+                        let (suspend_tx, suspend_rx) = crossbeam_channel::unbounded();
+
+                        let _ = self.ev_tx.send(DirScanEvent::Suspend(suspend_rx));
+
+                        self.btn_suspend.set_label("Continue");
+
+                        self.suspend_tx = Some(suspend_tx);
+                    }
+                },
                 1 => {
                     let _ = self.ev_tx.send(DirScanEvent::Skip);
                 }
@@ -172,6 +196,8 @@ impl Component for DlgDirscan {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
 
                     let _ = self.ev_tx.send(DirScanEvent::Abort);
+
+                    self.delete_job();
                 }
                 _ => unreachable!(),
             },
@@ -194,37 +220,39 @@ impl Component for DlgDirscan {
             PubSub::ComponentThreadEvent => {
                 if let Ok(info) = self.info_rx.try_recv() {
                     self.current = info.current.to_string_lossy().to_string();
-                    self.files = info.files;
-                    self.total_size = info.bytes;
+                    self.num_files = info.num_files;
+                    self.total_size = info.total_size;
                 }
 
                 if let Ok(result) = self.result_rx.try_recv() {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
 
-                    match &self.job.operation {
-                        DBJobOperation::Cp => {
-                            self.pubsub_tx
-                                .send(PubSub::DoCp(
-                                    self.job.clone(),
-                                    // TODO: Instead of using unwrap() we should check for None, in which case it means that the operation is aborted
-                                    result.unwrap(),
-                                ))
-                                .unwrap();
-                        }
-                        DBJobOperation::Mv => {
-                            self.pubsub_tx
-                                .send(PubSub::DoMv(
-                                    self.job.clone(),
-                                    // TODO: Instead of using unwrap() we should check for None, in which case it means that the operation is aborted
-                                    result.unwrap(),
-                                ))
-                                .unwrap();
-                        }
-                        DBJobOperation::Rm => {
-                            self.pubsub_tx
-                                // TODO: Instead of using unwrap() we should check for None, in which case it means that the operation is aborted
-                                .send(PubSub::DoRm(self.job.clone(), result.unwrap()))
-                                .unwrap();
+                    // If result is None it means that the operation has been aborted, and the
+                    // DB job has already been deleted, so there would be nothing to do here
+                    if let Some(mut files) = result {
+                        self.db_file
+                            .as_deref()
+                            .and_then(|db_file| DataBase::new(db_file).ok())
+                            .map(|mut db| db.set_file_list(self.job.id, &mut files));
+
+                        self.job.status = DBJobStatus::InProgress;
+
+                        match &self.job.operation {
+                            DBJobOperation::Cp => {
+                                self.pubsub_tx
+                                    .send(PubSub::DoCp(self.job.clone(), files))
+                                    .unwrap();
+                            }
+                            DBJobOperation::Mv => {
+                                self.pubsub_tx
+                                    .send(PubSub::DoMv(self.job.clone(), files))
+                                    .unwrap();
+                            }
+                            DBJobOperation::Rm => {
+                                self.pubsub_tx
+                                    .send(PubSub::DoRm(self.job.clone(), files))
+                                    .unwrap();
+                            }
                         }
                     }
                 }
@@ -302,8 +330,8 @@ impl Component for DlgDirscan {
             &self.current,
             upper_area[0].width as usize,
         )));
-        let files = Paragraph::new(Span::raw(tilde_layout(
-            &format!("Files: {}", self.files.separate_with_commas()),
+        let num_files = Paragraph::new(Span::raw(tilde_layout(
+            &format!("Files: {}", self.num_files.separate_with_commas()),
             upper_area[1].width as usize,
         )));
         let total_size = Paragraph::new(Span::raw(tilde_layout(
@@ -319,7 +347,7 @@ impl Component for DlgDirscan {
 
         f.render_widget(upper_block, sections[0]);
         f.render_widget(current, upper_area[0]);
-        f.render_widget(files, upper_area[1]);
+        f.render_widget(num_files, upper_area[1]);
         f.render_widget(total_size, upper_area[2]);
 
         // Lower section

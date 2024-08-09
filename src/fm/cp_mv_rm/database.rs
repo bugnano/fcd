@@ -79,7 +79,6 @@ impl ToSql for DBJobOperation {
 pub enum DBJobStatus {
     Dirscan, // TODO
     InProgress,
-    AbortedDirscan, // TODO -- Not sure if useful
     Aborted,
     Done,
 }
@@ -89,7 +88,6 @@ impl FromSql for DBJobStatus {
         match value {
             ValueRef::Text(b"DIRSCAN") => Ok(DBJobStatus::Dirscan),
             ValueRef::Text(b"IN_PROGRESS") => Ok(DBJobStatus::InProgress),
-            ValueRef::Text(b"ABORTED_DIRSCAN") => Ok(DBJobStatus::AbortedDirscan),
             ValueRef::Text(b"ABORTED") => Ok(DBJobStatus::Aborted),
             ValueRef::Text(b"DONE") => Ok(DBJobStatus::Done),
             _ => Err(FromSqlError::InvalidType),
@@ -102,7 +100,6 @@ impl ToSql for DBJobStatus {
         Ok(ToSqlOutput::Borrowed(ValueRef::Text(match &self {
             DBJobStatus::Dirscan => b"DIRSCAN",
             DBJobStatus::InProgress => b"IN_PROGRESS",
-            DBJobStatus::AbortedDirscan => b"ABORTED_DIRSCAN",
             DBJobStatus::Aborted => b"ABORTED",
             DBJobStatus::Done => b"DONE",
         })))
@@ -485,6 +482,147 @@ impl DataBase {
         );
     }
 
+    pub fn get_replace_first_path(&self, job_id: i64) -> Option<bool> {
+        self.conn
+            .query_row(
+                "SELECT replace_first_path
+                FROM jobs
+                WHERE id = ?1",
+                [job_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(None)
+    }
+
+    pub fn set_replace_first_path(&self, job_id: i64, replace_first_path: bool) {
+        let _ = self.conn.execute(
+            "UPDATE jobs SET replace_first_path = ?1 WHERE id = ?2",
+            (replace_first_path, job_id),
+        );
+    }
+
+    pub fn get_file_list(&self, job_id: i64) -> Vec<DBFileEntry> {
+        self.conn
+            .prepare(
+                "SELECT id,
+                        file,
+                        is_file,
+                        is_dir,
+                        is_symlink,
+                        size,
+                        uid,
+                        gid,
+                        status,
+                        message,
+                        target_is_dir,
+                        target_is_symlink,
+                        cur_target
+                FROM files
+                WHERE job_id = ?1
+                ORDER BY id",
+            )
+            .and_then(|mut stmt| {
+                stmt.query_map([job_id], |row| {
+                    Ok(DBFileEntry {
+                        id: row.get(0)?,
+                        job_id,
+                        file: PathBuf::from(row.get::<usize, String>(1)?),
+                        is_file: row.get(2)?,
+                        is_dir: row.get(3)?,
+                        is_symlink: row.get(4)?,
+                        size: row.get(5)?,
+                        uid: row.get(6)?,
+                        gid: row.get(7)?,
+                        status: row.get(8)?,
+                        message: row.get(9)?,
+                        target_is_dir: row.get(10)?,
+                        target_is_symlink: row.get(11)?,
+                        cur_target: row.get::<usize, Option<String>>(12)?.map(PathBuf::from),
+                    })
+                })
+                .and_then(|rows| rows.collect())
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn set_file_list(&mut self, job_id: i64, files: &mut [DBFileEntry]) {
+        if let Ok(tx) = self.conn.transaction() {
+            {
+                let Ok(mut stmt) = tx.prepare(
+                    "INSERT INTO files (
+                            job_id,
+                            file,
+                            is_file,
+                            is_dir,
+                            is_symlink,
+                            size,
+                            uid,
+                            gid,
+                            status,
+                            message,
+                            target_is_dir,
+                            target_is_symlink,
+                            cur_target
+                        ) VALUES (
+                            ?1,
+                            ?2,
+                            ?3,
+                            ?4,
+                            ?5,
+                            ?6,
+                            ?7,
+                            ?8,
+                            ?9,
+                            ?10,
+                            ?11,
+                            ?12,
+                            ?13
+                        )",
+                ) else {
+                    return;
+                };
+
+                for entry in files.iter_mut() {
+                    match stmt.execute((
+                        job_id,
+                        entry.file.to_string_lossy(),
+                        entry.is_file,
+                        entry.is_dir,
+                        entry.is_symlink,
+                        entry.size,
+                        entry.uid,
+                        entry.gid,
+                        entry.status,
+                        &entry.message,
+                        entry.target_is_dir,
+                        entry.target_is_symlink,
+                        entry
+                            .cur_target
+                            .as_ref()
+                            .map(|cur_target| cur_target.to_string_lossy()),
+                    )) {
+                        Ok(_) => {
+                            entry.id = tx.last_insert_rowid();
+                            entry.job_id = job_id;
+                        }
+                        Err(_) => {
+                            return;
+                        }
+                    }
+                }
+            }
+
+            let Ok(_) = tx.execute(
+                "UPDATE jobs SET status = ?1 WHERE id = ?2",
+                (DBJobStatus::InProgress, job_id),
+            ) else {
+                return;
+            };
+
+            let _ = tx.commit();
+        }
+    }
+
     pub fn update_file(&self, file: &DBFileEntry) {
         if let Ok(mut stmt) = self.conn.prepare_cached(
             "UPDATE files
@@ -525,7 +663,6 @@ impl DataBase {
                         dir_list.status,
                         dir_list.message,
                         files.id,
-                        files.job_id,
                         files.file,
                         files.is_file,
                         files.is_dir,
@@ -537,11 +674,11 @@ impl DataBase {
                         files.message,
                         files.target_is_dir,
                         files.target_is_symlink,
-                        files.cur_target,
+                        files.cur_target
                 FROM dir_list
                 JOIN files ON files.id = dir_list.file_id
-                WHERE job_id = ?1
-                ORDER BY id",
+                WHERE dir_list.job_id = ?1
+                ORDER BY dir_list.id",
             )
             .and_then(|mut stmt| {
                 stmt.query_map([job_id], |row| {
@@ -555,19 +692,19 @@ impl DataBase {
                         message: row.get(5)?,
                         file: DBFileEntry {
                             id: row.get(6)?,
-                            job_id: row.get(7)?,
-                            file: PathBuf::from(row.get::<usize, String>(8)?),
-                            is_file: row.get(9)?,
-                            is_dir: row.get(10)?,
-                            is_symlink: row.get(11)?,
-                            size: row.get(12)?,
-                            uid: row.get(13)?,
-                            gid: row.get(14)?,
-                            status: row.get(15)?,
-                            message: row.get(16)?,
-                            target_is_dir: row.get(17)?,
-                            target_is_symlink: row.get(18)?,
-                            cur_target: row.get::<usize, Option<String>>(19)?.map(PathBuf::from),
+                            job_id,
+                            file: PathBuf::from(row.get::<usize, String>(7)?),
+                            is_file: row.get(8)?,
+                            is_dir: row.get(9)?,
+                            is_symlink: row.get(10)?,
+                            size: row.get(11)?,
+                            uid: row.get(12)?,
+                            gid: row.get(13)?,
+                            status: row.get(14)?,
+                            message: row.get(15)?,
+                            target_is_dir: row.get(16)?,
+                            target_is_symlink: row.get(17)?,
+                            cur_target: row.get::<usize, Option<String>>(18)?.map(PathBuf::from),
                         },
                     })
                 })
@@ -730,60 +867,4 @@ impl DataBase {
             let _ = stmt.execute([skip_dir_stack_id]);
         }
     }
-
-    pub fn get_replace_first_path(&self, job_id: i64) -> Option<bool> {
-        self.conn
-            .query_row(
-                "SELECT replace_first_path
-                FROM jobs
-                WHERE id = ?1",
-                [job_id],
-                |row| row.get(0),
-            )
-            .unwrap_or(None)
-    }
-
-    pub fn set_replace_first_path(&self, job_id: i64, replace_first_path: bool) {
-        let _ = self.conn.execute(
-            "UPDATE jobs SET replace_first_path = ?1 WHERE id = ?2",
-            (replace_first_path, job_id),
-        );
-    }
-
-    /*
-        def get_file_list(self, job_id):
-            file_list = []
-
-            if self.conn is None:
-                return file_list
-
-            try:
-                with self.conn:
-                    c = self.conn.execute("SELECT * FROM files WHERE job_id = ?", (job_id,))
-                    for row in c:
-                        file = json.loads(row["file"])
-                        file["id"] = row["id"]
-                        file["status"] = row["status"]
-                        file["message"] = row["message"]
-                        file["lstat"] = os.stat_result(file["lstat"])
-
-                        file_list.append(file)
-
-                    c.close()
-            except sqlite3.OperationalError:
-                pass
-
-            return file_list
-
-
-        def __del__(self):
-            if self.conn is None:
-                return
-
-            try:
-                self.conn.commit()
-                self.conn.close()
-            except sqlite3.OperationalError:
-                pass
-    */
 }

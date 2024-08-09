@@ -32,12 +32,11 @@ pub enum DirScanEvent {
 #[derive(Debug, Clone)]
 pub struct DirScanInfo {
     pub current: PathBuf,
-    pub files: usize,
-    pub bytes: Option<u64>,
+    pub num_files: usize,
+    pub total_size: Option<u64>,
 }
 
 pub fn dirscan(
-    job_id: i64,
     cwd: &Path,
     entries: &[DBEntriesEntry],
     archive_dirs: &[ArchiveEntry],
@@ -50,8 +49,8 @@ pub fn dirscan(
 
     let mut info = DirScanInfo {
         current: PathBuf::from(cwd),
-        files: 0,
-        bytes: match read_metadata {
+        num_files: 0,
+        total_size: match read_metadata {
             ReadMetadata::Yes => Some(0),
             ReadMetadata::No => None,
         },
@@ -69,7 +68,7 @@ pub fn dirscan(
                         result.clear();
                         result.push(DBFileEntry {
                             id: 0,
-                            job_id,
+                            job_id: 0,
                             file: PathBuf::from(cwd),
                             is_file: false,
                             is_dir: true,
@@ -83,8 +82,8 @@ pub fn dirscan(
                             target_is_symlink: false,
                             cur_target: None,
                         });
-                        info.files = 0;
-                        info.bytes = match read_metadata {
+                        info.num_files = 0;
+                        info.total_size = match read_metadata {
                             ReadMetadata::Yes => Some(0),
                             ReadMetadata::No => None,
                         };
@@ -96,9 +95,9 @@ pub fn dirscan(
         }
 
         info.current = PathBuf::from(cwd);
-        info.files += 1;
-        info.bytes = match read_metadata {
-            ReadMetadata::Yes => info.bytes.map(|bytes| bytes + entry.size),
+        info.num_files += 1;
+        info.total_size = match read_metadata {
+            ReadMetadata::Yes => info.total_size.map(|total_size| total_size + entry.size),
             ReadMetadata::No => None,
         };
 
@@ -110,7 +109,7 @@ pub fn dirscan(
 
         result.push(DBFileEntry {
             id: 0,
-            job_id,
+            job_id: 0,
             file: entry.file.clone(),
             is_file: entry.is_file,
             is_dir: entry.is_dir,
@@ -127,7 +126,6 @@ pub fn dirscan(
 
         if entry.is_dir {
             match recursive_dirscan(
-                job_id,
                 &entry.file,
                 archive_dirs,
                 read_metadata,
@@ -161,7 +159,6 @@ pub fn dirscan(
 }
 
 fn recursive_dirscan(
-    job_id: i64,
     cwd: &Path,
     archive_dirs: &[ArchiveEntry],
     read_metadata: ReadMetadata,
@@ -173,8 +170,8 @@ fn recursive_dirscan(
 ) -> Result<Option<(Vec<DBFileEntry>, Instant)>> {
     let mut result = Vec::new();
 
-    let old_files = info.files;
-    let old_bytes = info.bytes;
+    let old_num_files = info.num_files;
+    let old_total_size = info.total_size;
 
     let mut last_write = old_last_write;
     for entry in fs::read_dir(archive_mounter::unarchive_path_map(cwd, archive_dirs))? {
@@ -188,7 +185,7 @@ fn recursive_dirscan(
                         result.clear();
                         result.push(DBFileEntry {
                             id: 0,
-                            job_id,
+                            job_id: 0,
                             file: PathBuf::from(cwd),
                             is_file: false,
                             is_dir: true,
@@ -202,8 +199,8 @@ fn recursive_dirscan(
                             target_is_symlink: false,
                             cur_target: None,
                         });
-                        info.files = old_files;
-                        info.bytes = old_bytes;
+                        info.num_files = old_num_files;
+                        info.total_size = old_total_size;
                         return Ok(Some((result, last_write)));
                     }
                     DirScanEvent::Abort => return Ok(None),
@@ -220,8 +217,8 @@ fn recursive_dirscan(
                             Err(e) => {
                                 result.push(DBFileEntry {
                                     id: 0,
-                                    job_id,
-                                    file: archive_mounter::archive_path_map(
+                                    job_id: 0,
+                                    file: archive_mounter::archive_parent_map(
                                         &entry.path(),
                                         archive_dirs,
                                     ),
@@ -245,9 +242,11 @@ fn recursive_dirscan(
                     };
 
                     info.current = PathBuf::from(cwd);
-                    info.files += 1;
-                    info.bytes = match metadata {
-                        Some(ref metadata) => info.bytes.map(|bytes| bytes + metadata.len()),
+                    info.num_files += 1;
+                    info.total_size = match metadata {
+                        Some(ref metadata) => info
+                            .total_size
+                            .map(|total_size| total_size + metadata.len()),
                         None => None,
                     };
 
@@ -257,11 +256,11 @@ fn recursive_dirscan(
                         let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
                     }
 
-                    let file = archive_mounter::archive_path_map(&entry.path(), archive_dirs);
+                    let file = archive_mounter::archive_parent_map(&entry.path(), archive_dirs);
 
                     result.push(DBFileEntry {
                         id: 0,
-                        job_id,
+                        job_id: 0,
                         file: file.clone(),
                         is_file: file_type.is_file(),
                         is_dir: file_type.is_dir(),
@@ -287,7 +286,6 @@ fn recursive_dirscan(
 
                     if file_type.is_dir() {
                         match recursive_dirscan(
-                            job_id,
                             &file,
                             archive_dirs,
                             read_metadata,
@@ -318,8 +316,8 @@ fn recursive_dirscan(
                 }
                 Err(e) => result.push(DBFileEntry {
                     id: 0,
-                    job_id,
-                    file: archive_mounter::archive_path_map(&entry.path(), archive_dirs),
+                    job_id: 0,
+                    file: archive_mounter::archive_parent_map(&entry.path(), archive_dirs),
                     is_file: false,
                     is_dir: false,
                     is_symlink: false,
