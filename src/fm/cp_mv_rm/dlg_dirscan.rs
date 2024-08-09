@@ -39,6 +39,7 @@ pub struct DlgDirscan {
     pubsub_tx: Sender<PubSub>,
     job: DBJobEntry,
     archive_dirs: Vec<ArchiveEntry>,
+    db_file: Option<PathBuf>,
     ev_tx: Sender<DirScanEvent>,
     info_rx: Receiver<DirScanInfo>,
     result_rx: Receiver<Option<Vec<DBFileEntry>>>,
@@ -49,7 +50,6 @@ pub struct DlgDirscan {
     num_files: usize,
     total_size: Option<u64>,
     focus_position: usize,
-    db_file: Option<PathBuf>,
     suspend_tx: Option<Sender<()>>,
 }
 
@@ -70,6 +70,7 @@ impl DlgDirscan {
             pubsub_tx,
             job: job.clone(),
             archive_dirs: Vec::from(archive_dirs),
+            db_file: db_file.map(PathBuf::from),
             ev_tx,
             info_rx,
             result_rx,
@@ -107,7 +108,6 @@ impl DlgDirscan {
             num_files: 0,
             total_size: None,
             focus_position: 0,
-            db_file: db_file.map(PathBuf::from),
             suspend_tx: None,
         };
 
@@ -144,9 +144,32 @@ impl DlgDirscan {
                 info_tx,
                 pubsub_tx.clone(),
             );
+
             let _ = result_tx.send(result);
             let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
         });
+    }
+
+    fn suspend(&mut self) {
+        if let None = &self.suspend_tx {
+            let (suspend_tx, suspend_rx) = crossbeam_channel::unbounded();
+
+            let _ = self.ev_tx.send(DirScanEvent::Suspend(suspend_rx));
+
+            self.btn_suspend.set_label("Continue");
+
+            self.suspend_tx = Some(suspend_tx);
+        }
+    }
+
+    fn resume(&mut self) {
+        if let Some(suspend_tx) = &self.suspend_tx {
+            let _ = suspend_tx.send(());
+
+            self.btn_suspend.set_label("Suspend ");
+
+            self.suspend_tx = None;
+        }
     }
 
     fn delete_job(&self) {
@@ -163,50 +186,24 @@ impl Component for DlgDirscan {
 
         match key {
             Key::Esc | Key::Char('q') | Key::Char('Q') | Key::F(10) | Key::Char('0') => {
-                self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
-
-                // Resume the thread before the abort
-                self.suspend_tx.as_ref().map(|suspend_tx| {
-                    let _ = suspend_tx.send(());
-                });
+                self.resume();
 
                 let _ = self.ev_tx.send(DirScanEvent::Abort);
-
-                self.delete_job();
             }
             Key::Char('\n') | Key::Char(' ') => match self.focus_position {
                 0 => match &self.suspend_tx {
-                    Some(suspend_tx) => {
-                        let _ = suspend_tx.send(());
-
-                        self.btn_suspend.set_label("Suspend ");
-
-                        self.suspend_tx = None;
-                    }
-                    None => {
-                        let (suspend_tx, suspend_rx) = crossbeam_channel::unbounded();
-
-                        let _ = self.ev_tx.send(DirScanEvent::Suspend(suspend_rx));
-
-                        self.btn_suspend.set_label("Continue");
-
-                        self.suspend_tx = Some(suspend_tx);
-                    }
+                    Some(_suspend_tx) => self.resume(),
+                    None => self.suspend(),
                 },
                 1 => {
+                    self.resume();
+
                     let _ = self.ev_tx.send(DirScanEvent::Skip);
                 }
                 2 => {
-                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
-
-                    // Resume the thread before the abort
-                    self.suspend_tx.as_ref().map(|suspend_tx| {
-                        let _ = suspend_tx.send(());
-                    });
+                    self.resume();
 
                     let _ = self.ev_tx.send(DirScanEvent::Abort);
-
-                    self.delete_job();
                 }
                 _ => unreachable!(),
             },
@@ -236,33 +233,47 @@ impl Component for DlgDirscan {
                 if let Ok(result) = self.result_rx.try_recv() {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
 
-                    // If result is None it means that the operation has been aborted, and the
-                    // DB job has already been deleted, so there would be nothing to do here
-                    if let Some(mut files) = result {
-                        self.db_file
-                            .as_deref()
-                            .and_then(|db_file| DataBase::new(db_file).ok())
-                            .map(|mut db| db.set_file_list(self.job.id, &mut files));
+                    match result {
+                        Some(mut files) => {
+                            self.db_file
+                                .as_deref()
+                                .and_then(|db_file| DataBase::new(db_file).ok())
+                                .map(|mut db| db.set_file_list(self.job.id, &mut files));
 
-                        self.job.status = DBJobStatus::InProgress;
+                            self.job.status = DBJobStatus::InProgress;
 
-                        match &self.job.operation {
-                            DBJobOperation::Cp => {
-                                self.pubsub_tx
-                                    .send(PubSub::DoCp(self.job.clone(), files))
-                                    .unwrap();
-                            }
-                            DBJobOperation::Mv => {
-                                self.pubsub_tx
-                                    .send(PubSub::DoMv(self.job.clone(), files))
-                                    .unwrap();
-                            }
-                            DBJobOperation::Rm => {
-                                self.pubsub_tx
-                                    .send(PubSub::DoRm(self.job.clone(), files))
-                                    .unwrap();
+                            match &self.job.operation {
+                                DBJobOperation::Cp => {
+                                    self.pubsub_tx
+                                        .send(PubSub::DoCp(
+                                            self.job.clone(),
+                                            files,
+                                            self.archive_dirs.clone(),
+                                        ))
+                                        .unwrap();
+                                }
+                                DBJobOperation::Mv => {
+                                    self.pubsub_tx
+                                        .send(PubSub::DoMv(
+                                            self.job.clone(),
+                                            files,
+                                            self.archive_dirs.clone(),
+                                        ))
+                                        .unwrap();
+                                }
+                                DBJobOperation::Rm => {
+                                    self.pubsub_tx
+                                        .send(PubSub::DoRm(
+                                            self.job.clone(),
+                                            files,
+                                            self.archive_dirs.clone(),
+                                        ))
+                                        .unwrap();
+                                }
                             }
                         }
+                        // If result is None it means that the operation has been aborted
+                        None => self.delete_job(),
                     }
                 }
             }

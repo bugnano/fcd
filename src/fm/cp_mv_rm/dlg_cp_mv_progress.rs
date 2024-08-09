@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     thread,
+    time::Duration,
 };
 
 use crossbeam_channel::{Receiver, Sender};
@@ -22,10 +23,11 @@ use crate::{
     component::{Component, Focus},
     config::Config,
     fm::{
-        app::human_readable_size,
-        archive_mounter::{self, ArchiveMounterCommand},
+        app::{format_seconds, human_readable_size},
+        archive_mounter::{self, ArchiveEntry},
         cp_mv_rm::{
-            database::{DBFileEntry, DBJobEntry, OnConflict},
+            cp_mv::{cp_mv, CpMvEvent, CpMvInfo},
+            database::{DBDirListEntry, DBFileEntry, DBJobEntry, OnConflict},
             dirscan::{dirscan, DirScanEvent, DirScanInfo, ReadMetadata},
             dlg_cp_mv::DlgCpMvType,
         },
@@ -41,20 +43,27 @@ pub struct DlgCpMvProgress {
     pubsub_tx: Sender<PubSub>,
     job: DBJobEntry,
     files: Vec<DBFileEntry>,
+    archive_dirs: Vec<ArchiveEntry>,
+    db_file: Option<PathBuf>,
     dlg_cp_mv_type: DlgCpMvType,
+    ev_tx: Sender<CpMvEvent>,
+    info_rx: Receiver<CpMvInfo>,
+    result_rx: Receiver<(Vec<DBFileEntry>, Vec<DBDirListEntry>)>,
     btn_suspend: Button,
     btn_skip: Button,
     btn_abort: Button,
     btn_no_db: Button,
-    source: String,
-    target: String,
+    total_size: u64,
+    cur_source: String,
+    cur_target: String,
     cur_size: u64,
     cur_bytes: u64,
+    cur_time: Duration,
     num_files: usize,
-    bytes: u64,
-    is_suspended: bool,
+    total_bytes: u64,
+    total_time: Duration,
     focus_position: usize,
-    archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
+    suspend_tx: Option<Sender<()>>,
 }
 
 impl DlgCpMvProgress {
@@ -63,15 +72,25 @@ impl DlgCpMvProgress {
         pubsub_tx: Sender<PubSub>,
         job: &DBJobEntry,
         files: &[DBFileEntry],
+        archive_dirs: &[ArchiveEntry],
+        db_file: Option<&Path>,
         dlg_cp_mv_type: DlgCpMvType,
-        archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
     ) -> DlgCpMvProgress {
+        let (ev_tx, ev_rx) = crossbeam_channel::unbounded();
+        let (info_tx, info_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+
         let mut dlg = DlgCpMvProgress {
             config: Rc::clone(config),
             pubsub_tx,
             job: job.clone(),
             files: Vec::from(files),
+            archive_dirs: Vec::from(archive_dirs),
+            db_file: db_file.map(PathBuf::from),
             dlg_cp_mv_type,
+            ev_tx,
+            info_rx,
+            result_rx,
             btn_suspend: Button::new(
                 "Suspend ",
                 &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
@@ -112,56 +131,90 @@ impl DlgCpMvProgress {
                     .fg(config.dialog.title_fg)
                     .bg(config.dialog.bg),
             ),
-            source: String::from(""),
-            target: String::from(""),
-            cur_size: 1,
+            total_size: files.iter().map(|entry| entry.size).sum(),
+            cur_source: String::from(""),
+            cur_target: String::from(""),
+            cur_size: 0,
             cur_bytes: 0,
+            cur_time: Duration::ZERO,
             num_files: 0,
-            bytes: 0,
-            is_suspended: false,
+            total_bytes: 0,
+            total_time: Duration::ZERO,
             focus_position: 0,
-            archive_mounter_command_tx,
+            suspend_tx: None,
         };
 
-        //dlg.dirscan_thread(cwd, ev_rx, info_tx, result_tx);
+        dlg.cp_mv_thread(ev_rx, info_tx, result_tx);
 
         dlg
     }
 
-    // fn dirscan_thread(
-    //     &mut self,
-    //     cwd: &Path,
-    //     ev_rx: Receiver<DirScanEvent>,
-    //     info_tx: Sender<DirScanInfo>,
-    //     result_tx: Sender<DirScanResult>,
-    // ) {
-    //     let (entries, read_metadata) = match &self.dirscan_type {
-    //         DirscanType::Cp => todo!(),
-    //         DirscanType::Mv => todo!(),
-    //         DirscanType::Rm(entries) => (entries.clone(), ReadMetadata::No),
-    //     };
+    fn cp_mv_thread(
+        &mut self,
+        ev_rx: Receiver<CpMvEvent>,
+        info_tx: Sender<CpMvInfo>,
+        result_tx: Sender<(Vec<DBFileEntry>, Vec<DBDirListEntry>)>,
+    ) {
+        let job_id = self.job.id;
+        let mode = self.dlg_cp_mv_type;
+        let entries = self.files.clone();
+        let cwd = self.job.cwd.clone();
 
-    //     let pubsub_tx = self.pubsub_tx.clone();
-    //     let cwd = PathBuf::from(cwd);
+        let dest = self
+            .job
+            .dest
+            .clone()
+            .expect("BUG: CP/MV operation without dest");
 
-    //     thread::spawn(move || {
-    //         let result = dirscan(
-    //             &entries,
-    //             &cwd,
-    //             read_metadata,
-    //             ev_rx,
-    //             info_tx,
-    //             pubsub_tx.clone(),
-    //         );
-    //         let _ = result_tx.send(result);
-    //         let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
-    //     });
-    // }
+        let on_conflict = self
+            .job
+            .on_conflict
+            .expect("BUG: CP/MV operation without on_conflict");
 
-    fn archive_path(&self, file: &Path) -> PathBuf {
-        match &self.archive_mounter_command_tx {
-            Some(command_tx) => archive_mounter::archive_path(command_tx, file),
-            None => PathBuf::from(file),
+        let db_file = self.db_file.clone();
+        let archive_dirs = self.archive_dirs.clone();
+
+        let pubsub_tx = self.pubsub_tx.clone();
+
+        thread::spawn(move || {
+            let result = cp_mv(
+                job_id,
+                mode,
+                &entries,
+                &cwd,
+                &dest,
+                on_conflict,
+                ev_rx,
+                info_tx,
+                pubsub_tx.clone(),
+                db_file.as_deref(),
+                &archive_dirs,
+            );
+
+            let _ = result_tx.send(result);
+            let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
+        });
+    }
+
+    fn suspend(&mut self) {
+        if let None = &self.suspend_tx {
+            let (suspend_tx, suspend_rx) = crossbeam_channel::unbounded();
+
+            let _ = self.ev_tx.send(CpMvEvent::Suspend(suspend_rx));
+
+            self.btn_suspend.set_label("Continue");
+
+            self.suspend_tx = Some(suspend_tx);
+        }
+    }
+
+    fn resume(&mut self) {
+        if let Some(suspend_tx) = &self.suspend_tx {
+            let _ = suspend_tx.send(());
+
+            self.btn_suspend.set_label("Suspend ");
+
+            self.suspend_tx = None;
         }
     }
 }
@@ -172,22 +225,29 @@ impl Component for DlgCpMvProgress {
 
         match key {
             Key::Esc | Key::Char('q') | Key::Char('Q') | Key::F(10) | Key::Char('0') => {
-                self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+                self.resume();
 
-                // let _ = self.ev_tx.send(DirScanEvent::Abort);
+                let _ = self.ev_tx.send(CpMvEvent::Abort);
             }
             Key::Char('\n') | Key::Char(' ') => match self.focus_position {
-                0 => {
-                    todo!();
-                }
+                0 => match &self.suspend_tx {
+                    Some(_suspend_tx) => self.resume(),
+                    None => self.suspend(),
+                },
                 1 => {
-                    todo!();
+                    self.resume();
+
+                    let _ = self.ev_tx.send(CpMvEvent::Skip);
                 }
                 2 => {
-                    todo!();
+                    self.resume();
+
+                    let _ = self.ev_tx.send(CpMvEvent::Abort);
                 }
                 3 => {
-                    todo!();
+                    self.resume();
+
+                    let _ = self.ev_tx.send(CpMvEvent::NoDb);
                 }
                 _ => unreachable!(),
             },
@@ -206,22 +266,27 @@ impl Component for DlgCpMvProgress {
     }
 
     fn handle_pubsub(&mut self, event: &PubSub) {
-        // match event {
-        //     PubSub::ComponentThreadEvent => {
-        //         if let Ok(info) = self.info_rx.try_recv() {
-        //             self.current = self
-        //                 .archive_path(&info.current)
-        //                 .to_string_lossy()
-        //                 .to_string();
-        //             self.num_files = info.files;
-        //             self.total_size = info.bytes;
-        //         }
-        //         if let Ok(result) = self.result_rx.try_recv() {
-        //             todo!();
-        //         }
-        //     }
-        //     _ => (),
-        // }
+        match event {
+            PubSub::ComponentThreadEvent => {
+                if let Ok(info) = self.info_rx.try_recv() {
+                    self.cur_source = info.cur_source.to_string_lossy().to_string();
+                    self.cur_target = info.cur_target.to_string_lossy().to_string();
+                    self.cur_size = info.cur_size;
+                    self.cur_bytes = info.cur_bytes;
+                    self.cur_time = info.cur_time;
+                    self.num_files = info.num_files;
+                    self.total_bytes = info.total_bytes;
+                    self.total_time = info.total_time;
+                }
+
+                if let Ok(result) = self.result_rx.try_recv() {
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                    todo!();
+                }
+            }
+            _ => (),
+        }
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
@@ -307,8 +372,8 @@ impl Component for DlgCpMvProgress {
             upper_area[0].width as usize,
         )));
 
-        let source = Paragraph::new(Span::raw(tilde_layout(
-            &self.source,
+        let cur_source = Paragraph::new(Span::raw(tilde_layout(
+            &self.cur_source,
             upper_area[1].width as usize,
         )));
 
@@ -317,8 +382,8 @@ impl Component for DlgCpMvProgress {
             upper_area[2].width as usize,
         )));
 
-        let target = Paragraph::new(Span::raw(tilde_layout(
-            &self.target,
+        let cur_target = Paragraph::new(Span::raw(tilde_layout(
+            &self.cur_target,
             upper_area[3].width as usize,
         )));
 
@@ -331,7 +396,11 @@ impl Component for DlgCpMvProgress {
             ])
             .split(upper_area[4]);
 
-        let ratio = (self.cur_bytes as f64) / (self.cur_size as f64);
+        let ratio = match self.cur_size {
+            0 => 1.0,
+            cur_size => (self.cur_bytes as f64) / (cur_size as f64),
+        };
+
         let gauge = Gauge::default()
             .gauge_style(
                 Style::default()
@@ -347,16 +416,32 @@ impl Component for DlgCpMvProgress {
         let gauge_left = Paragraph::new(Span::raw("["));
         let gauge_right = Paragraph::new(Span::raw("]"));
 
+        let cur_bps = match self.cur_time.as_secs_f64() {
+            0.0 => 0.0,
+            secs => (self.cur_bytes as f64) / secs,
+        };
+
+        let cur_eta = match cur_bps {
+            0.0 => 0,
+            _ => (((self.cur_size - self.cur_bytes) as f64) / cur_bps).round() as u64,
+        };
+
         let cur_stats = Paragraph::new(Span::raw(tilde_layout(
-            &format!("{}/{} ETA {} ({}/s)", "0B", "0B", "00:00:00", "0B"),
+            &format!(
+                "{}/{} ETA {} ({}/s)",
+                human_readable_size(self.cur_bytes),
+                human_readable_size(self.cur_size),
+                format_seconds(cur_eta),
+                human_readable_size(cur_bps.round() as u64)
+            ),
             upper_area[5].width as usize,
         )));
 
         f.render_widget(upper_block, sections[0]);
         f.render_widget(lbl_source, upper_area[0]);
-        f.render_widget(source, upper_area[1]);
+        f.render_widget(cur_source, upper_area[1]);
         f.render_widget(lbl_target, upper_area[2]);
-        f.render_widget(target, upper_area[3]);
+        f.render_widget(cur_target, upper_area[3]);
         f.render_widget(gauge_left, gauge_area[0]);
         f.render_widget(gauge, gauge_area[1]);
         f.render_widget(gauge_right, gauge_area[2]);
@@ -367,7 +452,11 @@ impl Component for DlgCpMvProgress {
         let middle_block = Block::default()
             .title(
                 Title::from(Span::raw(tilde_layout(
-                    &format!(" Total: {}/{} ", "0B", "0B"),
+                    &format!(
+                        " Total: {}/{} ",
+                        human_readable_size(self.total_bytes),
+                        human_readable_size(self.total_size)
+                    ),
                     sections[0].width as usize,
                 )))
                 .position(Position::Top)
@@ -400,7 +489,11 @@ impl Component for DlgCpMvProgress {
             ])
             .split(middle_area[0]);
 
-        let ratio = (self.num_files as f64) / (self.files.len() as f64);
+        let ratio = match self.total_size {
+            0 => 1.0,
+            total_size => (self.total_bytes as f64) / (total_size as f64),
+        };
+
         let gauge = Gauge::default()
             .gauge_style(
                 Style::default()
@@ -425,8 +518,23 @@ impl Component for DlgCpMvProgress {
             middle_area[1].width as usize,
         )));
 
-        let time = Paragraph::new(Span::raw(tilde_layout(
-            &format!("Time: {} ETA {} ({}/s)", "00:00:00", "00:00:00", "0B"),
+        let total_bps = match self.total_time.as_secs_f64() {
+            0.0 => 0.0,
+            secs => (self.total_bytes as f64) / secs,
+        };
+
+        let total_eta = match total_bps {
+            0.0 => 0,
+            _ => (((self.total_size - self.total_bytes) as f64) / total_bps).round() as u64,
+        };
+
+        let total_time = Paragraph::new(Span::raw(tilde_layout(
+            &format!(
+                "Time: {} ETA {} ({}/s)",
+                format_seconds(self.total_time.as_secs()),
+                format_seconds(total_eta),
+                human_readable_size(total_bps.round() as u64)
+            ),
             middle_area[2].width as usize,
         )));
 
@@ -435,14 +543,9 @@ impl Component for DlgCpMvProgress {
         f.render_widget(gauge, gauge_area[1]);
         f.render_widget(gauge_right, gauge_area[2]);
         f.render_widget(num_files, middle_area[1]);
-        f.render_widget(time, middle_area[2]);
+        f.render_widget(total_time, middle_area[2]);
 
         // Lower section
-
-        self.btn_suspend.set_label(match self.is_suspended {
-            true => "Continue",
-            false => "Suspend ",
-        });
 
         let lower_block = Block::default()
             .borders(Borders::ALL)

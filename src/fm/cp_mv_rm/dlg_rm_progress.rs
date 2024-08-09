@@ -23,7 +23,7 @@ use crate::{
     config::Config,
     fm::{
         app::human_readable_size,
-        archive_mounter::{self, ArchiveMounterCommand},
+        archive_mounter::{self, ArchiveEntry},
         cp_mv_rm::{
             database::{DBFileEntry, DBJobEntry},
             dirscan::{dirscan, DirScanEvent, DirScanInfo, ReadMetadata},
@@ -40,15 +40,15 @@ pub struct DlgRmProgress {
     pubsub_tx: Sender<PubSub>,
     job: DBJobEntry,
     files: Vec<DBFileEntry>,
+    archive_dirs: Vec<ArchiveEntry>,
+    db_file: Option<PathBuf>,
     btn_suspend: Button,
     btn_skip: Button,
     btn_abort: Button,
-    btn_no_db: Button,
     current: String,
     num_files: usize,
-    is_suspended: bool,
     focus_position: usize,
-    archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
+    suspend_tx: Option<Sender<()>>,
 }
 
 impl DlgRmProgress {
@@ -57,13 +57,16 @@ impl DlgRmProgress {
         pubsub_tx: Sender<PubSub>,
         job: &DBJobEntry,
         files: &[DBFileEntry],
-        archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
+        archive_dirs: &[ArchiveEntry],
+        db_file: Option<&Path>,
     ) -> DlgRmProgress {
         let mut dlg = DlgRmProgress {
             config: Rc::clone(config),
             pubsub_tx,
             job: job.clone(),
             files: Vec::from(files),
+            archive_dirs: Vec::from(archive_dirs),
+            db_file: db_file.map(PathBuf::from),
             btn_suspend: Button::new(
                 "Suspend ",
                 &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
@@ -94,21 +97,10 @@ impl DlgRmProgress {
                     .fg(config.dialog.title_fg)
                     .bg(config.dialog.bg),
             ),
-            btn_no_db: Button::new(
-                "No DB",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
-            ),
             current: String::from(""),
             num_files: 0,
-            is_suspended: false,
             focus_position: 0,
-            archive_mounter_command_tx,
+            suspend_tx: None,
         };
 
         //dlg.dirscan_thread(cwd, ev_rx, info_tx, result_tx);
@@ -145,13 +137,6 @@ impl DlgRmProgress {
     //         let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
     //     });
     // }
-
-    fn archive_path(&self, file: &Path) -> PathBuf {
-        match &self.archive_mounter_command_tx {
-            Some(command_tx) => archive_mounter::archive_path(command_tx, file),
-            None => PathBuf::from(file),
-        }
-    }
 }
 
 impl Component for DlgRmProgress {
@@ -182,7 +167,7 @@ impl Component for DlgRmProgress {
             Key::Left | Key::Char('h') => {
                 self.focus_position = self.focus_position.saturating_sub(1);
             }
-            Key::Right | Key::Char('l') => self.focus_position = min(self.focus_position + 1, 3),
+            Key::Right | Key::Char('l') => self.focus_position = min(self.focus_position + 1, 2),
             Key::Ctrl('c') => key_handled = false,
             Key::Ctrl('l') => key_handled = false,
             Key::Ctrl('z') => key_handled = false,
@@ -324,7 +309,11 @@ impl Component for DlgRmProgress {
             ])
             .split(middle_area[0]);
 
-        let ratio = (self.num_files as f64) / (self.files.len() as f64);
+        let ratio = match self.files.len() {
+            0 => 1.0,
+            len => (self.num_files as f64) / (len as f64),
+        };
+
         let gauge = Gauge::default()
             .gauge_style(
                 Style::default()
@@ -362,11 +351,6 @@ impl Component for DlgRmProgress {
 
         // Lower section
 
-        self.btn_suspend.set_label(match self.is_suspended {
-            true => "Continue",
-            false => "Suspend ",
-        });
-
         let lower_block = Block::default()
             .borders(Borders::ALL)
             .border_set(middle_border_set)
@@ -384,17 +368,10 @@ impl Component for DlgRmProgress {
                 Constraint::Length(self.btn_skip.width() as u16),
                 Constraint::Length(1),
                 Constraint::Length(self.btn_abort.width() as u16),
-                Constraint::Length(1),
-                Constraint::Length(self.btn_no_db.width() as u16),
             ])
             .split(centered_rect(
-                (self.btn_suspend.width()
-                    + 1
-                    + self.btn_skip.width()
-                    + 1
-                    + self.btn_abort.width()
-                    + 1
-                    + self.btn_no_db.width()) as u16,
+                (self.btn_suspend.width() + 1 + self.btn_skip.width() + 1 + self.btn_abort.width())
+                    as u16,
                 1,
                 &lower_block.inner(sections[2]),
             ));
@@ -421,14 +398,6 @@ impl Component for DlgRmProgress {
             &lower_area[4],
             match self.focus_position {
                 2 => Focus::Focused,
-                _ => Focus::Normal,
-            },
-        );
-        self.btn_no_db.render(
-            f,
-            &lower_area[6],
-            match self.focus_position {
-                3 => Focus::Focused,
                 _ => Focus::Normal,
             },
         );

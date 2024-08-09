@@ -10,6 +10,7 @@ use signal_hook::iterator::Signals;
 
 use crate::{
     fm::{
+        archive_mounter::ArchiveEntry,
         cp_mv_rm::{
             database::{DBFileEntry, DBJobEntry, OnConflict},
             dlg_cp_mv::DlgCpMvType,
@@ -96,9 +97,9 @@ pub enum PubSub {
     ArchiveMountCancel(PathBuf),
 
     // Dialog DirScan events
-    DoRm(DBJobEntry, Vec<DBFileEntry>),
-    DoCp(DBJobEntry, Vec<DBFileEntry>),
-    DoMv(DBJobEntry, Vec<DBFileEntry>),
+    DoRm(DBJobEntry, Vec<DBFileEntry>, Vec<ArchiveEntry>),
+    DoCp(DBJobEntry, Vec<DBFileEntry>, Vec<ArchiveEntry>),
+    DoMv(DBJobEntry, Vec<DBFileEntry>, Vec<ArchiveEntry>),
 
     // Dialog CpMv events
     DoDirscan(PathBuf, Vec<Entry>, String, OnConflict, DlgCpMvType),

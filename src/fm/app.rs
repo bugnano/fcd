@@ -680,13 +680,14 @@ impl App {
                     self.db_file.as_deref(),
                 )));
             }
-            PubSub::DoRm(job, files) => {
+            PubSub::DoRm(job, files, archive_dirs) => {
                 self.dialog = Some(Box::new(DlgRmProgress::new(
                     &self.config,
                     self.pubsub_tx.clone(),
                     &job,
                     files,
-                    self.archive_mounter_command_tx.clone(),
+                    archive_dirs,
+                    self.db_file.as_deref(),
                 )));
             }
             PubSub::Cp(cwd, entries) | PubSub::Mv(cwd, entries) => {
@@ -840,10 +841,10 @@ impl App {
                     )));
                 }
             }
-            PubSub::DoCp(job, files) | PubSub::DoMv(job, files) => {
+            PubSub::DoCp(job, files, archive_dirs) | PubSub::DoMv(job, files, archive_dirs) => {
                 let dlg_cp_mv_type = match pubsub {
-                    PubSub::DoCp(_job, _files) => DlgCpMvType::Cp,
-                    PubSub::DoMv(_job, _files) => DlgCpMvType::Mv,
+                    PubSub::DoCp(_job, _files, _archive_dirs) => DlgCpMvType::Cp,
+                    PubSub::DoMv(_job, _files, _archive_dirs) => DlgCpMvType::Mv,
                     _ => unreachable!(),
                 };
 
@@ -852,8 +853,9 @@ impl App {
                     self.pubsub_tx.clone(),
                     &job,
                     files,
+                    archive_dirs,
+                    self.db_file.as_deref(),
                     dlg_cp_mv_type,
-                    self.archive_mounter_command_tx.clone(),
                 )));
             }
             _ => (),
@@ -1195,6 +1197,18 @@ pub fn format_date(d: SystemTime) -> String {
         format!("{}", d.format(" %b %d"))
     } else {
         format!("{}", d.format("%Y-%m"))
+    }
+}
+
+pub fn format_seconds(t: u64) -> String {
+    let seconds = t % 60;
+    let minutes = (t / 60) % 60;
+    let hours = (t / 3600) % 24;
+    let days = t / 86400;
+
+    match days {
+        0 => format!("{:02}:{:02}:{:02}", hours, minutes, seconds),
+        _ => format!("{}d{:02}:{:02}:{:02}", days, hours, minutes, seconds),
     }
 }
 

@@ -55,9 +55,9 @@ pub struct CpMvInfo {
     pub cur_size: u64,
     pub cur_bytes: u64,
     pub cur_time: Duration,
-    pub files: usize,
-    pub bytes: u64,
-    pub time: Duration,
+    pub num_files: usize,
+    pub total_bytes: u64,
+    pub total_time: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -103,9 +103,9 @@ pub fn cp_mv(
         cur_size: 0,
         cur_bytes: 0,
         cur_time: Duration::ZERO,
-        files: 0,
-        bytes: 0,
-        time: Duration::ZERO,
+        num_files: 0,
+        total_bytes: 0,
+        total_time: Duration::ZERO,
     };
 
     let mut database = db_file.and_then(|db_file| DataBase::new(db_file).ok());
@@ -152,8 +152,8 @@ pub fn cp_mv(
         match entry.status {
             DBFileStatus::Error | DBFileStatus::Skipped | DBFileStatus::Done => {
                 total_bytes += entry.size;
-                info.bytes = total_bytes;
-                info.files += 1;
+                info.total_bytes = total_bytes;
+                info.num_files += 1;
                 continue;
             }
             _ => {}
@@ -205,8 +205,8 @@ pub fn cp_mv(
         }
 
         total_bytes += entry.size;
-        info.bytes = total_bytes;
-        info.files += 1;
+        info.total_bytes = total_bytes;
+        info.num_files += 1;
     }
 
     for entry in dir_list.iter_mut().rev() {
@@ -530,7 +530,7 @@ fn cp_mv_entry(
     if timers.last_write.elapsed().as_millis() >= 50 {
         timers.last_write = Instant::now();
         info.cur_time = timers.last_write.duration_since(timers.cur_start);
-        info.time = timers.last_write.duration_since(timers.start);
+        info.total_time = timers.last_write.duration_since(timers.start);
         let _ = info_tx.send(info.clone());
         let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
     }
@@ -726,7 +726,7 @@ fn handle_dir_entry(
     if timers.last_write.elapsed().as_millis() >= 50 {
         timers.last_write = Instant::now();
         info.cur_time = timers.last_write.duration_since(timers.cur_start);
-        info.time = timers.last_write.duration_since(timers.start);
+        info.total_time = timers.last_write.duration_since(timers.start);
         let _ = info_tx.send(info.clone());
         let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
     }
@@ -831,7 +831,7 @@ fn copy_file(
                 seek(&source_fd, SeekFrom::Start(pos)).context("lseek")?;
                 seek(&target_fd, SeekFrom::Start(pos)).context("lseek")?;
                 info.cur_bytes += pos;
-                info.bytes += pos;
+                info.total_bytes += pos;
             }
 
             pos
@@ -921,12 +921,12 @@ fn copy_file(
         bytes_written += bytes_copied as u64;
 
         info.cur_bytes += bytes_written;
-        info.bytes += bytes_written;
+        info.total_bytes += bytes_written;
 
         if timers.last_write.elapsed().as_millis() >= 50 {
             timers.last_write = Instant::now();
             info.cur_time = timers.last_write.duration_since(timers.cur_start);
-            info.time = timers.last_write.duration_since(timers.start);
+            info.total_time = timers.last_write.duration_since(timers.start);
             let _ = info_tx.send(info.clone());
             let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
         }
