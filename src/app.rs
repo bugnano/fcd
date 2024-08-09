@@ -179,9 +179,9 @@ pub fn centered_rect(width: u16, height: u16, r: &Rect) -> Rect {
 }
 
 pub fn render_shadow(f: &mut Frame, r: &Rect, s: &Style) {
-    let area1 = Rect::new(r.x + 2, r.y + r.height, r.width, 1).intersection(f.size());
+    let area1 = Rect::new(r.x + 2, r.y + r.height, r.width, 1).intersection(f.area());
     let area2 =
-        Rect::new(r.x + r.width, r.y + 1, 2, r.height.saturating_sub(1)).intersection(f.size());
+        Rect::new(r.x + r.width, r.y + 1, 2, r.height.saturating_sub(1)).intersection(f.area());
 
     let block = Block::default().style(*s);
 

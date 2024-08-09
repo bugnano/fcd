@@ -53,7 +53,7 @@ impl Component for CheckBox {
 
         if let Focus::Focused = focus {
             if (chunk.width > 1) && (chunk.height > 0) {
-                f.set_cursor(chunk.x + 1, chunk.y);
+                f.set_cursor_position((chunk.x + 1, chunk.y));
             }
         }
     }

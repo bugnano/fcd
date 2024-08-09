@@ -109,7 +109,7 @@ impl Component for RadioBox {
 
         if let Focus::Focused = focus {
             if (chunk.width > 1) && (chunk.height > (self.cursor_position as u16)) {
-                f.set_cursor(chunk.x + 1, chunk.y + (self.cursor_position as u16));
+                f.set_cursor_position((chunk.x + 1, chunk.y + (self.cursor_position as u16)));
             }
         }
     }

@@ -151,12 +151,9 @@ pub fn cp_mv(
     for entry in file_list.iter_mut() {
         match entry.status {
             DBFileStatus::Error | DBFileStatus::Skipped | DBFileStatus::Done => {
-                // Alternatively we can remove the size of this entry from the total size,
-                // which could result in a more accurate timing
                 total_bytes += entry.size;
                 info.bytes = total_bytes;
                 info.files += 1;
-
                 continue;
             }
             _ => {}

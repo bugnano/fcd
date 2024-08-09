@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, FileType, Metadata},
+    fs,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     time::Instant,
@@ -82,7 +82,7 @@ pub fn dirscan(
                             target_is_symlink: false,
                             cur_target: None,
                         });
-                        info.num_files = 0;
+                        info.num_files = 1;
                         info.total_size = match read_metadata {
                             ReadMetadata::Yes => Some(0),
                             ReadMetadata::No => None,
@@ -147,8 +147,9 @@ pub fn dirscan(
                 }
                 Ok(None) => return None,
                 Err(e) => {
-                    let mut last_result = result.last_mut().unwrap();
+                    let last_result = result.last_mut().unwrap();
                     // TODO -- last_result.message = f'({when}) {e.strerror} ({e.errno})'
+                    last_result.message = e.to_string();
                     last_result.status = DBFileStatus::Error;
                 }
             }
@@ -235,6 +236,7 @@ fn recursive_dirscan(
                                     target_is_symlink: false,
                                     cur_target: None,
                                 });
+                                info.num_files += 1;
                                 continue;
                             }
                         },
@@ -307,30 +309,34 @@ fn recursive_dirscan(
                             }
                             Ok(None) => return Ok(None),
                             Err(e) => {
-                                let mut last_result = result.last_mut().unwrap();
+                                let last_result = result.last_mut().unwrap();
                                 // TODO -- last_result.message = f'({when}) {e.strerror} ({e.errno})'
+                                last_result.message = e.to_string();
                                 last_result.status = DBFileStatus::Error;
                             }
                         }
                     }
                 }
-                Err(e) => result.push(DBFileEntry {
-                    id: 0,
-                    job_id: 0,
-                    file: archive_mounter::archive_parent_map(&entry.path(), archive_dirs),
-                    is_file: false,
-                    is_dir: false,
-                    is_symlink: false,
-                    size: 0,
-                    uid: 0,
-                    gid: 0,
-                    status: DBFileStatus::Error,
-                    // TODO -- message: f'({when}) {e.strerror} ({e.errno})'
-                    message: e.to_string(),
-                    target_is_dir: false,
-                    target_is_symlink: false,
-                    cur_target: None,
-                }),
+                Err(e) => {
+                    result.push(DBFileEntry {
+                        id: 0,
+                        job_id: 0,
+                        file: archive_mounter::archive_parent_map(&entry.path(), archive_dirs),
+                        is_file: false,
+                        is_dir: false,
+                        is_symlink: false,
+                        size: 0,
+                        uid: 0,
+                        gid: 0,
+                        status: DBFileStatus::Error,
+                        // TODO -- message: f'({when}) {e.strerror} ({e.errno})'
+                        message: e.to_string(),
+                        target_is_dir: false,
+                        target_is_symlink: false,
+                        cur_target: None,
+                    });
+                    info.num_files += 1;
+                }
             }
         }
     }

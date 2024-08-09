@@ -156,7 +156,7 @@ impl Component for Input {
         f.render_widget(input, *chunk);
 
         if let Focus::Focused = focus {
-            f.set_cursor(chunk.x + (cursor_width as u16), chunk.y);
+            f.set_cursor_position((chunk.x + (cursor_width as u16), chunk.y));
         }
     }
 }

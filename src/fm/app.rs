@@ -667,12 +667,10 @@ impl App {
                     status: DBJobStatus::Dirscan,
                 };
 
-                let job_id = self
-                    .db_file
+                self.db_file
                     .as_deref()
                     .and_then(|db_file| DataBase::new(db_file).ok())
-                    .map(|mut db| db.new_job(&mut job))
-                    .unwrap_or(0);
+                    .map(|mut db| db.new_job(&mut job));
 
                 self.dialog = Some(Box::new(DlgDirscan::new(
                     &self.config,
@@ -828,12 +826,10 @@ impl App {
                         status: DBJobStatus::Dirscan,
                     };
 
-                    let job_id = self
-                        .db_file
+                    self.db_file
                         .as_deref()
                         .and_then(|db_file| DataBase::new(db_file).ok())
-                        .map(|mut db| db.new_job(&mut job))
-                        .unwrap_or(0);
+                        .map(|mut db| db.new_job(&mut job));
 
                     self.dialog = Some(Box::new(DlgDirscan::new(
                         &self.config,
@@ -1089,7 +1085,7 @@ impl app::App for App {
                 Constraint::Length(1),
                 Constraint::Length(1),
             ])
-            .split(f.size());
+            .split(f.area());
 
         let panel_chunks = Layout::default()
             .direction(Direction::Horizontal)

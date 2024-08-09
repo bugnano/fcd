@@ -235,7 +235,7 @@ impl app::App for App {
                 Constraint::Min(1),
                 Constraint::Length(1),
             ])
-            .split(f.size());
+            .split(f.area());
 
         self.top_bar.render(f, &chunks[0], Focus::Normal);
         self.viewer.render(f, &chunks[1], Focus::Focused);

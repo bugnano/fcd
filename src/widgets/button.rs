@@ -62,7 +62,7 @@ impl Component for Button {
 
         if let Focus::Focused = focus {
             if (chunk.width > 2) && (chunk.height > 0) {
-                f.set_cursor(chunk.x + 2, chunk.y);
+                f.set_cursor_position((chunk.x + 2, chunk.y));
             }
         }
     }

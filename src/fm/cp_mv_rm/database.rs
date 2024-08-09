@@ -1,11 +1,9 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    thread,
 };
 
 use anyhow::{bail, Result};
-use crossbeam_channel::{Receiver, Sender};
 
 use rusqlite::{
     self,
@@ -279,108 +277,106 @@ impl DataBase {
     }
 
     pub fn new_job(&mut self, job: &mut DBJobEntry) -> i64 {
-        match self.conn.transaction() {
-            Ok(tx) => {
-                let job_id = match tx.execute(
-                    "INSERT INTO jobs (
-                        pid,
-                        operation,
-                        cwd,
-                        dest,
-                        on_conflict,
-                        status
-                    ) VALUES (
-                        ?1,
-                        ?2,
-                        ?3,
-                        ?4,
-                        ?5,
-                        ?6
-                    )",
-                    (
-                        job.pid,
-                        job.operation,
-                        job.cwd.to_string_lossy(),
-                        job.dest.as_ref().map(|x| x.to_string_lossy()),
-                        job.on_conflict,
-                        job.status,
-                    ),
-                ) {
-                    Ok(_) => tx.last_insert_rowid(),
-                    Err(_) => return 0,
-                };
+        let Ok(tx) = self.conn.transaction() else {
+            return 0;
+        };
 
-                {
-                    let Ok(mut stmt) = tx.prepare(
-                        "INSERT INTO entries (
-                            job_id,
-                            file,
-                            is_file,
-                            is_dir,
-                            is_symlink,
-                            size,
-                            uid,
-                            gid
-                        ) VALUES (
-                            ?1,
-                            ?2,
-                            ?3,
-                            ?4,
-                            ?5,
-                            ?6,
-                            ?7,
-                            ?8
-                        )",
-                    ) else {
+        let job_id = match tx.execute(
+            "INSERT INTO jobs (
+                pid,
+                operation,
+                cwd,
+                dest,
+                on_conflict,
+                status
+            ) VALUES (
+                ?1,
+                ?2,
+                ?3,
+                ?4,
+                ?5,
+                ?6
+            )",
+            (
+                job.pid,
+                job.operation,
+                job.cwd.to_string_lossy(),
+                job.dest.as_ref().map(|x| x.to_string_lossy()),
+                job.on_conflict,
+                job.status,
+            ),
+        ) {
+            Ok(_) => tx.last_insert_rowid(),
+            Err(_) => return 0,
+        };
+
+        {
+            let Ok(mut stmt) = tx.prepare(
+                "INSERT INTO entries (
+                    job_id,
+                    file,
+                    is_file,
+                    is_dir,
+                    is_symlink,
+                    size,
+                    uid,
+                    gid
+                ) VALUES (
+                    ?1,
+                    ?2,
+                    ?3,
+                    ?4,
+                    ?5,
+                    ?6,
+                    ?7,
+                    ?8
+                )",
+            ) else {
+                return 0;
+            };
+
+            for entry in job.entries.iter_mut() {
+                match stmt.execute((
+                    job_id,
+                    entry.file.to_string_lossy(),
+                    entry.is_file,
+                    entry.is_dir,
+                    entry.is_symlink,
+                    entry.size,
+                    entry.uid,
+                    entry.gid,
+                )) {
+                    Ok(_) => {
+                        entry.id = tx.last_insert_rowid();
+                        entry.job_id = job_id;
+                    }
+                    Err(_) => {
                         return 0;
-                    };
-
-                    for entry in job.entries.iter_mut() {
-                        match stmt.execute((
-                            job_id,
-                            entry.file.to_string_lossy(),
-                            entry.is_file,
-                            entry.is_dir,
-                            entry.is_symlink,
-                            entry.size,
-                            entry.uid,
-                            entry.gid,
-                        )) {
-                            Ok(_) => {
-                                entry.id = tx.last_insert_rowid();
-                                entry.job_id = job_id;
-                            }
-                            Err(_) => {
-                                return 0;
-                            }
-                        }
                     }
                 }
+            }
+        }
 
-                {
-                    let Ok(mut stmt) =
-                        tx.prepare("INSERT INTO archives (job_id, archive) VALUES (?1, ?2)")
-                    else {
-                        return 0;
-                    };
+        {
+            let Ok(mut stmt) = tx.prepare("INSERT INTO archives (job_id, archive) VALUES (?1, ?2)")
+            else {
+                return 0;
+            };
 
-                    for archive in job.archives.iter() {
-                        if let Err(_) = stmt.execute((job_id, archive.to_string_lossy())) {
-                            return 0;
-                        }
-                    }
-                }
-
-                if let Err(_) = tx.commit() {
+            for archive in job.archives.iter() {
+                if let Err(_) = stmt.execute((job_id, archive.to_string_lossy())) {
                     return 0;
                 }
-
-                job.id = job_id;
-
-                job_id
             }
-            Err(_) => 0,
         }
+
+        if let Err(_) = tx.commit() {
+            return 0;
+        }
+
+        job.id = job_id;
+
+        job_id
     }
 
     pub fn get_jobs(&self) -> Vec<DBJobEntry> {
@@ -546,81 +542,83 @@ impl DataBase {
     }
 
     pub fn set_file_list(&mut self, job_id: i64, files: &mut [DBFileEntry]) {
-        if let Ok(tx) = self.conn.transaction() {
-            {
-                let Ok(mut stmt) = tx.prepare(
-                    "INSERT INTO files (
-                            job_id,
-                            file,
-                            is_file,
-                            is_dir,
-                            is_symlink,
-                            size,
-                            uid,
-                            gid,
-                            status,
-                            message,
-                            target_is_dir,
-                            target_is_symlink,
-                            cur_target
-                        ) VALUES (
-                            ?1,
-                            ?2,
-                            ?3,
-                            ?4,
-                            ?5,
-                            ?6,
-                            ?7,
-                            ?8,
-                            ?9,
-                            ?10,
-                            ?11,
-                            ?12,
-                            ?13
-                        )",
-                ) else {
-                    return;
-                };
+        let Ok(tx) = self.conn.transaction() else {
+            return;
+        };
 
-                for entry in files.iter_mut() {
-                    match stmt.execute((
-                        job_id,
-                        entry.file.to_string_lossy(),
-                        entry.is_file,
-                        entry.is_dir,
-                        entry.is_symlink,
-                        entry.size,
-                        entry.uid,
-                        entry.gid,
-                        entry.status,
-                        &entry.message,
-                        entry.target_is_dir,
-                        entry.target_is_symlink,
-                        entry
-                            .cur_target
-                            .as_ref()
-                            .map(|cur_target| cur_target.to_string_lossy()),
-                    )) {
-                        Ok(_) => {
-                            entry.id = tx.last_insert_rowid();
-                            entry.job_id = job_id;
-                        }
-                        Err(_) => {
-                            return;
-                        }
-                    }
-                }
-            }
-
-            let Ok(_) = tx.execute(
-                "UPDATE jobs SET status = ?1 WHERE id = ?2",
-                (DBJobStatus::InProgress, job_id),
+        {
+            let Ok(mut stmt) = tx.prepare(
+                "INSERT INTO files (
+                    job_id,
+                    file,
+                    is_file,
+                    is_dir,
+                    is_symlink,
+                    size,
+                    uid,
+                    gid,
+                    status,
+                    message,
+                    target_is_dir,
+                    target_is_symlink,
+                    cur_target
+                ) VALUES (
+                    ?1,
+                    ?2,
+                    ?3,
+                    ?4,
+                    ?5,
+                    ?6,
+                    ?7,
+                    ?8,
+                    ?9,
+                    ?10,
+                    ?11,
+                    ?12,
+                    ?13
+                )",
             ) else {
                 return;
             };
 
-            let _ = tx.commit();
+            for entry in files.iter_mut() {
+                match stmt.execute((
+                    job_id,
+                    entry.file.to_string_lossy(),
+                    entry.is_file,
+                    entry.is_dir,
+                    entry.is_symlink,
+                    entry.size,
+                    entry.uid,
+                    entry.gid,
+                    entry.status,
+                    &entry.message,
+                    entry.target_is_dir,
+                    entry.target_is_symlink,
+                    entry
+                        .cur_target
+                        .as_ref()
+                        .map(|cur_target| cur_target.to_string_lossy()),
+                )) {
+                    Ok(_) => {
+                        entry.id = tx.last_insert_rowid();
+                        entry.job_id = job_id;
+                    }
+                    Err(_) => {
+                        return;
+                    }
+                }
+            }
         }
+
+        let Ok(_) = tx.execute(
+            "UPDATE jobs SET status = ?1 WHERE id = ?2",
+            (DBJobStatus::InProgress, job_id),
+        ) else {
+            return;
+        };
+
+        let _ = tx.commit();
     }
 
     pub fn update_file(&self, file: &DBFileEntry) {

@@ -23,12 +23,11 @@ use crate::{
     config::Config,
     fm::{
         app::human_readable_size,
-        archive_mounter::{self, ArchiveEntry, ArchiveMounterCommand},
+        archive_mounter::ArchiveEntry,
         cp_mv_rm::{
             database::{DBFileEntry, DBJobEntry, DBJobOperation, DBJobStatus, DataBase},
             dirscan::{dirscan, DirScanEvent, DirScanInfo, ReadMetadata},
         },
-        entry::Entry,
     },
     tilde_layout::tilde_layout,
     widgets::button::Button,
@@ -154,7 +153,7 @@ impl DlgDirscan {
         self.db_file
             .as_deref()
             .and_then(|db_file| DataBase::new(db_file).ok())
-            .map(|mut db| db.delete_job(self.job.id));
+            .map(|db| db.delete_job(self.job.id));
     }
 }
 
@@ -165,6 +164,11 @@ impl Component for DlgDirscan {
         match key {
             Key::Esc | Key::Char('q') | Key::Char('Q') | Key::F(10) | Key::Char('0') => {
                 self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                // Resume the thread before the abort
+                self.suspend_tx.as_ref().map(|suspend_tx| {
+                    let _ = suspend_tx.send(());
+                });
 
                 let _ = self.ev_tx.send(DirScanEvent::Abort);
 
@@ -194,6 +198,11 @@ impl Component for DlgDirscan {
                 }
                 2 => {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                    // Resume the thread before the abort
+                    self.suspend_tx.as_ref().map(|suspend_tx| {
+                        let _ = suspend_tx.send(());
+                    });
 
                     let _ = self.ev_tx.send(DirScanEvent::Abort);
 
