@@ -75,7 +75,7 @@ impl ToSql for DBJobOperation {
 
 #[derive(Debug, Clone, Copy)]
 pub enum DBJobStatus {
-    Dirscan, // TODO
+    Dirscan,
     InProgress,
     Aborted,
     Done,
@@ -110,7 +110,6 @@ pub enum DBFileStatus {
     InProgress,
     Error,
     Skipped,
-    Aborted, // Not in rnr
     Done,
 }
 
@@ -121,7 +120,6 @@ impl FromSql for DBFileStatus {
             ValueRef::Text(b"IN_PROGRESS") => Ok(DBFileStatus::InProgress),
             ValueRef::Text(b"ERROR") => Ok(DBFileStatus::Error),
             ValueRef::Text(b"SKIPPED") => Ok(DBFileStatus::Skipped),
-            ValueRef::Text(b"ABORTED") => Ok(DBFileStatus::Aborted),
             ValueRef::Text(b"DONE") => Ok(DBFileStatus::Done),
             _ => Err(FromSqlError::InvalidType),
         }
@@ -135,7 +133,6 @@ impl ToSql for DBFileStatus {
             DBFileStatus::InProgress => b"IN_PROGRESS",
             DBFileStatus::Error => b"ERROR",
             DBFileStatus::Skipped => b"SKIPPED",
-            DBFileStatus::Aborted => b"ABORTED",
             DBFileStatus::Done => b"DONE",
         })))
     }

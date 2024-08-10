@@ -26,7 +26,7 @@ use crate::{
         app::{format_seconds, human_readable_size},
         archive_mounter::{self, ArchiveEntry},
         cp_mv_rm::{
-            cp_mv::{cp_mv, CpMvEvent, CpMvInfo},
+            cp_mv::{cp_mv, CpMvEvent, CpMvInfo, CpMvResult},
             database::{DBDirListEntry, DBFileEntry, DBJobEntry, OnConflict},
             dirscan::{dirscan, DirScanEvent, DirScanInfo, ReadMetadata},
             dlg_cp_mv::DlgCpMvType,
@@ -48,7 +48,7 @@ pub struct DlgCpMvProgress {
     dlg_cp_mv_type: DlgCpMvType,
     ev_tx: Sender<CpMvEvent>,
     info_rx: Receiver<CpMvInfo>,
-    result_rx: Receiver<(Vec<DBFileEntry>, Vec<DBDirListEntry>)>,
+    result_rx: Receiver<CpMvResult>,
     btn_suspend: Button,
     btn_skip: Button,
     btn_abort: Button,
@@ -153,7 +153,7 @@ impl DlgCpMvProgress {
         &mut self,
         ev_rx: Receiver<CpMvEvent>,
         info_tx: Sender<CpMvInfo>,
-        result_tx: Sender<(Vec<DBFileEntry>, Vec<DBDirListEntry>)>,
+        result_tx: Sender<CpMvResult>,
     ) {
         let job_id = self.job.id;
         let mode = self.dlg_cp_mv_type;
@@ -397,7 +397,7 @@ impl Component for DlgCpMvProgress {
             .split(upper_area[4]);
 
         let ratio = match self.cur_size {
-            0 => 1.0,
+            0 => 0.0,
             cur_size => (self.cur_bytes as f64) / (cur_size as f64),
         };
 
@@ -490,7 +490,7 @@ impl Component for DlgCpMvProgress {
             .split(middle_area[0]);
 
         let ratio = match self.total_size {
-            0 => 1.0,
+            0 => 0.0,
             total_size => (self.total_bytes as f64) / (total_size as f64),
         };
 

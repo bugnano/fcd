@@ -61,6 +61,13 @@ pub struct CpMvInfo {
 }
 
 #[derive(Debug, Clone)]
+pub struct CpMvResult {
+    pub files: Vec<DBFileEntry>,
+    pub dirs: Vec<DBDirListEntry>,
+    pub status: DBJobStatus,
+}
+
+#[derive(Debug, Clone)]
 struct Timers {
     pub start: Instant,
     pub last_write: Instant,
@@ -79,14 +86,15 @@ pub fn cp_mv(
     pubsub_tx: Sender<PubSub>,
     db_file: Option<&Path>,
     archive_dirs: &[ArchiveEntry],
-) -> (Vec<DBFileEntry>, Vec<DBDirListEntry>) {
+) -> CpMvResult {
+    let mut job_status_result = DBJobStatus::InProgress;
+
     let mut file_list = Vec::from(entries);
     file_list.sort_unstable_by(|a, b| a.file.cmp(&b.file));
 
     let actual_dest = unarchive_path_map(&dest, archive_dirs);
 
-    // TODO: Find the right block size
-    let default_block_size: i64 = 8 * 1024 * 1024;
+    let default_block_size: i64 = 128 * 1024;
     let block_size = match fs::metadata(&actual_dest) {
         Ok(metadata) => {
             let fs_block_size = metadata.blksize() as i64;
@@ -130,7 +138,7 @@ pub fn cp_mv(
         .and_then(|db| db.get_replace_first_path(job_id));
 
     let replace_first_path = replace_first_path.unwrap_or_else(|| {
-        let replace_first_path = actual_dest.is_dir();
+        let replace_first_path = !actual_dest.is_dir();
 
         if let Some(db) = &database {
             db.set_replace_first_path(job_id, replace_first_path);
@@ -179,14 +187,16 @@ pub fn cp_mv(
             &mut database,
             archive_dirs,
         ) {
-            Ok(status) => {
-                entry.status = status;
+            Ok((file_status, job_status)) => {
+                entry.status = file_status;
 
                 if let Some(db) = &database {
                     db.set_file_status(&entry);
                 }
 
-                if let DBFileStatus::Aborted = status {
+                if let DBJobStatus::Aborted = job_status {
+                    job_status_result = DBJobStatus::Aborted;
+
                     if let Some(db) = &database {
                         db.set_job_status(job_id, DBJobStatus::Aborted);
                     }
@@ -196,6 +206,7 @@ pub fn cp_mv(
             }
             Err(e) => {
                 // TODO -- entry.message = f'({when}) {e.strerror} ({e.errno})'
+                entry.message = e.to_string();
                 entry.status = DBFileStatus::Error;
 
                 if let Some(db) = &database {
@@ -230,14 +241,16 @@ pub fn cp_mv(
             &mut database,
             archive_dirs,
         ) {
-            Ok(status) => {
-                entry.status = status;
+            Ok((file_status, job_status)) => {
+                entry.status = file_status;
 
                 if let Some(db) = &database {
                     db.set_dir_list_entry_status(&entry);
                 }
 
-                if let DBFileStatus::Aborted = status {
+                if let DBJobStatus::Aborted = job_status {
+                    job_status_result = DBJobStatus::Aborted;
+
                     if let Some(db) = &database {
                         db.set_job_status(job_id, DBJobStatus::Aborted);
                     }
@@ -247,6 +260,7 @@ pub fn cp_mv(
             }
             Err(e) => {
                 // TODO -- entry.message = f'({when}) {e.strerror} ({e.errno})'
+                entry.message = e.to_string();
                 entry.status = DBFileStatus::Error;
 
                 if let Some(db) = &database {
@@ -256,11 +270,23 @@ pub fn cp_mv(
         }
     }
 
+    if let DBJobStatus::InProgress = job_status_result {
+        job_status_result = DBJobStatus::Done;
+
+        if let Some(db) = &database {
+            db.set_job_status(job_id, DBJobStatus::Done);
+        }
+    }
+
     if let None = &database {
         sync();
     }
 
-    (file_list, dir_list)
+    CpMvResult {
+        files: file_list,
+        dirs: dir_list,
+        status: job_status_result,
+    }
 }
 
 fn cp_mv_entry(
@@ -282,7 +308,7 @@ fn cp_mv_entry(
     timers: &mut Timers,
     database: &mut Option<DataBase>,
     archive_dirs: &[ArchiveEntry],
-) -> Result<DBFileStatus> {
+) -> Result<(DBFileStatus, DBJobStatus)> {
     timers.cur_start = Instant::now();
 
     let cur_file = PathBuf::from(&entry.file);
@@ -346,13 +372,13 @@ fn cp_mv_entry(
     let mut resume = false;
 
     match &entry.status {
-        DBFileStatus::InProgress | DBFileStatus::Aborted => {
+        DBFileStatus::InProgress => {
             if let Some(x) = &entry.cur_target {
                 cur_target = x.clone();
                 actual_target = unarchive_parent_map(&cur_target, archive_dirs);
             }
 
-            if actual_target.try_exists().is_ok() {
+            if actual_target.exists() {
                 resume = true;
 
                 if entry.message.is_empty() {
@@ -363,7 +389,7 @@ fn cp_mv_entry(
             }
         }
         _ => {
-            if actual_target.try_exists().is_ok() && !skip_dir {
+            if actual_target.exists() && !skip_dir {
                 target_is_dir = actual_target.is_dir();
                 target_is_symlink = actual_target.is_symlink();
 
@@ -374,7 +400,7 @@ fn cp_mv_entry(
                                 || matches!(on_conflict, OnConflict::RenameCopy))
                         {
                             entry.message = String::from("Same file");
-                            return Ok(DBFileStatus::Skipped);
+                            return Ok((DBFileStatus::Skipped, DBJobStatus::InProgress));
                         }
                     }
 
@@ -406,7 +432,7 @@ fn cp_mv_entry(
                                 .to_string_lossy()
                                 .to_string();
                             let mut existing_target = actual_target.clone();
-                            while existing_target.try_exists().is_ok() {
+                            while existing_target.exists() {
                                 let new_name = format!("{}.fcdsave{}", name, i);
                                 // TODO: I don't like this unwrap() call
                                 existing_target = existing_target.parent().unwrap().join(new_name);
@@ -443,10 +469,7 @@ fn cp_mv_entry(
                                 .to_string_lossy()
                                 .to_string();
                             let mut existing_target = cur_target.clone();
-                            while unarchive_path_map(&cur_target, archive_dirs)
-                                .try_exists()
-                                .is_ok()
-                            {
+                            while unarchive_path_map(&cur_target, archive_dirs).exists() {
                                 let new_name = format!("{}.fcdnew{}", name, i);
                                 // TODO: I don't like this unwrap() call
                                 cur_target = cur_target.parent().unwrap().join(new_name);
@@ -475,7 +498,7 @@ fn cp_mv_entry(
                         }
                         OnConflict::Skip => {
                             entry.message = String::from("Target exists");
-                            return Ok(DBFileStatus::Skipped);
+                            return Ok((DBFileStatus::Skipped, DBJobStatus::InProgress));
                         }
                     }
                 }
@@ -505,11 +528,11 @@ fn cp_mv_entry(
                 }
                 CpMvEvent::Skip => {
                     let _ = fs::remove_file(&actual_target);
-                    return Ok(DBFileStatus::Skipped);
+                    return Ok((DBFileStatus::Skipped, DBJobStatus::InProgress));
                 }
                 CpMvEvent::Abort => {
                     let _ = fs::remove_file(&actual_target);
-                    return Ok(DBFileStatus::Aborted);
+                    return Ok((DBFileStatus::InProgress, DBJobStatus::Aborted));
                 }
                 CpMvEvent::NoDb => {
                     if let Some(db) = &database {
@@ -536,7 +559,7 @@ fn cp_mv_entry(
     }
 
     if skip_dir {
-        return Ok(DBFileStatus::Done);
+        return Ok((DBFileStatus::Done, DBJobStatus::InProgress));
     }
 
     // TODO: I don't like this unwrap() call
@@ -614,20 +637,20 @@ fn cp_mv_entry(
                 timers,
                 database,
             ) {
-                Ok(DBFileStatus::Skipped) => {
+                Ok((DBFileStatus::Skipped, _)) => {
                     let _ = fs::remove_file(&actual_target);
-                    return Ok(DBFileStatus::Skipped);
+                    return Ok((DBFileStatus::Skipped, DBJobStatus::InProgress));
                 }
-                Ok(DBFileStatus::Aborted) => {
+                Ok((_, DBJobStatus::Aborted)) => {
                     let _ = fs::remove_file(&actual_target);
-                    return Ok(DBFileStatus::Aborted);
+                    return Ok((DBFileStatus::InProgress, DBJobStatus::Aborted));
                 }
                 Ok(_) => {}
                 Err(e) => return Err(e),
             }
         } else {
             entry.message = String::from("Special file");
-            return Ok(DBFileStatus::Error);
+            return Ok((DBFileStatus::Error, DBJobStatus::InProgress));
         }
 
         if !entry.is_dir {
@@ -666,7 +689,7 @@ fn cp_mv_entry(
         }
     }
 
-    Ok(DBFileStatus::Done)
+    Ok((DBFileStatus::Done, DBJobStatus::InProgress))
 }
 
 fn handle_dir_entry(
@@ -681,7 +704,7 @@ fn handle_dir_entry(
     timers: &mut Timers,
     database: &mut Option<DataBase>,
     archive_dirs: &[ArchiveEntry],
-) -> Result<DBFileStatus> {
+) -> Result<(DBFileStatus, DBJobStatus)> {
     timers.cur_start = Instant::now();
 
     if !ev_rx.is_empty() {
@@ -696,10 +719,10 @@ fn handle_dir_entry(
                     timers.start += dt;
                 }
                 CpMvEvent::Skip => {
-                    return Ok(DBFileStatus::Skipped);
+                    return Ok((DBFileStatus::Skipped, DBJobStatus::InProgress));
                 }
                 CpMvEvent::Abort => {
-                    return Ok(DBFileStatus::Aborted);
+                    return Ok((DBFileStatus::InProgress, DBJobStatus::Aborted));
                 }
                 CpMvEvent::NoDb => {
                     if let Some(db) = &database {
@@ -770,7 +793,7 @@ fn handle_dir_entry(
         }
     }
 
-    Ok(DBFileStatus::Done)
+    Ok((DBFileStatus::Done, DBJobStatus::InProgress))
 }
 
 fn copy_file(
@@ -786,7 +809,7 @@ fn copy_file(
     info: &mut CpMvInfo,
     timers: &mut Timers,
     database: &mut Option<DataBase>,
-) -> Result<DBFileStatus> {
+) -> Result<(DBFileStatus, DBJobStatus)> {
     let source_fd = open(actual_file, OFlags::RDONLY, Mode::RUSR).context("source_fd")?;
 
     let target_fd = match resume {
@@ -856,10 +879,10 @@ fn copy_file(
                         timers.start += dt;
                     }
                     CpMvEvent::Skip => {
-                        return Ok(DBFileStatus::Skipped);
+                        return Ok((DBFileStatus::Skipped, DBJobStatus::InProgress));
                     }
                     CpMvEvent::Abort => {
-                        return Ok(DBFileStatus::Aborted);
+                        return Ok((DBFileStatus::InProgress, DBJobStatus::Aborted));
                     }
                     CpMvEvent::NoDb => {
                         if let Some(db) = &database {
@@ -872,24 +895,24 @@ fn copy_file(
             }
         }
 
-        let bytes_copied = match copy_method {
+        let (bytes_copied, done) = match copy_method {
             CopyMethod::CopyFileRange => {
                 match copy_file_range(&source_fd, None, &target_fd, None, block_size as usize) {
-                    Ok(bytes_copied) => bytes_copied,
+                    Ok(bytes_copied) => (bytes_copied, bytes_copied == 0),
                     Err(_) => {
                         copy_method = CopyMethod::Sendfile;
 
-                        0
+                        (0, false)
                     }
                 }
             }
             CopyMethod::Sendfile => {
                 match sendfile(&target_fd, &source_fd, None, block_size as usize) {
-                    Ok(bytes_copied) => bytes_copied,
+                    Ok(bytes_copied) => (bytes_copied, bytes_copied == 0),
                     Err(_) => {
                         copy_method = CopyMethod::ReadWrite;
 
-                        0
+                        (0, false)
                     }
                 }
             }
@@ -906,11 +929,11 @@ fn copy_file(
                     }
                 }
 
-                bytes_copied
+                (bytes_copied, bytes_copied == 0)
             }
         };
 
-        if bytes_copied == 0 {
+        if done {
             break;
         }
 
@@ -920,8 +943,8 @@ fn copy_file(
 
         bytes_written += bytes_copied as u64;
 
-        info.cur_bytes += bytes_written;
-        info.total_bytes += bytes_written;
+        info.cur_bytes = bytes_written;
+        info.total_bytes += bytes_copied as u64;
 
         if timers.last_write.elapsed().as_millis() >= 50 {
             timers.last_write = Instant::now();
@@ -932,7 +955,7 @@ fn copy_file(
         }
     }
 
-    Ok(DBFileStatus::Done)
+    Ok((DBFileStatus::Done, DBJobStatus::InProgress))
 }
 
 fn same_file(file1: &Path, file2: &Path) -> Result<bool> {
