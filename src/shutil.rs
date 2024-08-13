@@ -144,7 +144,7 @@ pub fn copystat(src: &Path, dst: &Path) -> rustix::io::Result<()> {
 
     if FileType::from_raw_mode(st.st_mode) != FileType::Symlink {
         let fi = open(src, OFlags::RDONLY | OFlags::NOFOLLOW, Mode::RUSR)?;
-        let fo = open(dst, OFlags::WRONLY | OFlags::NOFOLLOW, Mode::WUSR)?;
+        let fo = open(dst, OFlags::RDONLY | OFlags::NOFOLLOW, Mode::RUSR)?;
 
         let _ = fchmod(&fo, Mode::from_raw_mode(st.st_mode));
 

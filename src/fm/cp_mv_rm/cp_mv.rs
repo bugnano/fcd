@@ -21,7 +21,7 @@ use rustix::{
 use crate::{
     app::PubSub,
     fm::{
-        archive_mounter::{self, unarchive_parent_map, unarchive_path_map, ArchiveEntry},
+        archive_mounter::{unarchive_parent_map, unarchive_path_map, ArchiveEntry},
         cp_mv_rm::{
             database::{
                 DBDirListEntry, DBFileEntry, DBFileStatus, DBJobStatus, DBRenameDirEntry,
@@ -205,8 +205,7 @@ pub fn cp_mv(
                 }
             }
             Err(e) => {
-                // TODO -- entry.message = f'({when}) {e.strerror} ({e.errno})'
-                entry.message = e.to_string();
+                entry.message = format!("({}) {}", e, e.root_cause());
                 entry.status = DBFileStatus::Error;
 
                 if let Some(db) = &database {
@@ -259,8 +258,7 @@ pub fn cp_mv(
                 }
             }
             Err(e) => {
-                // TODO -- entry.message = f'({when}) {e.strerror} ({e.errno})'
-                entry.message = e.to_string();
+                entry.message = format!("({}) {}", e, e.root_cause());
                 entry.status = DBFileStatus::Error;
 
                 if let Some(db) = &database {
@@ -426,7 +424,7 @@ fn cp_mv_entry(
                         OnConflict::RenameExisting => {
                             let mut i = 0;
                             // TODO: I don't like this unwrap() call
-                            let mut name = actual_target
+                            let name = actual_target
                                 .file_name()
                                 .unwrap()
                                 .to_string_lossy()
@@ -463,12 +461,12 @@ fn cp_mv_entry(
                         OnConflict::RenameCopy => {
                             let mut i = 0;
                             // TODO: I don't like this unwrap() call
-                            let mut name = cur_target
+                            let name = cur_target
                                 .file_name()
                                 .unwrap()
                                 .to_string_lossy()
                                 .to_string();
-                            let mut existing_target = cur_target.clone();
+                            let existing_target = cur_target.clone();
                             while unarchive_path_map(&cur_target, archive_dirs).exists() {
                                 let new_name = format!("{}.fcdnew{}", name, i);
                                 // TODO: I don't like this unwrap() call

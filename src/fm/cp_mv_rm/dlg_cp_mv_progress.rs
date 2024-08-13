@@ -24,14 +24,12 @@ use crate::{
     config::Config,
     fm::{
         app::{format_seconds, human_readable_size},
-        archive_mounter::{self, ArchiveEntry},
+        archive_mounter::ArchiveEntry,
         cp_mv_rm::{
             cp_mv::{cp_mv, CpMvEvent, CpMvInfo, CpMvResult},
             database::{DBDirListEntry, DBFileEntry, DBJobEntry, OnConflict},
-            dirscan::{dirscan, DirScanEvent, DirScanInfo, ReadMetadata},
             dlg_cp_mv::DlgCpMvType,
         },
-        entry::Entry,
     },
     tilde_layout::tilde_layout,
     widgets::button::Button,
@@ -281,6 +279,8 @@ impl Component for DlgCpMvProgress {
 
                 if let Ok(result) = self.result_rx.try_recv() {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                    self.job.status = result.status;
 
                     todo!();
                 }

@@ -148,8 +148,7 @@ pub fn dirscan(
                 Ok(None) => return None,
                 Err(e) => {
                     let last_result = result.last_mut().unwrap();
-                    // TODO -- last_result.message = f'({when}) {e.strerror} ({e.errno})'
-                    last_result.message = e.to_string();
+                    last_result.message = format!("(dirscan) {}", e);
                     last_result.status = DBFileStatus::Error;
                 }
             }
@@ -230,8 +229,7 @@ fn recursive_dirscan(
                                     uid: 0,
                                     gid: 0,
                                     status: DBFileStatus::Error,
-                                    // TODO -- message: f'({when}) {e.strerror} ({e.errno})'
-                                    message: e.to_string(),
+                                    message: format!("(dirscan) {}", e),
                                     target_is_dir: false,
                                     target_is_symlink: false,
                                     cur_target: None,
@@ -310,7 +308,7 @@ fn recursive_dirscan(
                             Ok(None) => return Ok(None),
                             Err(e) => {
                                 let last_result = result.last_mut().unwrap();
-                                // TODO -- last_result.message = f'({when}) {e.strerror} ({e.errno})'
+                                last_result.message = format!("(dirscan) {}", e);
                                 last_result.message = e.to_string();
                                 last_result.status = DBFileStatus::Error;
                             }
@@ -329,8 +327,7 @@ fn recursive_dirscan(
                         uid: 0,
                         gid: 0,
                         status: DBFileStatus::Error,
-                        // TODO -- message: f'({when}) {e.strerror} ({e.errno})'
-                        message: e.to_string(),
+                        message: format!("(dirscan) {}", e),
                         target_is_dir: false,
                         target_is_symlink: false,
                         cur_target: None,

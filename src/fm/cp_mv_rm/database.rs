@@ -618,6 +618,31 @@ impl DataBase {
         let _ = tx.commit();
     }
 
+    pub fn update_file_list(&mut self, files: &[DBFileEntry]) {
+        let Ok(tx) = self.conn.transaction() else {
+            return;
+        };
+
+        {
+            let Ok(mut stmt) = tx.prepare(
+                "UPDATE files
+                SET status = ?1,
+                    message = ?2
+                WHERE id = ?3",
+            ) else {
+                return;
+            };
+
+            for entry in files.iter() {
+                if let Err(_) = stmt.execute((entry.status, &entry.message, entry.id)) {
+                    return;
+                }
+            }
+        }
+
+        let _ = tx.commit();
+    }
+
     pub fn update_file(&self, file: &DBFileEntry) {
         if let Ok(mut stmt) = self.conn.prepare_cached(
             "UPDATE files

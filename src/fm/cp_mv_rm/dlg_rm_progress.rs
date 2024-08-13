@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     thread,
+    time::Duration,
 };
 
 use crossbeam_channel::{Receiver, Sender};
@@ -22,13 +23,12 @@ use crate::{
     component::{Component, Focus},
     config::Config,
     fm::{
-        app::human_readable_size,
-        archive_mounter::{self, ArchiveEntry},
+        app::format_seconds,
+        archive_mounter::ArchiveEntry,
         cp_mv_rm::{
-            database::{DBFileEntry, DBJobEntry},
-            dirscan::{dirscan, DirScanEvent, DirScanInfo, ReadMetadata},
+            database::{DBFileEntry, DBJobEntry, DBJobStatus, DataBase},
+            rm::{rm, RmEvent, RmInfo},
         },
-        entry::Entry,
     },
     tilde_layout::tilde_layout,
     widgets::button::Button,
@@ -42,11 +42,15 @@ pub struct DlgRmProgress {
     files: Vec<DBFileEntry>,
     archive_dirs: Vec<ArchiveEntry>,
     db_file: Option<PathBuf>,
+    ev_tx: Sender<RmEvent>,
+    info_rx: Receiver<RmInfo>,
+    result_rx: Receiver<(Vec<DBFileEntry>, DBJobStatus)>,
     btn_suspend: Button,
     btn_skip: Button,
     btn_abort: Button,
     current: String,
     num_files: usize,
+    total_time: Duration,
     focus_position: usize,
     suspend_tx: Option<Sender<()>>,
 }
@@ -60,6 +64,10 @@ impl DlgRmProgress {
         archive_dirs: &[ArchiveEntry],
         db_file: Option<&Path>,
     ) -> DlgRmProgress {
+        let (ev_tx, ev_rx) = crossbeam_channel::unbounded();
+        let (info_tx, info_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+
         let mut dlg = DlgRmProgress {
             config: Rc::clone(config),
             pubsub_tx,
@@ -67,6 +75,9 @@ impl DlgRmProgress {
             files: Vec::from(files),
             archive_dirs: Vec::from(archive_dirs),
             db_file: db_file.map(PathBuf::from),
+            ev_tx,
+            info_rx,
+            result_rx,
             btn_suspend: Button::new(
                 "Suspend ",
                 &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
@@ -99,44 +110,55 @@ impl DlgRmProgress {
             ),
             current: String::from(""),
             num_files: 0,
+            total_time: Duration::ZERO,
             focus_position: 0,
             suspend_tx: None,
         };
 
-        //dlg.dirscan_thread(cwd, ev_rx, info_tx, result_tx);
+        dlg.rm_thread(ev_rx, info_tx, result_tx);
 
         dlg
     }
 
-    // fn dirscan_thread(
-    //     &mut self,
-    //     cwd: &Path,
-    //     ev_rx: Receiver<DirScanEvent>,
-    //     info_tx: Sender<DirScanInfo>,
-    //     result_tx: Sender<DirScanResult>,
-    // ) {
-    //     let (entries, read_metadata) = match &self.dirscan_type {
-    //         DirscanType::Cp => todo!(),
-    //         DirscanType::Mv => todo!(),
-    //         DirscanType::Rm(entries) => (entries.clone(), ReadMetadata::No),
-    //     };
+    fn rm_thread(
+        &mut self,
+        ev_rx: Receiver<RmEvent>,
+        info_tx: Sender<RmInfo>,
+        result_tx: Sender<(Vec<DBFileEntry>, DBJobStatus)>,
+    ) {
+        let entries = self.files.clone();
+        let archive_dirs = self.archive_dirs.clone();
+        let pubsub_tx = self.pubsub_tx.clone();
 
-    //     let pubsub_tx = self.pubsub_tx.clone();
-    //     let cwd = PathBuf::from(cwd);
+        thread::spawn(move || {
+            let result = rm(&entries, ev_rx, info_tx, pubsub_tx.clone(), &archive_dirs);
 
-    //     thread::spawn(move || {
-    //         let result = dirscan(
-    //             &entries,
-    //             &cwd,
-    //             read_metadata,
-    //             ev_rx,
-    //             info_tx,
-    //             pubsub_tx.clone(),
-    //         );
-    //         let _ = result_tx.send(result);
-    //         let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
-    //     });
-    // }
+            let _ = result_tx.send(result);
+            let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
+        });
+    }
+
+    fn suspend(&mut self) {
+        if let None = &self.suspend_tx {
+            let (suspend_tx, suspend_rx) = crossbeam_channel::unbounded();
+
+            let _ = self.ev_tx.send(RmEvent::Suspend(suspend_rx));
+
+            self.btn_suspend.set_label("Continue");
+
+            self.suspend_tx = Some(suspend_tx);
+        }
+    }
+
+    fn resume(&mut self) {
+        if let Some(suspend_tx) = &self.suspend_tx {
+            let _ = suspend_tx.send(());
+
+            self.btn_suspend.set_label("Suspend ");
+
+            self.suspend_tx = None;
+        }
+    }
 }
 
 impl Component for DlgRmProgress {
@@ -145,22 +167,24 @@ impl Component for DlgRmProgress {
 
         match key {
             Key::Esc | Key::Char('q') | Key::Char('Q') | Key::F(10) | Key::Char('0') => {
-                self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+                self.resume();
 
-                // let _ = self.ev_tx.send(DirScanEvent::Abort);
+                let _ = self.ev_tx.send(RmEvent::Abort);
             }
             Key::Char('\n') | Key::Char(' ') => match self.focus_position {
-                0 => {
-                    todo!();
-                }
+                0 => match &self.suspend_tx {
+                    Some(_suspend_tx) => self.resume(),
+                    None => self.suspend(),
+                },
                 1 => {
-                    todo!();
+                    self.resume();
+
+                    let _ = self.ev_tx.send(RmEvent::Skip);
                 }
                 2 => {
-                    todo!();
-                }
-                3 => {
-                    todo!();
+                    self.resume();
+
+                    let _ = self.ev_tx.send(RmEvent::Abort);
                 }
                 _ => unreachable!(),
             },
@@ -179,22 +203,32 @@ impl Component for DlgRmProgress {
     }
 
     fn handle_pubsub(&mut self, event: &PubSub) {
-        // match event {
-        //     PubSub::ComponentThreadEvent => {
-        //         if let Ok(info) = self.info_rx.try_recv() {
-        //             self.current = self
-        //                 .archive_path(&info.current)
-        //                 .to_string_lossy()
-        //                 .to_string();
-        //             self.num_files = info.files;
-        //             self.total_size = info.bytes;
-        //         }
-        //         if let Ok(result) = self.result_rx.try_recv() {
-        //             todo!();
-        //         }
-        //     }
-        //     _ => (),
-        // }
+        match event {
+            PubSub::ComponentThreadEvent => {
+                if let Ok(info) = self.info_rx.try_recv() {
+                    self.current = info.current.to_string_lossy().to_string();
+                    self.num_files = info.num_files;
+                    self.total_time = info.total_time;
+                }
+
+                if let Ok((files, status)) = self.result_rx.try_recv() {
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                    self.job.status = status;
+
+                    self.db_file
+                        .as_deref()
+                        .and_then(|db_file| DataBase::new(db_file).ok())
+                        .map(|mut db| {
+                            db.update_file_list(&files);
+                            db.set_job_status(self.job.id, status);
+                        });
+
+                    todo!();
+                }
+            }
+            _ => (),
+        }
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
@@ -310,7 +344,7 @@ impl Component for DlgRmProgress {
             .split(middle_area[0]);
 
         let ratio = match self.files.len() {
-            0 => 1.0,
+            0 => 0.0,
             len => (self.num_files as f64) / (len as f64),
         };
 
@@ -337,8 +371,23 @@ impl Component for DlgRmProgress {
             ),
             middle_area[1].width as usize,
         )));
-        let time = Paragraph::new(Span::raw(tilde_layout(
-            &format!("Time: {} ETA {}", "00:00:00", "00:00:00"),
+
+        let total_fps = match self.total_time.as_secs_f64() {
+            0.0 => 0.0,
+            secs => (self.files.len() as f64) / secs,
+        };
+
+        let total_eta = match total_fps {
+            0.0 => 0,
+            _ => (((self.files.len() - self.num_files) as f64) / total_fps).round() as u64,
+        };
+
+        let total_time = Paragraph::new(Span::raw(tilde_layout(
+            &format!(
+                "Time: {} ETA {}",
+                format_seconds(self.total_time.as_secs()),
+                format_seconds(total_eta)
+            ),
             middle_area[2].width as usize,
         )));
 
@@ -347,7 +396,7 @@ impl Component for DlgRmProgress {
         f.render_widget(gauge, gauge_area[1]);
         f.render_widget(gauge_right, gauge_area[2]);
         f.render_widget(num_files, middle_area[1]);
-        f.render_widget(time, middle_area[2]);
+        f.render_widget(total_time, middle_area[2]);
 
         // Lower section
 
