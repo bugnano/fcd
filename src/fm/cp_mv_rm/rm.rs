@@ -50,8 +50,8 @@ pub fn rm(
     };
 
     let now = Instant::now();
-    let mut start = now.clone();
-    let mut last_write = now.clone();
+    let mut start = now;
+    let mut last_write = now;
     for entry in file_list.iter_mut() {
         match entry.status {
             DBFileStatus::Error | DBFileStatus::Skipped | DBFileStatus::Done => {

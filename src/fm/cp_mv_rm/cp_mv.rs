@@ -92,7 +92,7 @@ pub fn cp_mv(
     let mut file_list = Vec::from(entries);
     file_list.sort_unstable_by(|a, b| a.file.cmp(&b.file));
 
-    let actual_dest = unarchive_path_map(&dest, archive_dirs);
+    let actual_dest = unarchive_path_map(dest, archive_dirs);
 
     let default_block_size: i64 = 128 * 1024;
     let block_size = match fs::metadata(&actual_dest) {
@@ -149,8 +149,8 @@ pub fn cp_mv(
 
     let now = Instant::now();
     let mut timers = Timers {
-        start: now.clone(),
-        last_write: now.clone(),
+        start: now,
+        last_write: now,
         cur_start: now,
     };
 
@@ -191,7 +191,7 @@ pub fn cp_mv(
                 entry.status = file_status;
 
                 if let Some(db) = &database {
-                    db.set_file_status(&entry);
+                    db.set_file_status(entry);
                 }
 
                 if let DBJobStatus::Aborted = job_status {
@@ -209,7 +209,7 @@ pub fn cp_mv(
                 entry.status = DBFileStatus::Error;
 
                 if let Some(db) = &database {
-                    db.set_file_status(&entry);
+                    db.set_file_status(entry);
                 }
             }
         }
@@ -244,7 +244,7 @@ pub fn cp_mv(
                 entry.status = file_status;
 
                 if let Some(db) = &database {
-                    db.set_dir_list_entry_status(&entry);
+                    db.set_dir_list_entry_status(entry);
                 }
 
                 if let DBJobStatus::Aborted = job_status {
@@ -262,7 +262,7 @@ pub fn cp_mv(
                 entry.status = DBFileStatus::Error;
 
                 if let Some(db) = &database {
-                    db.set_dir_list_entry_status(&entry);
+                    db.set_dir_list_entry_status(entry);
                 }
             }
         }
@@ -276,7 +276,7 @@ pub fn cp_mv(
         }
     }
 
-    if let None = &database {
+    if database.is_none() {
         sync();
     }
 
@@ -413,7 +413,7 @@ fn cp_mv_entry(
                             if let Some(_db) = &database {
                                 // TODO: I don't like this unwrap() call
                                 fsync_parent(
-                                    &fs::canonicalize(&actual_target.parent().unwrap())
+                                    &fs::canonicalize(actual_target.parent().unwrap())
                                         .context("fsync")?,
                                 )
                                 .context("fsync")?;
@@ -446,7 +446,7 @@ fn cp_mv_entry(
                             if let Some(_db) = &database {
                                 // TODO: I don't like this unwrap() call
                                 fsync_parent(
-                                    &fs::canonicalize(&existing_target.parent().unwrap())
+                                    &fs::canonicalize(existing_target.parent().unwrap())
                                         .context("fsync")?,
                                 )
                                 .context("fsync")?;
@@ -510,7 +510,7 @@ fn cp_mv_entry(
     }
 
     if let Some(db) = &database {
-        db.update_file(&entry);
+        db.update_file(entry);
     }
 
     if !ev_rx.is_empty() {
@@ -561,7 +561,7 @@ fn cp_mv_entry(
     }
 
     // TODO: I don't like this unwrap() call
-    let parent_dir = fs::canonicalize(&actual_target.parent().unwrap()).context("parent_dir")?;
+    let parent_dir = fs::canonicalize(actual_target.parent().unwrap()).context("parent_dir")?;
 
     let mut perform_copy = true;
     if matches!(mode, DlgCpMvType::Mv) && !target_is_dir {
@@ -579,7 +579,7 @@ fn cp_mv_entry(
                         fsync_parent(&parent_dir).context("fsync")?;
 
                         // TODO: I don't like this unwrap() call
-                        let source_parent = fs::canonicalize(&actual_file.parent().unwrap())
+                        let source_parent = fs::canonicalize(actual_file.parent().unwrap())
                             .context("parent_dir")?;
 
                         fsync_parent(&source_parent).context("fsync")?;
@@ -628,9 +628,9 @@ fn cp_mv_entry(
                 entry.size,
                 block_size,
                 resume,
-                &ev_rx,
-                &info_tx,
-                &pubsub_tx,
+                ev_rx,
+                info_tx,
+                pubsub_tx,
                 info,
                 timers,
                 database,
@@ -681,7 +681,7 @@ fn cp_mv_entry(
         if let Some(_db) = &database {
             // TODO: I don't like this unwrap() call
             let source_parent =
-                fs::canonicalize(&actual_file.parent().unwrap()).context("parent_dir")?;
+                fs::canonicalize(actual_file.parent().unwrap()).context("parent_dir")?;
 
             fsync_parent(&source_parent).context("fsync")?;
         }
@@ -773,7 +773,7 @@ fn handle_dir_entry(
         if let Some(_db) = &database {
             // TODO: I don't like this unwrap() call
             let parent_dir =
-                fs::canonicalize(&actual_target.parent().unwrap()).context("parent_dir")?;
+                fs::canonicalize(actual_target.parent().unwrap()).context("parent_dir")?;
 
             fsync_parent(&parent_dir).context("fsync")?;
         }
@@ -785,7 +785,7 @@ fn handle_dir_entry(
         if let Some(_db) = &database {
             // TODO: I don't like this unwrap() call
             let source_parent =
-                fs::canonicalize(&actual_file.parent().unwrap()).context("parent_dir")?;
+                fs::canonicalize(actual_file.parent().unwrap()).context("parent_dir")?;
 
             fsync_parent(&source_parent).context("fsync")?;
         }
@@ -834,7 +834,7 @@ fn copy_file(
 
                 // TODO: I don't like this unwrap() call
                 let parent_dir =
-                    fs::canonicalize(&actual_target.parent().unwrap()).context("parent_dir")?;
+                    fs::canonicalize(actual_target.parent().unwrap()).context("parent_dir")?;
 
                 fsync_parent(&parent_dir).context("fsync")?;
             }
@@ -958,7 +958,7 @@ fn copy_file(
 
 fn same_file(file1: &Path, file2: &Path) -> Result<bool> {
     // TODO: Instead of canonicalizing the path it would be more reliable to check the device number and inode number
-    match (fs::canonicalize(&file1), fs::canonicalize(&file2)) {
+    match (fs::canonicalize(file1), fs::canonicalize(file2)) {
         (Ok(file), Ok(target)) if file == target => Ok(true),
         (e @ Err(_), _) | (_, e @ Err(_)) => Ok(e.map(|_| false)?),
         _ => Ok(false),

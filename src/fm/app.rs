@@ -684,7 +684,7 @@ impl App {
                 self.dialog = Some(Box::new(DlgRmProgress::new(
                     &self.config,
                     self.pubsub_tx.clone(),
-                    &job,
+                    job,
                     files,
                     archive_dirs,
                     self.db_file.as_deref(),
@@ -715,7 +715,7 @@ impl App {
                 self.dialog = Some(Box::new(DlgCpMv::new(
                     &self.config,
                     self.pubsub_tx.clone(),
-                    &cwd,
+                    cwd,
                     entries,
                     &dest,
                     dlg_cp_mv_type,
@@ -851,7 +851,7 @@ impl App {
                 self.dialog = Some(Box::new(DlgCpMvProgress::new(
                     &self.config,
                     self.pubsub_tx.clone(),
-                    &job,
+                    job,
                     files,
                     archive_dirs,
                     self.db_file.as_deref(),

@@ -186,16 +186,14 @@ pub fn archive_path_map(file: &Path, archive_dirs: &[ArchiveEntry]) -> PathBuf {
 
 pub fn unarchive_parent_map(file: &Path, archive_dirs: &[ArchiveEntry]) -> PathBuf {
     match (file.parent(), file.file_name()) {
-        (Some(parent), Some(file_name)) => {
-            unarchive_path_map(&parent, archive_dirs).join(file_name)
-        }
+        (Some(parent), Some(file_name)) => unarchive_path_map(parent, archive_dirs).join(file_name),
         _ => PathBuf::from(file),
     }
 }
 
 pub fn archive_parent_map(file: &Path, archive_dirs: &[ArchiveEntry]) -> PathBuf {
     match (file.parent(), file.file_name()) {
-        (Some(parent), Some(file_name)) => archive_path_map(&parent, archive_dirs).join(file_name),
+        (Some(parent), Some(file_name)) => archive_path_map(parent, archive_dirs).join(file_name),
         _ => PathBuf::from(file),
     }
 }
@@ -232,7 +230,7 @@ impl ArchiveMounter {
         let child = Command::new(&self.executable)
             .args(["-o", "ro"])
             .args([archive.file_name().unwrap(), temp_dir.as_os_str()])
-            .current_dir(&self.unarchive_path(archive.parent().unwrap()))
+            .current_dir(self.unarchive_path(archive.parent().unwrap()))
             .stderr(Stdio::piped())
             .spawn();
 
@@ -247,7 +245,7 @@ impl ArchiveMounter {
 
                                 let _ = Command::new("umount")
                                     .arg(&temp_dir)
-                                    .current_dir(&self.unarchive_path(archive.parent().unwrap()))
+                                    .current_dir(self.unarchive_path(archive.parent().unwrap()))
                                     .output();
 
                                 let _ = fs::remove_dir(&temp_dir);
@@ -278,9 +276,7 @@ impl ArchiveMounter {
                                 .map_err(|e| {
                                     let _ = Command::new("umount")
                                         .arg(&temp_dir)
-                                        .current_dir(
-                                            &self.unarchive_path(archive.parent().unwrap()),
-                                        )
+                                        .current_dir(self.unarchive_path(archive.parent().unwrap()))
                                         .output();
 
                                     let _ = fs::remove_dir(&temp_dir);
@@ -306,7 +302,7 @@ impl ArchiveMounter {
         if let Some((i, entry)) = pos_and_entry {
             let _ = Command::new("umount")
                 .arg(&entry.temp_dir)
-                .current_dir(&self.unarchive_path(archive.parent().unwrap()))
+                .current_dir(self.unarchive_path(archive.parent().unwrap()))
                 .output();
 
             let _ = fs::remove_dir(&entry.temp_dir);

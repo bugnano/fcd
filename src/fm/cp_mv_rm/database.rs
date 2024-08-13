@@ -361,13 +361,13 @@ impl DataBase {
             };
 
             for archive in job.archives.iter() {
-                if let Err(_) = stmt.execute((job_id, archive.to_string_lossy())) {
+                if stmt.execute((job_id, archive.to_string_lossy())).is_err() {
                     return 0;
                 }
             }
         }
 
-        if let Err(_) = tx.commit() {
+        if tx.commit().is_err() {
             return 0;
         }
 
@@ -634,7 +634,10 @@ impl DataBase {
             };
 
             for entry in files.iter() {
-                if let Err(_) = stmt.execute((entry.status, &entry.message, entry.id)) {
+                if stmt
+                    .execute((entry.status, &entry.message, entry.id))
+                    .is_err()
+                {
                     return;
                 }
             }

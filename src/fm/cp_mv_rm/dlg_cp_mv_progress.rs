@@ -195,7 +195,7 @@ impl DlgCpMvProgress {
     }
 
     fn suspend(&mut self) {
-        if let None = &self.suspend_tx {
+        if self.suspend_tx.is_none() {
             let (suspend_tx, suspend_rx) = crossbeam_channel::unbounded();
 
             let _ = self.ev_tx.send(CpMvEvent::Suspend(suspend_rx));
