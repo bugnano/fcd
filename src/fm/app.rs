@@ -37,12 +37,14 @@ use crate::{
         },
         cp_mv_rm::{
             database::{
-                DBEntriesEntry, DBJobEntry, DBJobOperation, DBJobStatus, DataBase, OnConflict,
+                DBEntriesEntry, DBFileStatus, DBJobEntry, DBJobOperation, DBJobStatus, DataBase,
+                OnConflict,
             },
             dlg_cp_mv::{DlgCpMv, DlgCpMvType},
             dlg_cp_mv_progress::DlgCpMvProgress,
             dlg_dirscan::DlgDirscan,
             dlg_question::DlgQuestion,
+            dlg_report::DlgReport,
             dlg_rm_progress::DlgRmProgress,
         },
         dlg_mount_archive::DlgMountArchive,
@@ -869,6 +871,49 @@ impl App {
                     self.db_file.as_deref(),
                     dlg_cp_mv_type,
                 )));
+            }
+            PubSub::JobCompleted(job, files, dirs) => {
+                self.pubsub_tx.send(PubSub::Reload).unwrap();
+
+                let job_aborted = matches!(job.status, DBJobStatus::Aborted);
+
+                let skipped_files = files
+                    .iter()
+                    .any(|entry| matches!(entry.status, DBFileStatus::Skipped));
+
+                let skipped_dirs = dirs
+                    .as_ref()
+                    .map(|entries| {
+                        entries
+                            .iter()
+                            .any(|entry| matches!(entry.status, DBFileStatus::Skipped))
+                    })
+                    .unwrap_or(false);
+
+                let messages_files = files.iter().any(|entry| !entry.message.is_empty());
+
+                let messages_dirs = dirs
+                    .as_ref()
+                    .map(|entries| entries.iter().any(|entry| !entry.message.is_empty()))
+                    .unwrap_or(false);
+
+                if job_aborted || skipped_files || skipped_dirs || messages_files || messages_dirs {
+                    self.dialog = Some(Box::new(DlgReport::new(
+                        &self.config,
+                        self.pubsub_tx.clone(),
+                        job,
+                        files,
+                        dirs.as_deref(),
+                        self.db_file.as_deref(),
+                    )));
+                } else {
+                    self.db_file
+                        .as_deref()
+                        .and_then(|db_file| DataBase::new(db_file).ok())
+                        .map(|db| db.delete_job(job.id));
+
+                    // TODO: Process next pending job
+                }
             }
             _ => (),
         }

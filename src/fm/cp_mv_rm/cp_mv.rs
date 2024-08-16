@@ -12,8 +12,8 @@ use crossbeam_channel::{Receiver, Sender};
 use pathdiff::diff_paths;
 use rustix::{
     fs::{
-        copy_file_range, fallocate, fstat, fsync, open, seek, sendfile, sync, FallocateFlags, Mode,
-        OFlags, SeekFrom,
+        copy_file_range, fadvise, fallocate, fstat, fsync, open, seek, sendfile, sync, Advice,
+        FallocateFlags, Mode, OFlags, SeekFrom,
     },
     io::{read, write, Errno},
 };
@@ -530,7 +530,7 @@ fn cp_mv_entry(
                 }
                 CpMvEvent::Abort => {
                     let _ = fs::remove_file(&actual_target);
-                    return Ok((DBFileStatus::InProgress, DBJobStatus::Aborted));
+                    return Ok((DBFileStatus::ToDo, DBJobStatus::Aborted));
                 }
                 CpMvEvent::NoDb => {
                     if let Some(db) = &database {
@@ -641,7 +641,7 @@ fn cp_mv_entry(
                 }
                 Ok((_, DBJobStatus::Aborted)) => {
                     let _ = fs::remove_file(&actual_target);
-                    return Ok((DBFileStatus::InProgress, DBJobStatus::Aborted));
+                    return Ok((DBFileStatus::ToDo, DBJobStatus::Aborted));
                 }
                 Ok(_) => {}
                 Err(e) => return Err(e),
@@ -860,6 +860,8 @@ fn copy_file(
         false => 0,
     };
 
+    let _ = fadvise(&source_fd, bytes_written, 0, Advice::Sequential);
+
     let mut copy_method = CopyMethod::CopyFileRange;
 
     let mut buf = vec![0; block_size as usize];
@@ -917,13 +919,11 @@ fn copy_file(
             CopyMethod::ReadWrite => {
                 let mut bytes_copied = 0;
 
-                buf.resize(block_size as usize, 0);
                 let bytes_read = read(&source_fd, &mut buf).context("read")?;
                 if bytes_read != 0 {
-                    buf.resize(bytes_read, 0);
-
                     while bytes_copied < bytes_read {
-                        bytes_copied += write(&target_fd, &buf[bytes_copied..]).context("write")?;
+                        bytes_copied +=
+                            write(&target_fd, &buf[bytes_copied..bytes_read]).context("write")?;
                     }
                 }
 

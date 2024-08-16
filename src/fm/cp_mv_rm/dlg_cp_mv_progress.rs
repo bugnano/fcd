@@ -27,7 +27,7 @@ use crate::{
         archive_mounter::ArchiveEntry,
         cp_mv_rm::{
             cp_mv::{cp_mv, CpMvEvent, CpMvInfo, CpMvResult},
-            database::{DBDirListEntry, DBFileEntry, DBJobEntry, OnConflict},
+            database::{DBFileEntry, DBJobEntry},
             dlg_cp_mv::DlgCpMvType,
         },
     },
@@ -282,7 +282,13 @@ impl Component for DlgCpMvProgress {
 
                     self.job.status = result.status;
 
-                    todo!();
+                    self.pubsub_tx
+                        .send(PubSub::JobCompleted(
+                            self.job.clone(),
+                            result.files,
+                            Some(result.dirs),
+                        ))
+                        .unwrap();
                 }
             }
             _ => (),

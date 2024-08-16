@@ -12,7 +12,7 @@ use crate::{
     fm::{
         archive_mounter::ArchiveEntry,
         cp_mv_rm::{
-            database::{DBFileEntry, DBJobEntry, OnConflict},
+            database::{DBDirListEntry, DBFileEntry, DBJobEntry, OnConflict},
             dlg_cp_mv::DlgCpMvType,
         },
         entry::{Entry, SortBy, SortOrder},
@@ -103,6 +103,9 @@ pub enum PubSub {
 
     // Dialog CpMv events
     DoDirscan(PathBuf, Vec<Entry>, String, OnConflict, DlgCpMvType),
+
+    // Dialog Progress events
+    JobCompleted(DBJobEntry, Vec<DBFileEntry>, Option<Vec<DBDirListEntry>>),
 }
 
 #[derive(Debug, Copy, Clone)]

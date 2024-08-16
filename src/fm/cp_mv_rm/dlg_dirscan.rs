@@ -273,6 +273,7 @@ impl Component for DlgDirscan {
                             }
                         }
                         // If result is None it means that the operation has been aborted
+                        // TODO: If there are more jobs in the queue, they need to be processed
                         None => self.delete_job(),
                     }
                 }

@@ -224,7 +224,9 @@ impl Component for DlgRmProgress {
                             db.set_job_status(self.job.id, status);
                         });
 
-                    todo!();
+                    self.pubsub_tx
+                        .send(PubSub::JobCompleted(self.job.clone(), files, None))
+                        .unwrap();
                 }
             }
             _ => (),
