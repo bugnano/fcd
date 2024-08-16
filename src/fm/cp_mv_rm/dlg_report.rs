@@ -198,13 +198,6 @@ impl Component for DlgReport {
         key_handled
     }
 
-    fn handle_pubsub(&mut self, event: &PubSub) {
-        match event {
-            PubSub::ComponentThreadEvent => {}
-            _ => (),
-        }
-    }
-
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
         let area = centered_rect(
             (((chunk.width as usize) * 3) / 4) as u16,

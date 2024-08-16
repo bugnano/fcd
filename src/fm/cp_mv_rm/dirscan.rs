@@ -158,6 +158,7 @@ pub fn dirscan(
     Some(result)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn recursive_dirscan(
     cwd: &Path,
     archive_dirs: &[ArchiveEntry],

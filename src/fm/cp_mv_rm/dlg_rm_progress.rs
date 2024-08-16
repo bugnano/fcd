@@ -203,6 +203,7 @@ impl Component for DlgRmProgress {
     }
 
     fn handle_pubsub(&mut self, event: &PubSub) {
+        #[allow(clippy::single_match)]
         match event {
             PubSub::ComponentThreadEvent => {
                 if let Ok(info) = self.info_rx.try_recv() {

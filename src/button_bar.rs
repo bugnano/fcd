@@ -31,6 +31,7 @@ impl ButtonBar {
 
 impl Component for ButtonBar {
     fn handle_pubsub(&mut self, event: &PubSub) {
+        #[allow(clippy::single_match)]
         match event {
             PubSub::ButtonLabels(labels) => self.labels.clone_from(labels),
             _ => (),

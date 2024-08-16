@@ -35,6 +35,7 @@ impl TopBar {
 
 impl Component for TopBar {
     fn handle_pubsub(&mut self, event: &PubSub) {
+        #[allow(clippy::single_match)]
         match event {
             PubSub::FileInfo(filename, position, percent) => {
                 self.filename = String::from(filename);

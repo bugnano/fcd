@@ -49,3 +49,6 @@ strip = true
 lto = true
 codegen-units = 1
 panic = "abort"
+
+[lints.clippy]
+option_map_unit_fn = "allow"

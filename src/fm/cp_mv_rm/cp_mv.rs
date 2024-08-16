@@ -74,6 +74,7 @@ struct Timers {
     pub cur_start: Instant,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn cp_mv(
     job_id: i64,
     mode: DlgCpMvType,
@@ -287,6 +288,7 @@ pub fn cp_mv(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cp_mv_entry(
     job_id: i64,
     mode: DlgCpMvType,
@@ -392,14 +394,13 @@ fn cp_mv_entry(
                 target_is_symlink = actual_target.is_symlink();
 
                 if !(entry.is_dir && target_is_dir) {
-                    if same_file(&actual_file, &actual_target).context("samefile")? {
-                        if matches!(mode, DlgCpMvType::Mv)
+                    if same_file(&actual_file, &actual_target).context("samefile")?
+                        && (matches!(mode, DlgCpMvType::Mv)
                             || !(matches!(on_conflict, OnConflict::RenameExisting)
-                                || matches!(on_conflict, OnConflict::RenameCopy))
-                        {
-                            entry.message = String::from("Same file");
-                            return Ok((DBFileStatus::Skipped, DBJobStatus::InProgress));
-                        }
+                                || matches!(on_conflict, OnConflict::RenameCopy)))
+                    {
+                        entry.message = String::from("Same file");
+                        return Ok((DBFileStatus::Skipped, DBJobStatus::InProgress));
                     }
 
                     match on_conflict {
@@ -690,6 +691,7 @@ fn cp_mv_entry(
     Ok((DBFileStatus::Done, DBJobStatus::InProgress))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_dir_entry(
     job_id: i64,
     mode: DlgCpMvType,
@@ -794,6 +796,7 @@ fn handle_dir_entry(
     Ok((DBFileStatus::Done, DBJobStatus::InProgress))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn copy_file(
     job_id: i64,
     actual_file: &Path,

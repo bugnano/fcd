@@ -63,7 +63,9 @@ pub fn start() -> Option<Sender<ArchiveMounterCommand>> {
                             archive_mounter.umount_archive(&archive);
                         }
                         ArchiveMounterCommand::UmountParents(parents, completed_tx) => {
-                            let _ = completed_tx.send(archive_mounter.umount_parents(&parents));
+                            archive_mounter.umount_parents(&parents);
+
+                            let _ = completed_tx.send(());
                         }
                         ArchiveMounterCommand::UnarchivePath(file, unarchive_path_tx) => {
                             let _ = unarchive_path_tx.send(archive_mounter.unarchive_path(&file));
@@ -338,13 +340,13 @@ impl ArchiveMounter {
                 .archive_dirs
                 .iter()
                 .rev()
-                .filter_map(|entry| {
+                .filter(|&entry| {
                     entry
                         .archive_file
                         .ancestors()
                         .any(|ancestor| ancestor == file.as_ref())
-                        .then(|| entry.archive_file.clone())
                 })
+                .map(|entry| entry.archive_file.clone())
                 .collect();
 
             for archive in &archives_to_umount {

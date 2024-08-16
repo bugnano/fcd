@@ -129,6 +129,7 @@ impl Component for FileViewer {
             _ => self.main_viewer.handle_pubsub(event),
         }
 
+        #[allow(clippy::single_match)]
         match event {
             PubSub::ToggleHex => self.hex_mode = !self.hex_mode,
             _ => (),

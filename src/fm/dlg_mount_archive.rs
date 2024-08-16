@@ -121,6 +121,7 @@ impl Component for DlgMountArchive {
     }
 
     fn handle_pubsub(&mut self, event: &PubSub) {
+        #[allow(clippy::single_match)]
         match event {
             PubSub::ComponentThreadEvent => {
                 if let Ok(result) = self.result_rx.try_recv() {
