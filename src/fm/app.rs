@@ -644,12 +644,24 @@ impl App {
                 )));
             }
             PubSub::Rm(cwd, entries) => {
-                // TODO: Unmount all the archives referenced by entries
-
-                let archive_dirs = match &self.archive_mounter_command_tx {
+                let mut archive_dirs = match &self.archive_mounter_command_tx {
                     Some(command_tx) => archive_mounter::get_archive_dirs(command_tx),
                     None => Vec::new(),
                 };
+
+                if let Some(command_tx) = &self.archive_mounter_command_tx {
+                    // If the files that we're deleting are (parents of) mounted archives,
+                    // we need to umount those archives before deleting.
+                    let parents: Vec<PathBuf> = entries
+                        .iter()
+                        .map(|entry| archive_mounter::archive_path_map(&entry.file, &archive_dirs))
+                        .collect();
+
+                    archive_mounter::umount_parents(command_tx, &parents);
+
+                    // Given that we umounted some archives, we need to fetch the new archives list
+                    archive_dirs = archive_mounter::get_archive_dirs(command_tx);
+                }
 
                 let mut job = DBJobEntry {
                     id: 0,

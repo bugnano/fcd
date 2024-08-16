@@ -23,6 +23,7 @@ pub enum ArchiveMounterCommand {
     GetExeName(Sender<String>),
     MountArchive(PathBuf, Sender<Result<PathBuf>>, Receiver<()>),
     UmountArchive(PathBuf),
+    UmountParents(Vec<PathBuf>, Sender<()>),
     UnarchivePath(PathBuf, Sender<PathBuf>),
     ArchivePath(PathBuf, Sender<PathBuf>),
     GetArchiveDirs(Sender<Vec<ArchiveEntry>>),
@@ -60,6 +61,9 @@ pub fn start() -> Option<Sender<ArchiveMounterCommand>> {
                         }
                         ArchiveMounterCommand::UmountArchive(archive) => {
                             archive_mounter.umount_archive(&archive);
+                        }
+                        ArchiveMounterCommand::UmountParents(parents, completed_tx) => {
+                            let _ = completed_tx.send(archive_mounter.umount_parents(&parents));
                         }
                         ArchiveMounterCommand::UnarchivePath(file, unarchive_path_tx) => {
                             let _ = unarchive_path_tx.send(archive_mounter.unarchive_path(&file));
@@ -115,6 +119,22 @@ pub fn umount_archive(command_tx: &Sender<ArchiveMounterCommand>, archive: &Path
     command_tx
         .send(ArchiveMounterCommand::UmountArchive(PathBuf::from(archive)))
         .unwrap();
+}
+
+pub fn umount_parents<T: AsRef<Path>>(command_tx: &Sender<ArchiveMounterCommand>, parents: &[T]) {
+    let (completed_tx, completed_rx) = crossbeam_channel::unbounded();
+
+    command_tx
+        .send(ArchiveMounterCommand::UmountParents(
+            parents
+                .iter()
+                .map(|file| PathBuf::from(file.as_ref()))
+                .collect(),
+            completed_tx,
+        ))
+        .unwrap();
+
+    let _ = completed_rx.recv();
 }
 
 pub fn unarchive_path(command_tx: &Sender<ArchiveMounterCommand>, file: &Path) -> PathBuf {
@@ -312,6 +332,27 @@ impl ArchiveMounter {
         }
     }
 
+    pub fn umount_parents<T: AsRef<Path>>(&mut self, parents: &[T]) {
+        for file in parents.iter() {
+            let archives_to_umount: Vec<PathBuf> = self
+                .archive_dirs
+                .iter()
+                .rev()
+                .filter_map(|entry| {
+                    entry
+                        .archive_file
+                        .ancestors()
+                        .any(|ancestor| ancestor == file.as_ref())
+                        .then(|| entry.archive_file.clone())
+                })
+                .collect();
+
+            for archive in &archives_to_umount {
+                self.umount_archive(archive);
+            }
+        }
+    }
+
     pub fn unarchive_path(&self, file: &Path) -> PathBuf {
         unarchive_path_map(file, &self.archive_dirs)
     }
@@ -327,14 +368,14 @@ impl ArchiveMounter {
 
 impl Drop for ArchiveMounter {
     fn drop(&mut self) {
-        let archives_to_unmount: Vec<PathBuf> = self
+        let archives_to_umount: Vec<PathBuf> = self
             .archive_dirs
             .iter()
             .rev()
             .map(|entry| entry.archive_file.clone())
             .collect();
 
-        for archive in &archives_to_unmount {
+        for archive in &archives_to_umount {
             self.umount_archive(archive);
         }
     }
