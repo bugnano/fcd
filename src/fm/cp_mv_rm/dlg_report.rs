@@ -19,6 +19,7 @@ use crate::{
     app::{centered_rect, render_shadow, PubSub},
     component::{Component, Focus},
     config::Config,
+    dlg_error::DialogType,
     fm::cp_mv_rm::database::{
         DBDirListEntry, DBFileEntry, DBFileStatus, DBJobEntry, DBJobStatus, DataBase,
     },
@@ -33,10 +34,12 @@ pub struct DlgReport {
     job: DBJobEntry,
     db_file: Option<PathBuf>,
     messages: Vec<String>,
+    dialog_type: DialogType,
     btn_close: Button,
     btn_save: Button,
     first_line: usize,
     focus_position: usize,
+    rect: Rect,
 }
 
 impl DlgReport {
@@ -48,7 +51,7 @@ impl DlgReport {
         dirs: Option<&[DBDirListEntry]>,
         db_file: Option<&Path>,
     ) -> DlgReport {
-        let messages = files
+        let mut messages: Vec<String> = files
             .iter()
             .filter_map(|entry| match entry.status {
                 DBFileStatus::ToDo | DBFileStatus::InProgress => Some(format!(
@@ -128,34 +131,64 @@ impl DlgReport {
             )
             .collect();
 
+        // We want to show errors first
+        messages.sort_by_cached_key(|message| match message.starts_with("ERROR") {
+            true => 0,
+            false => 1,
+        });
+
+        // Given that we show errors first, we only need to check if the first message is an error
+        let dialog_type = match messages
+            .first()
+            .map(|message| message.starts_with("ERROR"))
+            .unwrap_or(false)
+        {
+            true => DialogType::Error,
+            false => DialogType::Warning,
+        };
+
+        let (style, focused_style, active_style) = match dialog_type {
+            DialogType::Error => (
+                Style::default().fg(config.error.fg).bg(config.error.bg),
+                Style::default()
+                    .fg(config.error.focus_fg)
+                    .bg(config.error.focus_bg),
+                Style::default()
+                    .fg(config.error.title_fg)
+                    .bg(config.error.bg),
+            ),
+            DialogType::Warning | DialogType::Info => (
+                Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
+                Style::default()
+                    .fg(config.dialog.focus_fg)
+                    .bg(config.dialog.focus_bg),
+                Style::default()
+                    .fg(config.dialog.title_fg)
+                    .bg(config.dialog.bg),
+            ),
+        };
+
         DlgReport {
             config: Rc::clone(config),
             pubsub_tx,
             job: job.clone(),
             db_file: db_file.map(PathBuf::from),
             messages,
-            btn_close: Button::new(
-                "Close",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
-            ),
-            btn_save: Button::new(
-                "Save",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
-            ),
+            dialog_type,
+            btn_close: Button::new("Close", &style, &focused_style, &active_style),
+            btn_save: Button::new("Save", &style, &focused_style, &active_style),
             first_line: 0,
             focus_position: 0,
+            rect: Rect::default(),
+        }
+    }
+
+    fn clamp_first_line(&mut self) {
+        if (self.first_line + (self.rect.height as usize)) > self.messages.len() {
+            self.first_line = self
+                .messages
+                .len()
+                .saturating_sub(self.rect.height as usize);
         }
     }
 
@@ -188,6 +221,31 @@ impl Component for DlgReport {
             },
             Key::Left | Key::Char('h') => self.focus_position = 0,
             Key::Right | Key::Char('l') => self.focus_position = 1,
+            Key::Up | Key::Char('k') => {
+                self.first_line = self.first_line.saturating_sub(1);
+            }
+            Key::Down | Key::Char('j') => {
+                self.first_line = self.first_line.saturating_add(1);
+                self.clamp_first_line();
+            }
+            Key::Home | Key::Char('g') => {
+                self.first_line = 0;
+            }
+            Key::End | Key::Char('G') => {
+                self.first_line = self.messages.len();
+                self.clamp_first_line();
+            }
+            Key::PageUp | Key::Ctrl('b') => {
+                let rect_height = (self.rect.height as usize).saturating_sub(1);
+
+                self.first_line = self.first_line.saturating_sub(rect_height);
+            }
+            Key::PageDown | Key::Ctrl('f') => {
+                let rect_height = (self.rect.height as usize).saturating_sub(1);
+
+                self.first_line = self.first_line.saturating_add(rect_height);
+                self.clamp_first_line();
+            }
             Key::Ctrl('c') => key_handled = false,
             Key::Ctrl('l') => key_handled = false,
             Key::Ctrl('z') => key_handled = false,
@@ -205,15 +263,27 @@ impl Component for DlgReport {
             chunk,
         );
 
-        f.render_widget(Clear, area);
-        f.render_widget(
-            Block::default().style(
+        let (style, title_style) = match self.dialog_type {
+            DialogType::Error => (
+                Style::default()
+                    .fg(self.config.error.fg)
+                    .bg(self.config.error.bg),
+                Style::default()
+                    .fg(self.config.error.title_fg)
+                    .bg(self.config.error.bg),
+            ),
+            DialogType::Warning | DialogType::Info => (
                 Style::default()
                     .fg(self.config.dialog.fg)
                     .bg(self.config.dialog.bg),
+                Style::default()
+                    .fg(self.config.dialog.title_fg)
+                    .bg(self.config.dialog.bg),
             ),
-            area,
-        );
+        };
+
+        f.render_widget(Clear, area);
+        f.render_widget(Block::default().style(style), area);
         if self.config.ui.use_shadows {
             render_shadow(
                 f,
@@ -245,20 +315,19 @@ impl Component for DlgReport {
             .title(
                 Title::from(Span::styled(
                     tilde_layout(" Report ", sections[0].width as usize),
-                    Style::default().fg(self.config.dialog.title_fg),
+                    title_style,
                 ))
                 .position(Position::Top)
                 .alignment(Alignment::Center),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .style(style);
 
         let upper_area = upper_block.inner(sections[0]);
+
+        self.rect = upper_area;
+        self.clamp_first_line();
 
         let items: Vec<ListItem> = self
             .messages
@@ -278,11 +347,7 @@ impl Component for DlgReport {
         let lower_block = Block::default()
             .borders(Borders::ALL)
             .border_set(middle_border_set)
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .style(style);
 
         let lower_area = Layout::default()
             .direction(Direction::Horizontal)

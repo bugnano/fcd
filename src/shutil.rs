@@ -133,10 +133,8 @@ pub fn copystat(src: &Path, dst: &Path) -> rustix::io::Result<()> {
         names.resize(len_names, 0);
         for name in names.split(|c| *c == 0) {
             if !name.is_empty() {
-                value.resize(65536, 0);
                 if let Ok(len_value) = lgetxattr(src, name, &mut value) {
-                    value.resize(len_value, 0);
-                    let _ = lsetxattr(dst, name, &value, XattrFlags::empty());
+                    let _ = lsetxattr(dst, name, &value[..len_value], XattrFlags::empty());
                 }
             }
         }
