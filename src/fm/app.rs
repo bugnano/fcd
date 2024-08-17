@@ -32,6 +32,7 @@ use crate::{
         bookmarks::Bookmarks,
         command_bar::{
             cmdbar::{CmdBar, CmdBarType},
+            component::CommandBarComponent,
             filter::Filter,
             leader::Leader,
         },
@@ -85,7 +86,7 @@ pub struct App {
     pubsub_tx: Sender<PubSub>,
     pubsub_rx: Receiver<PubSub>,
     panels: Vec<Box<dyn PanelComponent>>,
-    command_bar: Option<Box<dyn Component>>,
+    command_bar: Option<Box<dyn CommandBarComponent>>,
     button_bar: ButtonBar,
     dialog: Option<Box<dyn Component>>,
     fg_app: Option<Box<dyn app::App>>,
@@ -174,21 +175,18 @@ impl App {
                     }
                     false => match input {
                         Event::Key(key) => {
-                            let key_handled = match &mut self.dialog {
-                                Some(dlg) => dlg.handle_key(key),
-                                None => {
-                                    let mut key_handled = match &mut self.command_bar {
-                                        Some(command_bar) => command_bar.handle_key(key),
-                                        None => false,
-                                    };
+                            let focus_command_bar = self
+                                .command_bar
+                                .as_ref()
+                                .map(|command_bar| command_bar.is_focusable())
+                                .unwrap_or(false);
 
-                                    if !key_handled {
-                                        key_handled =
-                                            self.panels[self.panel_focus_position].handle_key(key);
-                                    }
-
-                                    key_handled
-                                }
+                            let key_handled = match focus_command_bar {
+                                true => self.command_bar.as_mut().unwrap().handle_key(key),
+                                false => match &mut self.dialog {
+                                    Some(dlg) => dlg.handle_key(key),
+                                    None => self.panels[self.panel_focus_position].handle_key(key),
+                                },
                             };
 
                             if !key_handled {
@@ -717,7 +715,6 @@ impl App {
                 let dest = self
                     .archive_path(&other_cwd)
                     .to_string_lossy()
-                    .to_string()
                     .replace('%', "%%");
 
                 let dlg_cp_mv_type = match pubsub {
@@ -914,6 +911,38 @@ impl App {
 
                     // TODO: Process next pending job
                 }
+            }
+            PubSub::PromptSaveReport(cwd, path) => {
+                let str_path = path.to_string_lossy().replace('%', "%%");
+                let chars: Vec<char> = str_path.chars().collect();
+
+                self.command_bar = Some(Box::new(CmdBar::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    CmdBarType::SaveReport(cwd.clone()),
+                    "save: ",
+                    &str_path,
+                    chars
+                        .iter()
+                        .rposition(|c| *c == '/')
+                        .unwrap_or(str_path.len()),
+                )));
+            }
+            PubSub::SaveReport(cwd, str_path) => {
+                let archive_path =
+                    expanduser(&PathBuf::from(&self.apply_template(str_path, Quote::No)));
+
+                let path = match archive_path.is_absolute() {
+                    true => self.unarchive_path(&archive_path),
+                    false => {
+                        let mut path = cwd.clone();
+                        path.push(&archive_path);
+
+                        self.unarchive_path(&path)
+                    }
+                };
+
+                self.pubsub_tx.send(PubSub::DoSaveReport(path)).unwrap();
             }
             _ => (),
         }
@@ -1168,13 +1197,19 @@ impl app::App for App {
             },
         );
 
+        let focus_command_bar = self
+            .command_bar
+            .as_ref()
+            .map(|command_bar| command_bar.is_focusable())
+            .unwrap_or(false);
+
         if let Some(command_bar) = &mut self.command_bar {
             command_bar.render(
                 f,
                 &chunks[1],
-                match &self.dialog {
-                    Some(_) => Focus::Normal,
-                    None => Focus::Focused,
+                match focus_command_bar {
+                    true => Focus::Focused,
+                    false => Focus::Normal,
                 },
             );
         }
@@ -1182,7 +1217,14 @@ impl app::App for App {
         self.button_bar.render(f, &chunks[2], Focus::Normal);
 
         if let Some(dlg) = &mut self.dialog {
-            dlg.render(f, &chunks[0], Focus::Focused);
+            dlg.render(
+                f,
+                &chunks[0],
+                match focus_command_bar {
+                    true => Focus::Normal,
+                    false => Focus::Focused,
+                },
+            );
         }
     }
 }

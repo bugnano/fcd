@@ -215,7 +215,12 @@ impl Component for DlgReport {
             Key::Char('\n') | Key::Char(' ') => match self.focus_position {
                 0 => self.close(),
                 1 => {
-                    todo!();
+                    let mut path = self.job.cwd.clone();
+                    path.push("fcd-report.txt");
+
+                    self.pubsub_tx
+                        .send(PubSub::PromptSaveReport(self.job.cwd.clone(), path))
+                        .unwrap();
                 }
                 _ => unreachable!(),
             },
@@ -256,7 +261,17 @@ impl Component for DlgReport {
         key_handled
     }
 
-    fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
+    fn handle_pubsub(&mut self, event: &PubSub) {
+        #[allow(clippy::single_match)]
+        match event {
+            PubSub::DoSaveReport(path) => {
+                todo!();
+            }
+            _ => (),
+        }
+    }
+
+    fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {
         let area = centered_rect(
             (((chunk.width as usize) * 3) / 4) as u16,
             (((chunk.height as usize) * 3) / 4) as u16,
@@ -367,7 +382,10 @@ impl Component for DlgReport {
             f,
             &lower_area[0],
             match self.focus_position {
-                0 => Focus::Focused,
+                0 => match focus {
+                    Focus::Focused => Focus::Focused,
+                    _ => Focus::Active,
+                },
                 _ => Focus::Normal,
             },
         );
@@ -375,7 +393,10 @@ impl Component for DlgReport {
             f,
             &lower_area[2],
             match self.focus_position {
-                1 => Focus::Focused,
+                1 => match focus {
+                    Focus::Focused => Focus::Focused,
+                    _ => Focus::Active,
+                },
                 _ => Focus::Normal,
             },
         );

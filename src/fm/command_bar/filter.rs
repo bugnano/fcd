@@ -10,6 +10,7 @@ use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
+    fm::command_bar::component::{CommandBar, CommandBarComponent},
     widgets::input::Input,
 };
 
@@ -75,3 +76,11 @@ impl Component for Filter {
         self.input.render(f, &sections[1], focus);
     }
 }
+
+impl CommandBar for Filter {
+    fn is_focusable(&self) -> bool {
+        true
+    }
+}
+
+impl CommandBarComponent for Filter {}

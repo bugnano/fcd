@@ -90,6 +90,7 @@ pub enum PubSub {
     UntagGlob(String),
     Mkdir(String),
     Rename(String),
+    SaveReport(PathBuf, String),
 
     // Dialog MountArchive events
     ArchiveMounted(PathBuf, PathBuf),
@@ -106,6 +107,10 @@ pub enum PubSub {
 
     // Dialog Progress events
     JobCompleted(DBJobEntry, Vec<DBFileEntry>, Option<Vec<DBDirListEntry>>),
+
+    // Dialog Report events
+    PromptSaveReport(PathBuf, PathBuf),
+    DoSaveReport(PathBuf),
 }
 
 #[derive(Debug, Copy, Clone)]

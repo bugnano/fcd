@@ -5,6 +5,7 @@ use ratatui::{prelude::*, widgets::*};
 use crate::{
     component::{Component, Focus},
     config::Config,
+    fm::command_bar::component::{CommandBar, CommandBarComponent},
 };
 
 #[derive(Debug)]
@@ -27,3 +28,11 @@ impl Component for Leader {
         f.render_widget(label, *chunk);
     }
 }
+
+impl CommandBar for Leader {
+    fn is_focusable(&self) -> bool {
+        false
+    }
+}
+
+impl CommandBarComponent for Leader {}

@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{path::PathBuf, rc::Rc};
 
 use crossbeam_channel::Sender;
 use ratatui::{prelude::*, widgets::*};
@@ -10,15 +10,17 @@ use crate::{
     app::PubSub,
     component::{Component, Focus},
     config::Config,
+    fm::command_bar::component::{CommandBar, CommandBarComponent},
     widgets::input::Input,
 };
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum CmdBarType {
     TagGlob,
     UntagGlob,
     Mkdir,
     Rename,
+    SaveReport(PathBuf),
 }
 
 #[derive(Debug)]
@@ -58,7 +60,7 @@ impl Component for CmdBar {
                 Key::Char('\n') => {
                     self.pubsub_tx.send(PubSub::CloseCommandBar).unwrap();
 
-                    match self.command_bar_type {
+                    match &self.command_bar_type {
                         CmdBarType::TagGlob => {
                             self.pubsub_tx
                                 .send(PubSub::TagGlob(self.input.value()))
@@ -77,6 +79,11 @@ impl Component for CmdBar {
                         CmdBarType::Rename => {
                             self.pubsub_tx
                                 .send(PubSub::Rename(self.input.value()))
+                                .unwrap();
+                        }
+                        CmdBarType::SaveReport(cwd) => {
+                            self.pubsub_tx
+                                .send(PubSub::SaveReport(cwd.clone(), self.input.value()))
                                 .unwrap();
                         }
                     }
@@ -111,3 +118,11 @@ impl Component for CmdBar {
         self.input.render(f, &sections[1], focus);
     }
 }
+
+impl CommandBar for CmdBar {
+    fn is_focusable(&self) -> bool {
+        true
+    }
+}
+
+impl CommandBarComponent for CmdBar {}
