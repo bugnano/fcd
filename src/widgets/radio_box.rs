@@ -71,7 +71,7 @@ impl Component for RadioBox {
                     key_handled = false;
                 }
             }
-            Key::Char(' ') | Key::Char('\n') => self.selected_button = self.cursor_position,
+            Key::Char(' ') => self.selected_button = self.cursor_position,
             _ => key_handled = false,
         }
 

@@ -1,15 +1,12 @@
 use std::{
-    env,
-    ffi::CString,
-    fs, io,
-    mem::MaybeUninit,
-    os::unix::fs::MetadataExt,
+    env, fs,
     path::{Path, PathBuf},
 };
 
 use rustix::fs::{
-    fchmod, ioctl_getflags, ioctl_setflags, lgetxattr, llistxattr, lsetxattr, lstat, open,
-    utimensat, AtFlags, FileType, Mode, OFlags, Timespec, Timestamps, XattrFlags, CWD,
+    access, fchmod, ioctl_getflags, ioctl_setflags, lgetxattr, llistxattr, lsetxattr, lstat, open,
+    statvfs, utimensat, Access, AtFlags, FileType, Mode, OFlags, Timespec, Timestamps, XattrFlags,
+    CWD,
 };
 use uzers::{get_current_uid, get_user_by_name, get_user_by_uid, os::unix::UserExt};
 
@@ -26,18 +23,8 @@ pub struct DiskUsage {
 }
 
 /// Return disk usage statistics about the given path.
-pub fn disk_usage(path: &Path) -> Result<DiskUsage, io::Error> {
-    let path_str = CString::new(path.as_os_str().as_encoded_bytes())?;
-
-    let st = unsafe {
-        let mut st = MaybeUninit::<libc::statvfs>::zeroed();
-
-        if libc::statvfs(path_str.as_ptr(), st.as_mut_ptr()) != 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        st.assume_init()
-    };
+pub fn disk_usage(path: &Path) -> rustix::io::Result<DiskUsage> {
+    let st = statvfs(path)?;
 
     Ok(DiskUsage {
         total: st.f_blocks * st.f_frsize,
@@ -55,8 +42,11 @@ pub fn which<T: AsRef<Path>>(cmd: T) -> Option<PathBuf> {
 
             let is_executable = path
                 .as_deref()
-                .and_then(|path| fs::metadata(path).ok())
-                .map(|metadata| metadata.is_file() && (metadata.mode() & 0o111) != 0)
+                .and_then(|path| {
+                    fs::metadata(path).ok().map(|metadata| {
+                        metadata.is_file() && access(path, Access::EXISTS | Access::EXEC_OK).is_ok()
+                    })
+                })
                 .unwrap_or(false);
 
             match is_executable {

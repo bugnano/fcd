@@ -313,7 +313,6 @@ fn cp_mv_entry(
 
     let cur_file = PathBuf::from(&entry.file);
 
-    // TODO: I don't like this unwrap() call
     let rel_file = diff_paths(&cur_file, cwd).unwrap();
 
     let mut skip_dir = false;
@@ -352,7 +351,6 @@ fn cp_mv_entry(
         {
             cur_target = rename_dir_entry
                 .cur_target
-                // TODO: I don't like this unwrap() call
                 .join(diff_paths(&cur_target, &rename_dir_entry.existing_target).unwrap());
             break;
         } else {
@@ -412,7 +410,6 @@ fn cp_mv_entry(
                             }
 
                             if let Some(_db) = &database {
-                                // TODO: I don't like this unwrap() call
                                 fsync_parent(
                                     &fs::canonicalize(actual_target.parent().unwrap())
                                         .context("fsync")?,
@@ -424,7 +421,6 @@ fn cp_mv_entry(
                         }
                         OnConflict::RenameExisting => {
                             let mut i = 0;
-                            // TODO: I don't like this unwrap() call
                             let name = actual_target
                                 .file_name()
                                 .unwrap()
@@ -433,7 +429,6 @@ fn cp_mv_entry(
                             let mut existing_target = actual_target.clone();
                             while existing_target.exists() {
                                 let new_name = format!("{}.fcdsave{}", name, i);
-                                // TODO: I don't like this unwrap() call
                                 existing_target = existing_target.parent().unwrap().join(new_name);
                                 i += 1;
                             }
@@ -445,7 +440,6 @@ fn cp_mv_entry(
                             fs::rename(&actual_target, &existing_target).context("rename")?;
 
                             if let Some(_db) = &database {
-                                // TODO: I don't like this unwrap() call
                                 fsync_parent(
                                     &fs::canonicalize(existing_target.parent().unwrap())
                                         .context("fsync")?,
@@ -453,7 +447,6 @@ fn cp_mv_entry(
                                 .context("fsync")?;
                             }
 
-                            // TODO: I don't like this unwrap() call
                             entry.message = format!(
                                 "Renamed to {}",
                                 existing_target.file_name().unwrap().to_string_lossy()
@@ -461,7 +454,6 @@ fn cp_mv_entry(
                         }
                         OnConflict::RenameCopy => {
                             let mut i = 0;
-                            // TODO: I don't like this unwrap() call
                             let name = cur_target
                                 .file_name()
                                 .unwrap()
@@ -470,14 +462,12 @@ fn cp_mv_entry(
                             let existing_target = cur_target.clone();
                             while unarchive_path_map(&cur_target, archive_dirs).exists() {
                                 let new_name = format!("{}.fcdnew{}", name, i);
-                                // TODO: I don't like this unwrap() call
                                 cur_target = cur_target.parent().unwrap().join(new_name);
                                 i += 1;
                             }
 
                             actual_target = unarchive_path_map(&cur_target, archive_dirs);
 
-                            // TODO: I don't like this unwrap() call
                             entry.message = format!(
                                 "Renamed to {}",
                                 cur_target.file_name().unwrap().to_string_lossy()
@@ -561,7 +551,6 @@ fn cp_mv_entry(
         return Ok((DBFileStatus::Done, DBJobStatus::InProgress));
     }
 
-    // TODO: I don't like this unwrap() call
     let parent_dir = fs::canonicalize(actual_target.parent().unwrap()).context("parent_dir")?;
 
     let mut perform_copy = true;
@@ -579,7 +568,6 @@ fn cp_mv_entry(
                     if let Some(db) = &database {
                         fsync_parent(&parent_dir).context("fsync")?;
 
-                        // TODO: I don't like this unwrap() call
                         let source_parent = fs::canonicalize(actual_file.parent().unwrap())
                             .context("parent_dir")?;
 
@@ -680,7 +668,6 @@ fn cp_mv_entry(
         fs::remove_file(&actual_file).context("remove")?;
 
         if let Some(_db) = &database {
-            // TODO: I don't like this unwrap() call
             let source_parent =
                 fs::canonicalize(actual_file.parent().unwrap()).context("parent_dir")?;
 
@@ -735,7 +722,6 @@ fn handle_dir_entry(
         }
     }
 
-    // TODO: I don't like this unwrap() call
     let rel_file = diff_paths(&entry.cur_file, cwd).unwrap();
 
     info.cur_source = rel_file.clone();
@@ -773,7 +759,6 @@ fn handle_dir_entry(
         shutil::copystat(&actual_file, &actual_target).context("copystat")?;
 
         if let Some(_db) = &database {
-            // TODO: I don't like this unwrap() call
             let parent_dir =
                 fs::canonicalize(actual_target.parent().unwrap()).context("parent_dir")?;
 
@@ -785,7 +770,6 @@ fn handle_dir_entry(
         fs::remove_dir(&actual_file).context("rmdir")?;
 
         if let Some(_db) = &database {
-            // TODO: I don't like this unwrap() call
             let source_parent =
                 fs::canonicalize(actual_file.parent().unwrap()).context("parent_dir")?;
 
@@ -835,7 +819,6 @@ fn copy_file(
             if let Some(_db) = &database {
                 fsync(&fd).context("fsync")?;
 
-                // TODO: I don't like this unwrap() call
                 let parent_dir =
                     fs::canonicalize(actual_target.parent().unwrap()).context("parent_dir")?;
 

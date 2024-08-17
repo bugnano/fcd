@@ -240,10 +240,9 @@ fn main() -> Result<()> {
                 let mut output = io::stdout();
                 write!(
                     output,
-                    "{}{}                          {}{}",
+                    "{}{}{}",
                     termion::cursor::Restore,
-                    termion::cursor::Save,
-                    termion::cursor::Restore,
+                    termion::clear::UntilNewline,
                     termion::screen::ToAlternateScreen
                 )?;
                 output.flush()?;

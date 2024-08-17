@@ -31,7 +31,7 @@ impl Component for CheckBox {
         let mut key_handled = true;
 
         match key {
-            Key::Char(' ') | Key::Char('\n') => self.checked = !self.checked,
+            Key::Char(' ') => self.checked = !self.checked,
             _ => key_handled = false,
         }
 

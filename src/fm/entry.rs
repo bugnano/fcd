@@ -197,8 +197,8 @@ pub fn get_file_list(cwd: &Path, file_list_rx: Option<Receiver<PathBuf>>) -> Res
                 || metadata.file_type().is_block_device()
             {
                 let rdev = metadata.rdev();
-                let major = unsafe { libc::major(rdev) };
-                let minor = unsafe { libc::minor(rdev) };
+                let major = rustix::fs::major(rdev);
+                let minor = rustix::fs::minor(rdev);
 
                 (
                     // This works as long as size is u64 and major and minor are u32
