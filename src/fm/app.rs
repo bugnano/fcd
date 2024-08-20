@@ -45,6 +45,7 @@ use crate::{
             dlg_cp_mv::{DlgCpMv, DlgCpMvType},
             dlg_cp_mv_progress::DlgCpMvProgress,
             dlg_dirscan::DlgDirscan,
+            dlg_pending_job::DlgPendingJob,
             dlg_question::DlgQuestion,
             dlg_report::DlgReport,
             dlg_rm_progress::DlgRmProgress,
@@ -98,6 +99,7 @@ pub struct App {
     tabsize: u8,
     ctrl_o: bool,
     archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
+    pending_jobs: Vec<DBJobEntry>,
 }
 
 impl App {
@@ -112,6 +114,39 @@ impl App {
         let (pubsub_tx, pubsub_rx) = crossbeam_channel::unbounded();
 
         let archive_mounter_command_tx = archive_mounter::start();
+
+        let self_pid = process::id();
+        let self_exe = fs::canonicalize("/proc/self/exe");
+
+        let pending_jobs: Vec<DBJobEntry> = db_file
+            .and_then(|db_file| DataBase::new(db_file).ok())
+            .map(|db| db.get_jobs())
+            .unwrap_or_default()
+            .iter()
+            .rev()
+            .filter(|job| {
+                // If the pid stored in the job is the same as the current pid, then
+                // it's an interrupted job from a previous session, given that the
+                // current app has not started yet.
+                if job.pid == self_pid {
+                    return true;
+                }
+
+                match (
+                    &self_exe,
+                    &fs::canonicalize(&format!("/proc/{}/exe", job.pid)),
+                ) {
+                    // If the pid stored in the job has the same executable as me,
+                    // it means that the job is running in another instance,
+                    // and has not been interrupted.
+                    (Ok(exe1), Ok(exe2)) if exe1 == exe2 => false,
+                    _ => true,
+                }
+            })
+            .cloned()
+            .collect();
+
+        pubsub_tx.send(PubSub::NextPendingJob).unwrap();
 
         Ok(App {
             config: Rc::clone(config),
@@ -152,6 +187,7 @@ impl App {
             tabsize,
             ctrl_o: false,
             archive_mounter_command_tx,
+            pending_jobs,
         })
     }
 
@@ -910,7 +946,7 @@ impl App {
                         .and_then(|db_file| DataBase::new(db_file).ok())
                         .map(|db| db.delete_job(job.id));
 
-                    // TODO: Process next pending job
+                    self.pubsub_tx.send(PubSub::NextPendingJob).unwrap();
                 }
             }
             PubSub::PromptSaveReport(cwd, path) => {
@@ -947,6 +983,21 @@ impl App {
             }
             PubSub::CommandBarError(msg) => {
                 self.command_bar = Some(Box::new(CommandBarError::new(&self.config, msg)));
+            }
+            PubSub::NextPendingJob => {
+                match self.pending_jobs.pop() {
+                    Some(job) => {
+                        self.dialog = Some(Box::new(DlgPendingJob::new(
+                            &self.config,
+                            self.pubsub_tx.clone(),
+                            &job,
+                            self.db_file.as_deref(),
+                        )));
+                    }
+                    None => {
+                        // TODO: Umount all archives
+                    }
+                }
             }
             _ => (),
         }

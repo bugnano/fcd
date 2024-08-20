@@ -36,6 +36,7 @@ pub enum PubSub {
     ComponentThreadEvent,
     Esc,
     Question(String, String, Box<PubSub>),
+    NextPendingJob,
 
     // Button bar events
     ButtonLabels(Vec<String>),

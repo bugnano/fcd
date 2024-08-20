@@ -171,13 +171,6 @@ impl DlgDirscan {
             self.suspend_tx = None;
         }
     }
-
-    fn delete_job(&self) {
-        self.db_file
-            .as_deref()
-            .and_then(|db_file| DataBase::new(db_file).ok())
-            .map(|db| db.delete_job(self.job.id));
-    }
 }
 
 impl Component for DlgDirscan {
@@ -273,9 +266,15 @@ impl Component for DlgDirscan {
                                 }
                             }
                         }
-                        // If result is None it means that the operation has been aborted
-                        // TODO: If there are more jobs in the queue, they need to be processed
-                        None => self.delete_job(),
+                        None => {
+                            // If result is None it means that the operation has been aborted
+                            self.db_file
+                                .as_deref()
+                                .and_then(|db_file| DataBase::new(db_file).ok())
+                                .map(|db| db.delete_job(self.job.id));
+
+                            self.pubsub_tx.send(PubSub::NextPendingJob).unwrap();
+                        }
                     }
                 }
             }

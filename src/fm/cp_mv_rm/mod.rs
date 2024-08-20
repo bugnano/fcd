@@ -4,6 +4,7 @@ pub mod dirscan;
 pub mod dlg_cp_mv;
 pub mod dlg_cp_mv_progress;
 pub mod dlg_dirscan;
+pub mod dlg_pending_job;
 pub mod dlg_question;
 pub mod dlg_report;
 pub mod dlg_rm_progress;

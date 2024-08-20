@@ -114,6 +114,17 @@ impl ToSql for DBJobStatus {
     }
 }
 
+impl fmt::Display for DBJobStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            DBJobStatus::Dirscan => write!(f, "DIRSCAN"),
+            DBJobStatus::InProgress => write!(f, "IN_PROGRESS"),
+            DBJobStatus::Aborted => write!(f, "ABORTED"),
+            DBJobStatus::Done => write!(f, "DONE"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum DBFileStatus {
     ToDo,
@@ -397,7 +408,7 @@ impl DataBase {
                         dest,
                         on_conflict,
                         replace_first_path,
-                        status,
+                        status
                 FROM jobs
                 ORDER BY id",
             )
@@ -454,7 +465,7 @@ impl DataBase {
         }
 
         if let Ok(mut stmt) = self.conn.prepare(
-            "SELECT archive,
+            "SELECT archive
             FROM archives
             WHERE job_id = ?1
             ORDER BY id",

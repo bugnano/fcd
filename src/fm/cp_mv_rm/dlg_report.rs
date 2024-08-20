@@ -203,7 +203,7 @@ impl DlgReport {
             .and_then(|db_file| DataBase::new(db_file).ok())
             .map(|db| db.delete_job(self.job.id));
 
-        // TODO: Process next pending job
+        self.pubsub_tx.send(PubSub::NextPendingJob).unwrap();
     }
 }
 
