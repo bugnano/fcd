@@ -32,6 +32,7 @@ use crate::{
         bookmarks::Bookmarks,
         command_bar::{
             cmdbar::{CmdBar, CmdBarType},
+            command_bar_error::CommandBarError,
             component::CommandBarComponent,
             filter::Filter,
             leader::Leader,
@@ -943,6 +944,9 @@ impl App {
                 };
 
                 self.pubsub_tx.send(PubSub::DoSaveReport(path)).unwrap();
+            }
+            PubSub::CommandBarError(msg) => {
+                self.command_bar = Some(Box::new(CommandBarError::new(&self.config, msg)));
             }
             _ => (),
         }

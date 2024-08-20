@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    fmt, fs,
     path::{Path, PathBuf},
 };
 
@@ -70,6 +70,16 @@ impl ToSql for DBJobOperation {
             DBJobOperation::Mv => b"MV",
             DBJobOperation::Rm => b"RM",
         })))
+    }
+}
+
+impl fmt::Display for DBJobOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            DBJobOperation::Cp => write!(f, "Copy"),
+            DBJobOperation::Mv => write!(f, "Move"),
+            DBJobOperation::Rm => write!(f, "Delete"),
+        }
     }
 }
 

@@ -12,6 +12,9 @@ use_shadows = true
 shadow_fg = "dark gray"
 shadow_bg = "black"
 
+error_fg = "light red"
+error_bg = "reset"
+
 [panel]
 fg = "gray"
 bg = "blue"

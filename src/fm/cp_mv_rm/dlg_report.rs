@@ -1,4 +1,5 @@
 use std::{
+    io::{BufWriter, Write},
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -13,6 +14,7 @@ use ratatui::{
 };
 use termion::event::*;
 
+use atomicwrites::{AllowOverwrite, AtomicFile};
 use pathdiff::diff_paths;
 
 use crate::{
@@ -194,6 +196,7 @@ impl DlgReport {
 
     fn close(&self) {
         self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+        self.pubsub_tx.send(PubSub::CloseCommandBar).unwrap();
 
         self.db_file
             .as_deref()
@@ -265,7 +268,48 @@ impl Component for DlgReport {
         #[allow(clippy::single_match)]
         match event {
             PubSub::DoSaveReport(path) => {
-                todo!();
+                let result = AtomicFile::new(path, AllowOverwrite).write(|f| {
+                    let mut writer = BufWriter::new(f);
+
+                    writeln!(writer, "Operation: {}", self.job.operation)?;
+                    writeln!(writer, "From: {}", self.job.cwd.to_string_lossy())?;
+
+                    if let Some(dest) = &self.job.dest {
+                        writeln!(writer, "To: {}", dest.to_string_lossy())?;
+                    }
+
+                    writeln!(writer, "Files:")?;
+
+                    for entry in &self.job.entries {
+                        writeln!(
+                            writer,
+                            "{}",
+                            diff_paths(&entry.file, &self.job.cwd).unwrap().to_string_lossy()
+                        )?;
+                    }
+
+                    writeln!(writer)?;
+                    writeln!(writer, "------------------------------------------------------------------------------")?;
+                    writeln!(writer)?;
+
+                    for message in &self.messages {
+                        writeln!(writer, "{}", message)?;
+                    }
+
+                    Ok::<(), std::io::Error>(())
+                });
+
+                match result {
+                    Ok(()) => {
+                        self.pubsub_tx.send(PubSub::Reload).unwrap();
+                        self.close();
+                    }
+                    Err(e) => {
+                        self.pubsub_tx
+                            .send(PubSub::CommandBarError(e.to_string()))
+                            .unwrap();
+                    }
+                }
             }
             _ => (),
         }

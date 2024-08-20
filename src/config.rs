@@ -20,6 +20,9 @@ pub struct Ui {
 
     pub shadow_fg: Color,
     pub shadow_bg: Color,
+
+    pub error_fg: Color,
+    pub error_bg: Color,
 }
 
 #[derive(Deserialize, Debug, Copy, Clone)]

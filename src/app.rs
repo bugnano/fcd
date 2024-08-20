@@ -85,6 +85,7 @@ pub enum PubSub {
 
     // Command bar events
     CloseCommandBar,
+    CommandBarError(String),
     FileFilter(String),
     TagGlob(String),
     UntagGlob(String),

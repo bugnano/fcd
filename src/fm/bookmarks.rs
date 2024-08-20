@@ -83,8 +83,7 @@ impl Bookmarks {
 
     fn update_file(&mut self) {
         if let Some(file) = &self.file {
-            let af = AtomicFile::new(file, AllowOverwrite);
-            let _ = af.write(|f| {
+            let _ = AtomicFile::new(file, AllowOverwrite).write(|f| {
                 let mut result = Ok(());
 
                 for (k, v) in &self.data {

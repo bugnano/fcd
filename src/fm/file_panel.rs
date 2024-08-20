@@ -40,6 +40,12 @@ use crate::{
     tilde_layout::tilde_layout,
 };
 
+#[derive(Debug, Clone, Copy)]
+enum CursorPosition {
+    Keep,
+    Reset,
+}
+
 #[derive(Debug, Clone)]
 enum ComponentPubSub {
     FileList(Vec<Entry>),
@@ -145,6 +151,7 @@ impl FilePanel {
                             .as_ref()
                             .map(|selected_file| self.archive_path(selected_file))
                             .as_deref(),
+                        CursorPosition::Keep,
                     );
 
                     self.tagged_files
@@ -233,7 +240,7 @@ impl FilePanel {
         self.file_list_tx.send(self.cwd.clone()).unwrap();
     }
 
-    fn filter_and_sort_file_list(&mut self, selected_file: Option<&Path>) {
+    fn filter_and_sort_file_list(&mut self, selected_file: Option<&Path>, cursor: CursorPosition) {
         let offset_from_first = self.cursor_position.saturating_sub(self.first_line);
 
         self.shown_file_list =
@@ -242,17 +249,20 @@ impl FilePanel {
         self.shown_file_list
             .sort_unstable_by(|a, b| sort_by_function(self.sort_method)(a, b, self.sort_order));
 
-        match selected_file {
+        self.cursor_position = self.clamp_cursor(match selected_file {
             Some(file) => match self
                 .shown_file_list
                 .iter()
                 .position(|entry| self.archive_path(&entry.file) == file)
             {
-                Some(i) => self.cursor_position = self.clamp_cursor(i),
-                None => self.cursor_position = 0,
+                Some(i) => i,
+                None => match cursor {
+                    CursorPosition::Keep => self.cursor_position,
+                    CursorPosition::Reset => 0,
+                },
             },
-            None => self.cursor_position = 0,
-        }
+            None => 0,
+        });
 
         self.first_line = self.cursor_position.saturating_sub(offset_from_first);
         self.clamp_first_line();
@@ -773,7 +783,10 @@ impl Component for FilePanel {
                 if !self.file_filter.is_empty() {
                     self.file_filter.clear();
 
-                    self.filter_and_sort_file_list(self.get_selected_file().as_deref());
+                    self.filter_and_sort_file_list(
+                        self.get_selected_file().as_deref(),
+                        CursorPosition::Reset,
+                    );
 
                     if let Focus::Focused = self.focus {
                         self.pubsub_tx
@@ -786,7 +799,10 @@ impl Component for FilePanel {
                 self.sort_method = *sort_method;
                 self.sort_order = *sort_order;
 
-                self.filter_and_sort_file_list(self.get_selected_file().as_deref());
+                self.filter_and_sort_file_list(
+                    self.get_selected_file().as_deref(),
+                    CursorPosition::Reset,
+                );
 
                 if let Focus::Focused = self.focus {
                     self.pubsub_tx
@@ -799,7 +815,10 @@ impl Component for FilePanel {
                     if filter != &self.file_filter {
                         self.file_filter.clone_from(filter);
 
-                        self.filter_and_sort_file_list(self.get_selected_file().as_deref());
+                        self.filter_and_sort_file_list(
+                            self.get_selected_file().as_deref(),
+                            CursorPosition::Reset,
+                        );
 
                         if !self.shown_file_list.is_empty() {
                             let matcher = SkimMatcherV2::default();
@@ -844,7 +863,10 @@ impl Component for FilePanel {
                     HiddenFiles::Hide => HiddenFiles::Show,
                 };
 
-                self.filter_and_sort_file_list(self.get_selected_file().as_deref());
+                self.filter_and_sort_file_list(
+                    self.get_selected_file().as_deref(),
+                    CursorPosition::Reset,
+                );
 
                 if let Focus::Focused = self.focus {
                     self.pubsub_tx
