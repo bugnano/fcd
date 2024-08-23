@@ -22,12 +22,9 @@ use crate::{
     app::PubSub,
     fm::{
         archive_mounter::{unarchive_parent_map, unarchive_path_map, ArchiveEntry},
-        cp_mv_rm::{
-            database::{
-                DBDirListEntry, DBFileEntry, DBFileStatus, DBJobStatus, DBRenameDirEntry,
-                DBSkipDirEntry, DataBase, OnConflict,
-            },
-            dlg_cp_mv::DlgCpMvType,
+        cp_mv_rm::database::{
+            DBDirListEntry, DBFileEntry, DBFileStatus, DBJobOperation, DBJobStatus,
+            DBRenameDirEntry, DBSkipDirEntry, DataBase, OnConflict,
         },
     },
     shutil,
@@ -77,12 +74,12 @@ struct Timers {
 #[allow(clippy::too_many_arguments)]
 pub fn cp_mv(
     job_id: i64,
-    mode: DlgCpMvType,
-    entries: &[DBFileEntry],
+    operation: DBJobOperation,
     cwd: &Path,
     dest: &Path,
     on_conflict: OnConflict,
     replace_first_path: bool,
+    entries: &[DBFileEntry],
     ev_rx: Receiver<CpMvEvent>,
     info_tx: Sender<CpMvInfo>,
     pubsub_tx: Sender<PubSub>,
@@ -157,7 +154,7 @@ pub fn cp_mv(
 
         match cp_mv_entry(
             job_id,
-            mode,
+            operation,
             entry,
             cwd,
             dest,
@@ -217,7 +214,7 @@ pub fn cp_mv(
 
         match handle_dir_entry(
             job_id,
-            mode,
+            operation,
             entry,
             cwd,
             &ev_rx,
@@ -278,7 +275,7 @@ pub fn cp_mv(
 #[allow(clippy::too_many_arguments)]
 fn cp_mv_entry(
     job_id: i64,
-    mode: DlgCpMvType,
+    operation: DBJobOperation,
     entry: &mut DBFileEntry,
     cwd: &Path,
     dest: &Path,
@@ -380,7 +377,7 @@ fn cp_mv_entry(
 
                 if !(entry.is_dir && target_is_dir) {
                     if same_file(&actual_file, &actual_target).context("samefile")?
-                        && (matches!(mode, DlgCpMvType::Mv)
+                        && (matches!(operation, DBJobOperation::Mv)
                             || !(matches!(on_conflict, OnConflict::RenameExisting)
                                 || matches!(on_conflict, OnConflict::RenameCopy)))
                     {
@@ -541,7 +538,7 @@ fn cp_mv_entry(
     let parent_dir = fs::canonicalize(actual_target.parent().unwrap()).context("parent_dir")?;
 
     let mut perform_copy = true;
-    if matches!(mode, DlgCpMvType::Mv) && !target_is_dir {
+    if matches!(operation, DBJobOperation::Mv) && !target_is_dir {
         perform_copy = false;
         match fs::rename(&actual_file, &actual_target) {
             Ok(_) => {
@@ -651,7 +648,7 @@ fn cp_mv_entry(
         }
     }
 
-    if matches!(mode, DlgCpMvType::Mv) && perform_copy && !entry.is_dir {
+    if matches!(operation, DBJobOperation::Mv) && perform_copy && !entry.is_dir {
         fs::remove_file(&actual_file).context("remove")?;
 
         if let Some(_db) = &database {
@@ -668,7 +665,7 @@ fn cp_mv_entry(
 #[allow(clippy::too_many_arguments)]
 fn handle_dir_entry(
     job_id: i64,
-    mode: DlgCpMvType,
+    operation: DBJobOperation,
     entry: &DBDirListEntry,
     cwd: &Path,
     ev_rx: &Receiver<CpMvEvent>,
@@ -753,7 +750,7 @@ fn handle_dir_entry(
         }
     }
 
-    if let DlgCpMvType::Mv = mode {
+    if let DBJobOperation::Mv = operation {
         fs::remove_dir(&actual_file).context("rmdir")?;
 
         if let Some(_db) = &database {

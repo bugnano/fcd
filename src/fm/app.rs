@@ -42,7 +42,7 @@ use crate::{
                 DBEntriesEntry, DBFileStatus, DBJobEntry, DBJobOperation, DBJobStatus, DataBase,
                 OnConflict,
             },
-            dlg_cp_mv::{DlgCpMv, DlgCpMvType},
+            dlg_cp_mv::DlgCpMv,
             dlg_cp_mv_progress::DlgCpMvProgress,
             dlg_dirscan::DlgDirscan,
             dlg_pending_job::DlgPendingJob,
@@ -381,13 +381,14 @@ impl App {
         }
 
         match pubsub {
-            PubSub::Error(msg) => {
+            PubSub::Error(msg, next_action) => {
                 self.dialog = Some(Box::new(DlgError::new(
                     &self.config,
                     self.pubsub_tx.clone(),
                     msg,
                     "Error",
                     DialogType::Error,
+                    next_action.clone(),
                 )));
             }
             PubSub::Warning(title, msg) => {
@@ -397,6 +398,7 @@ impl App {
                     msg,
                     title,
                     DialogType::Warning,
+                    None,
                 )));
             }
             PubSub::Info(title, msg) => {
@@ -406,6 +408,7 @@ impl App {
                     msg,
                     title,
                     DialogType::Info,
+                    None,
                 )));
 
                 // Given that the Info dialog is used to show information,
@@ -513,7 +516,11 @@ impl App {
 
                 match fs::create_dir_all(new_dir) {
                     Ok(()) => self.pubsub_tx.send(PubSub::Reload).unwrap(),
-                    Err(e) => self.pubsub_tx.send(PubSub::Error(e.to_string())).unwrap(),
+                    Err(e) => {
+                        self.pubsub_tx
+                            .send(PubSub::Error(e.to_string(), None))
+                            .unwrap();
+                    }
                 }
             }
             PubSub::PromptRename(file_name, cursor_position) => {
@@ -567,14 +574,18 @@ impl App {
                             }
                             (Ok(_), Ok(_)) => {
                                 self.pubsub_tx
-                                    .send(PubSub::Error(String::from("File already exists")))
+                                    .send(PubSub::Error(String::from("File already exists"), None))
                                     .unwrap();
                             }
                             (Err(e), _) => {
-                                self.pubsub_tx.send(PubSub::Error(e.to_string())).unwrap();
+                                self.pubsub_tx
+                                    .send(PubSub::Error(e.to_string(), None))
+                                    .unwrap();
                             }
                             (_, Err(e)) => {
-                                self.pubsub_tx.send(PubSub::Error(e.to_string())).unwrap();
+                                self.pubsub_tx
+                                    .send(PubSub::Error(e.to_string(), None))
+                                    .unwrap();
                             }
                         }
                     }
@@ -635,7 +646,10 @@ impl App {
                                 self.pubsub_tx.send(PubSub::Reload).unwrap();
                             }
                         }
-                        Err(e) => self.pubsub_tx.send(PubSub::Error(e.to_string())).unwrap(),
+                        Err(e) => self
+                            .pubsub_tx
+                            .send(PubSub::Error(e.to_string(), None))
+                            .unwrap(),
                     },
                 }
             }
@@ -698,15 +712,15 @@ impl App {
                     pid: process::id(),
                     operation: DBJobOperation::Rm,
                     cwd: archive_cwd,
-                    entries: self.db_entries_from_entries(entries, &archive_dirs),
                     dest: None,
                     on_conflict: None,
+                    replace_first_path: false,
+                    status: DBJobStatus::Dirscan,
+                    entries: self.db_entries_from_entries(entries, &archive_dirs),
                     archives: archive_dirs
                         .iter()
                         .map(|archive_dir| archive_dir.archive_file.clone())
                         .collect(),
-                    replace_first_path: false,
-                    status: DBJobStatus::Dirscan,
                 };
 
                 self.db_file
@@ -747,9 +761,9 @@ impl App {
                     .to_string_lossy()
                     .replace('%', "%%");
 
-                let dlg_cp_mv_type = match pubsub {
-                    PubSub::Cp(_cwd, _entries) => DlgCpMvType::Cp,
-                    PubSub::Mv(_cwd, _entries) => DlgCpMvType::Mv,
+                let operation = match pubsub {
+                    PubSub::Cp(_cwd, _entries) => DBJobOperation::Cp,
+                    PubSub::Mv(_cwd, _entries) => DBJobOperation::Mv,
                     _ => unreachable!(),
                 };
 
@@ -759,10 +773,10 @@ impl App {
                     cwd,
                     entries,
                     &dest,
-                    dlg_cp_mv_type,
+                    operation,
                 )));
             }
-            PubSub::DoDirscan(cwd, entries, str_dest, on_conflict, dlg_cp_mv_type) => {
+            PubSub::DoDirscan(cwd, entries, str_dest, on_conflict, operation) => {
                 let archive_dest =
                     expanduser(&PathBuf::from(&self.apply_template(str_dest, Quote::No)));
 
@@ -782,7 +796,7 @@ impl App {
                             (Ok(canonical_cwd), Ok(canonical_dest))
                                 if canonical_cwd == canonical_dest =>
                             {
-                                if matches!(dlg_cp_mv_type, DlgCpMvType::Mv)
+                                if matches!(operation, DBJobOperation::Mv)
                                     || matches!(on_conflict, OnConflict::Overwrite)
                                     || matches!(on_conflict, OnConflict::Skip)
                                 {
@@ -807,7 +821,7 @@ impl App {
                                             (Ok(canonical_cwd), Ok(canonical_dest))
                                                 if canonical_cwd == canonical_dest =>
                                             {
-                                                if matches!(dlg_cp_mv_type, DlgCpMvType::Mv)
+                                                if matches!(operation, DBJobOperation::Mv)
                                                     || matches!(on_conflict, OnConflict::Overwrite)
                                                     || matches!(on_conflict, OnConflict::Skip)
                                                 {
@@ -821,10 +835,13 @@ impl App {
                                 }
                                 false => {
                                     self.pubsub_tx
-                                        .send(PubSub::Error(format!(
-                                            "{} is not a directory",
-                                            archive_dest_parent.to_string_lossy()
-                                        )))
+                                        .send(PubSub::Error(
+                                            format!(
+                                                "{} is not a directory",
+                                                archive_dest_parent.to_string_lossy()
+                                            ),
+                                            None,
+                                        ))
                                         .unwrap();
 
                                     do_dirscan = false;
@@ -832,10 +849,13 @@ impl App {
                             }
                         } else {
                             self.pubsub_tx
-                                .send(PubSub::Error(format!(
-                                    "{} is not a directory",
-                                    archive_dest.to_string_lossy()
-                                )))
+                                .send(PubSub::Error(
+                                    format!(
+                                        "{} is not a directory",
+                                        archive_dest.to_string_lossy()
+                                    ),
+                                    None,
+                                ))
                                 .unwrap();
 
                             do_dirscan = false;
@@ -871,20 +891,17 @@ impl App {
                     let mut job = DBJobEntry {
                         id: 0,
                         pid: process::id(),
-                        operation: match dlg_cp_mv_type {
-                            DlgCpMvType::Cp => DBJobOperation::Cp,
-                            DlgCpMvType::Mv => DBJobOperation::Mv,
-                        },
+                        operation: *operation,
                         cwd: archive_cwd,
-                        entries: self.db_entries_from_entries(entries, &archive_dirs),
                         dest: Some(archive_dest.clone()),
                         on_conflict: Some(*on_conflict),
+                        replace_first_path: !dest.is_dir(),
+                        status: DBJobStatus::Dirscan,
+                        entries: self.db_entries_from_entries(entries, &archive_dirs),
                         archives: archive_dirs
                             .iter()
                             .map(|archive_dir| archive_dir.archive_file.clone())
                             .collect(),
-                        replace_first_path: !dest.is_dir(),
-                        status: DBJobStatus::Dirscan,
                     };
 
                     self.db_file
@@ -902,9 +919,9 @@ impl App {
                 }
             }
             PubSub::DoCp(job, files, archive_dirs) | PubSub::DoMv(job, files, archive_dirs) => {
-                let dlg_cp_mv_type = match pubsub {
-                    PubSub::DoCp(_job, _files, _archive_dirs) => DlgCpMvType::Cp,
-                    PubSub::DoMv(_job, _files, _archive_dirs) => DlgCpMvType::Mv,
+                let operation = match pubsub {
+                    PubSub::DoCp(_job, _files, _archive_dirs) => DBJobOperation::Cp,
+                    PubSub::DoMv(_job, _files, _archive_dirs) => DBJobOperation::Mv,
                     _ => unreachable!(),
                 };
 
@@ -915,7 +932,7 @@ impl App {
                     files,
                     archive_dirs,
                     self.db_file.as_deref(),
-                    dlg_cp_mv_type,
+                    operation,
                 )));
             }
             PubSub::JobCompleted(job, files, dirs) => {
@@ -1008,94 +1025,92 @@ impl App {
 
                 self.pubsub_tx.send(PubSub::NextPendingArchive).unwrap();
             }
-            PubSub::NextPendingArchive => {
-                match self.pending_archives.pop() {
-                    Some(archive) => match &self.archive_mounter_command_tx {
-                        Some(_command_tx) => {
-                            self.pubsub_tx.send(PubSub::MountArchive(archive)).unwrap();
-                        }
-                        None => {
-                            self.pending_archives.clear();
-                            self.pending_job = None;
-
-                            // TODO: It would be nice to show the next pending jobs after dismissing the error
-                            self.pubsub_tx
-                                .send(PubSub::Error(String::from(
-                                    "archivefs/archivemount executable not found",
-                                )))
-                                .unwrap();
-                        }
-                    },
+            PubSub::NextPendingArchive => match self.pending_archives.pop() {
+                Some(archive) => match &self.archive_mounter_command_tx {
+                    Some(_command_tx) => {
+                        self.pubsub_tx.send(PubSub::MountArchive(archive)).unwrap();
+                    }
                     None => {
-                        let job = self
-                            .pending_job
-                            .take()
-                            .expect("BUG: pending_job is None when processing its archives");
+                        self.pending_archives.clear();
+                        self.pending_job = None;
 
-                        let archive_dirs = match &self.archive_mounter_command_tx {
-                            Some(command_tx) => archive_mounter::get_archive_dirs(command_tx),
-                            None => Vec::new(),
-                        };
+                        self.pubsub_tx
+                            .send(PubSub::Error(
+                                String::from("archivefs/archivemount executable not found"),
+                                Some(Box::new(PubSub::NextPendingJob)),
+                            ))
+                            .unwrap();
+                    }
+                },
+                None => {
+                    let job = self
+                        .pending_job
+                        .take()
+                        .expect("BUG: pending_job is None when processing its archives");
 
-                        match job.status {
-                            DBJobStatus::Dirscan => {
-                                self.dialog = Some(Box::new(DlgDirscan::new(
-                                    &self.config,
-                                    self.pubsub_tx.clone(),
-                                    &job,
-                                    &archive_dirs,
-                                    self.db_file.as_deref(),
-                                )));
-                            }
-                            DBJobStatus::InProgress => {
-                                let files = self
-                                    .db_file
-                                    .as_deref()
-                                    .and_then(|db_file| DataBase::new(db_file).ok())
-                                    .map(|db| db.get_file_list(job.id))
-                                    .unwrap_or_default();
+                    let archive_dirs = match &self.archive_mounter_command_tx {
+                        Some(command_tx) => archive_mounter::get_archive_dirs(command_tx),
+                        None => Vec::new(),
+                    };
 
-                                match job.operation {
-                                    DBJobOperation::Cp => {
-                                        self.pubsub_tx
-                                            .send(PubSub::DoCp(job, files, archive_dirs))
-                                            .unwrap();
-                                    }
-                                    DBJobOperation::Mv => {
-                                        self.pubsub_tx
-                                            .send(PubSub::DoMv(job, files, archive_dirs))
-                                            .unwrap();
-                                    }
-                                    DBJobOperation::Rm => {
-                                        self.pubsub_tx
-                                            .send(PubSub::DoRm(job, files, archive_dirs))
-                                            .unwrap();
-                                    }
+                    match job.status {
+                        DBJobStatus::Dirscan => {
+                            self.dialog = Some(Box::new(DlgDirscan::new(
+                                &self.config,
+                                self.pubsub_tx.clone(),
+                                &job,
+                                &archive_dirs,
+                                self.db_file.as_deref(),
+                            )));
+                        }
+                        DBJobStatus::InProgress => {
+                            let files = self
+                                .db_file
+                                .as_deref()
+                                .and_then(|db_file| DataBase::new(db_file).ok())
+                                .map(|db| db.get_file_list(job.id))
+                                .unwrap_or_default();
+
+                            match job.operation {
+                                DBJobOperation::Cp => {
+                                    self.pubsub_tx
+                                        .send(PubSub::DoCp(job, files, archive_dirs))
+                                        .unwrap();
+                                }
+                                DBJobOperation::Mv => {
+                                    self.pubsub_tx
+                                        .send(PubSub::DoMv(job, files, archive_dirs))
+                                        .unwrap();
+                                }
+                                DBJobOperation::Rm => {
+                                    self.pubsub_tx
+                                        .send(PubSub::DoRm(job, files, archive_dirs))
+                                        .unwrap();
                                 }
                             }
-                            DBJobStatus::Aborted | DBJobStatus::Done => {
-                                let files = self
-                                    .db_file
-                                    .as_deref()
-                                    .and_then(|db_file| DataBase::new(db_file).ok())
-                                    .map(|db| db.get_file_list(job.id))
-                                    .unwrap_or_default();
+                        }
+                        DBJobStatus::Aborted | DBJobStatus::Done => {
+                            let files = self
+                                .db_file
+                                .as_deref()
+                                .and_then(|db_file| DataBase::new(db_file).ok())
+                                .map(|db| db.get_file_list(job.id))
+                                .unwrap_or_default();
 
-                                let dirs = self
-                                    .db_file
-                                    .as_deref()
-                                    .and_then(|db_file| DataBase::new(db_file).ok())
-                                    .map(|db| db.get_dir_list(job.id))
-                                    .unwrap_or_default();
+                            let dirs = self
+                                .db_file
+                                .as_deref()
+                                .and_then(|db_file| DataBase::new(db_file).ok())
+                                .map(|db| db.get_dir_list(job.id))
+                                .unwrap_or_default();
 
-                                self.pubsub_tx
-                                    .send(PubSub::JobCompleted(job, files, dirs))
-                                    .unwrap();
-                            }
+                            self.pubsub_tx
+                                .send(PubSub::JobCompleted(job, files, dirs))
+                                .unwrap();
                         }
                     }
                 }
-            }
+            },
             PubSub::ArchiveMounted(_archive_file, _temp_dir) => {
                 if self.pending_job.is_some() {
                     self.pubsub_tx.send(PubSub::NextPendingArchive).unwrap();
@@ -1106,9 +1121,11 @@ impl App {
                     self.pending_archives.clear();
                     self.pending_job = None;
 
-                    // TODO: It would be nice to show the next pending jobs after dismissing the error
                     self.pubsub_tx
-                        .send(PubSub::Error(String::from(error)))
+                        .send(PubSub::Error(
+                            String::from(error),
+                            Some(Box::new(PubSub::NextPendingJob)),
+                        ))
                         .unwrap();
                 }
             }

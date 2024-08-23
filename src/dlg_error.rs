@@ -33,6 +33,7 @@ pub struct DlgError {
     message: String,
     title: String,
     dialog_type: DialogType,
+    next_action: Option<Box<PubSub>>,
 }
 
 impl DlgError {
@@ -42,6 +43,7 @@ impl DlgError {
         message: &str,
         title: &str,
         dialog_type: DialogType,
+        next_action: Option<Box<PubSub>>,
     ) -> DlgError {
         DlgError {
             config: Rc::clone(config),
@@ -49,6 +51,7 @@ impl DlgError {
             message: String::from(message),
             title: String::from(title),
             dialog_type,
+            next_action,
         }
     }
 }
@@ -60,6 +63,10 @@ impl Component for DlgError {
         match self.dialog_type {
             DialogType::Error | DialogType::Warning => {
                 self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                if let Some(next_action) = &self.next_action {
+                    self.pubsub_tx.send(*next_action.clone()).unwrap();
+                }
             }
             DialogType::Info => match key {
                 Key::Ctrl('c') => key_handled = false,

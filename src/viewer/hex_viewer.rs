@@ -462,7 +462,10 @@ impl Component for HexViewer {
                     }
                     Err(_) => {
                         self.pubsub_tx
-                            .send(PubSub::Error(format!("Invalid number: {}", str_offset)))
+                            .send(PubSub::Error(
+                                format!("Invalid number: {}", str_offset),
+                                None,
+                            ))
                             .unwrap();
                     }
                 }

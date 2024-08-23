@@ -20,16 +20,13 @@ use crate::{
     app::{centered_rect, render_shadow, PubSub},
     component::{Component, Focus},
     config::Config,
-    fm::{cp_mv_rm::database::OnConflict, entry::Entry},
+    fm::{
+        cp_mv_rm::database::{DBJobOperation, OnConflict},
+        entry::Entry,
+    },
     tilde_layout::tilde_layout,
     widgets::{button::Button, input::Input, radio_box::RadioBox},
 };
-
-#[derive(Debug, Clone, Copy)]
-pub enum DlgCpMvType {
-    Cp,
-    Mv,
-}
 
 #[derive(Debug)]
 pub struct DlgCpMv {
@@ -37,7 +34,7 @@ pub struct DlgCpMv {
     pubsub_tx: Sender<PubSub>,
     cwd: PathBuf,
     entries: Vec<Entry>,
-    dlg_cp_mv_type: DlgCpMvType,
+    operation: DBJobOperation,
     input: Input,
     radio: RadioBox,
     btn_ok: Button,
@@ -53,14 +50,14 @@ impl DlgCpMv {
         cwd: &Path,
         entries: &[Entry],
         dest: &str,
-        dlg_cp_mv_type: DlgCpMvType,
+        operation: DBJobOperation,
     ) -> DlgCpMv {
         DlgCpMv {
             config: Rc::clone(config),
             pubsub_tx,
             cwd: PathBuf::from(cwd),
             entries: Vec::from(entries),
-            dlg_cp_mv_type,
+            operation,
             input: Input::new(
                 &Style::default()
                     .fg(config.dialog.input_fg)
@@ -136,7 +133,7 @@ impl Component for DlgCpMv {
                                 self.entries.clone(),
                                 self.input.value(),
                                 on_conflict,
-                                self.dlg_cp_mv_type,
+                                self.operation,
                             ))
                             .unwrap();
                     }
@@ -218,10 +215,7 @@ impl Component for DlgCpMv {
 
         // Upper section
 
-        let title = match &self.dlg_cp_mv_type {
-            DlgCpMvType::Cp => "Copy",
-            DlgCpMvType::Mv => "Move",
-        };
+        let title = self.operation.to_string();
 
         let upper_block = Block::default()
             .title(

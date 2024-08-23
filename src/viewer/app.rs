@@ -145,13 +145,14 @@ impl App {
         }
 
         match pubsub {
-            PubSub::Error(msg) => {
+            PubSub::Error(msg, next_action) => {
                 self.dialog = Some(Box::new(DlgError::new(
                     &self.config,
                     self.pubsub_tx.clone(),
                     msg,
                     "Error",
                     DialogType::Error,
+                    next_action.clone(),
                 )));
             }
             PubSub::Warning(title, msg) => {
@@ -161,6 +162,7 @@ impl App {
                     msg,
                     title,
                     DialogType::Warning,
+                    None,
                 )));
             }
             PubSub::Info(title, msg) => {
@@ -170,6 +172,7 @@ impl App {
                     msg,
                     title,
                     DialogType::Info,
+                    None,
                 )));
 
                 // Given that the Info dialog is used to show information,

@@ -421,9 +421,10 @@ impl Component for FilePanel {
                         self.pubsub_tx.send(PubSub::Leader(self.leader)).unwrap();
                     } else {
                         self.pubsub_tx
-                            .send(PubSub::Error(String::from(
-                                "Cannot bookmark inside an archive",
-                            )))
+                            .send(PubSub::Error(
+                                String::from("Cannot bookmark inside an archive"),
+                                None,
+                            ))
                             .unwrap();
                     }
                 }
@@ -537,9 +538,10 @@ impl Component for FilePanel {
                             }
                             None => {
                                 self.pubsub_tx
-                                    .send(PubSub::Error(String::from(
-                                        "archivefs/archivemount executable not found",
-                                    )))
+                                    .send(PubSub::Error(
+                                        String::from("archivefs/archivemount executable not found"),
+                                        None,
+                                    ))
                                     .unwrap();
                             }
                         }
@@ -923,7 +925,7 @@ impl Component for FilePanel {
                         self.archive_mount_request = ArchiveMountRequest::None;
 
                         self.pubsub_tx
-                            .send(PubSub::Error(String::from(error)))
+                            .send(PubSub::Error(String::from(error), None))
                             .unwrap();
                     }
                 }

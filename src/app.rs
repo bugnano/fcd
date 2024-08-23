@@ -11,10 +11,7 @@ use signal_hook::iterator::Signals;
 use crate::{
     fm::{
         archive_mounter::ArchiveEntry,
-        cp_mv_rm::{
-            database::{DBDirListEntry, DBFileEntry, DBJobEntry, OnConflict},
-            dlg_cp_mv::DlgCpMvType,
-        },
+        cp_mv_rm::database::{DBDirListEntry, DBFileEntry, DBJobEntry, DBJobOperation, OnConflict},
         entry::{Entry, SortBy, SortOrder},
     },
     viewer::{dlg_goto::GotoType, dlg_hex_search::HexSearch, dlg_text_search::TextSearch},
@@ -29,7 +26,7 @@ pub enum Events {
 #[derive(Debug, Clone)]
 pub enum PubSub {
     // App-wide events
-    Error(String),
+    Error(String, Option<Box<PubSub>>),
     Warning(String, String),
     Info(String, String),
     CloseDialog,
@@ -106,7 +103,7 @@ pub enum PubSub {
     DoMv(DBJobEntry, Vec<DBFileEntry>, Vec<ArchiveEntry>),
 
     // Dialog CpMv events
-    DoDirscan(PathBuf, Vec<Entry>, String, OnConflict, DlgCpMvType),
+    DoDirscan(PathBuf, Vec<Entry>, String, OnConflict, DBJobOperation),
 
     // Dialog Progress events
     JobCompleted(DBJobEntry, Vec<DBFileEntry>, Vec<DBDirListEntry>),

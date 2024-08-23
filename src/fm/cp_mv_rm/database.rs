@@ -225,12 +225,12 @@ pub struct DBJobEntry {
     pub pid: u32,
     pub operation: DBJobOperation,
     pub cwd: PathBuf,
-    pub entries: Vec<DBEntriesEntry>,
     pub dest: Option<PathBuf>,
     pub on_conflict: Option<OnConflict>,
     pub replace_first_path: bool,
-    pub archives: Vec<PathBuf>,
     pub status: DBJobStatus,
+    pub entries: Vec<DBEntriesEntry>,
+    pub archives: Vec<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -427,12 +427,12 @@ impl DataBase {
                         pid: row.get(1)?,
                         operation: row.get(2)?,
                         cwd: PathBuf::from(row.get::<usize, String>(3)?),
-                        entries: Vec::new(),
                         dest: row.get::<usize, Option<String>>(4)?.map(PathBuf::from),
                         on_conflict: row.get(5)?,
-                        archives: Vec::new(),
                         replace_first_path: row.get(6)?,
                         status: row.get(7)?,
+                        entries: Vec::new(),
+                        archives: Vec::new(),
                     })
                 })
                 .and_then(|rows| rows.collect::<rusqlite::Result<Vec<DBJobEntry>>>())

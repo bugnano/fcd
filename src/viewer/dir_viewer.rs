@@ -293,10 +293,10 @@ impl Component for DirViewer {
                     }
                     Err(_) => {
                         self.pubsub_tx
-                            .send(PubSub::Error(format!(
-                                "Invalid number: {}",
-                                str_line_number
-                            )))
+                            .send(PubSub::Error(
+                                format!("Invalid number: {}", str_line_number),
+                                None,
+                            ))
                             .unwrap();
                     }
                 }
@@ -351,7 +351,7 @@ impl Component for DirViewer {
                     }
                     Err(_) => {
                         self.pubsub_tx
-                            .send(PubSub::Error(String::from("Invalid search string")))
+                            .send(PubSub::Error(String::from("Invalid search string"), None))
                             .unwrap();
 
                         None

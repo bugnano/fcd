@@ -27,8 +27,7 @@ use crate::{
         archive_mounter::ArchiveEntry,
         cp_mv_rm::{
             cp_mv::{cp_mv, CpMvEvent, CpMvInfo, CpMvResult},
-            database::{DBFileEntry, DBJobEntry},
-            dlg_cp_mv::DlgCpMvType,
+            database::{DBFileEntry, DBJobEntry, DBJobOperation},
         },
     },
     tilde_layout::tilde_layout,
@@ -43,7 +42,7 @@ pub struct DlgCpMvProgress {
     files: Vec<DBFileEntry>,
     archive_dirs: Vec<ArchiveEntry>,
     db_file: Option<PathBuf>,
-    dlg_cp_mv_type: DlgCpMvType,
+    operation: DBJobOperation,
     ev_tx: Sender<CpMvEvent>,
     info_rx: Receiver<CpMvInfo>,
     result_rx: Receiver<CpMvResult>,
@@ -72,7 +71,7 @@ impl DlgCpMvProgress {
         files: &[DBFileEntry],
         archive_dirs: &[ArchiveEntry],
         db_file: Option<&Path>,
-        dlg_cp_mv_type: DlgCpMvType,
+        operation: DBJobOperation,
     ) -> DlgCpMvProgress {
         let (ev_tx, ev_rx) = crossbeam_channel::unbounded();
         let (info_tx, info_rx) = crossbeam_channel::unbounded();
@@ -85,7 +84,7 @@ impl DlgCpMvProgress {
             files: Vec::from(files),
             archive_dirs: Vec::from(archive_dirs),
             db_file: db_file.map(PathBuf::from),
-            dlg_cp_mv_type,
+            operation,
             ev_tx,
             info_rx,
             result_rx,
@@ -154,7 +153,7 @@ impl DlgCpMvProgress {
         result_tx: Sender<CpMvResult>,
     ) {
         let job_id = self.job.id;
-        let mode = self.dlg_cp_mv_type;
+        let operation = self.operation;
         let entries = self.files.clone();
         let cwd = self.job.cwd.clone();
 
@@ -179,12 +178,12 @@ impl DlgCpMvProgress {
         thread::spawn(move || {
             let result = cp_mv(
                 job_id,
-                mode,
-                &entries,
+                operation,
                 &cwd,
                 &dest,
                 on_conflict,
                 replace_first_path,
+                &entries,
                 ev_rx,
                 info_tx,
                 pubsub_tx.clone(),
@@ -345,13 +344,7 @@ impl Component for DlgCpMvProgress {
         let upper_block = Block::default()
             .title(
                 Title::from(Span::styled(
-                    tilde_layout(
-                        match &self.dlg_cp_mv_type {
-                            DlgCpMvType::Cp => " Copy ",
-                            DlgCpMvType::Mv => " Move ",
-                        },
-                        sections[0].width as usize,
-                    ),
+                    tilde_layout(&format!(" {} ", self.operation), sections[0].width as usize),
                     Style::default().fg(self.config.dialog.title_fg),
                 ))
                 .position(Position::Top)
