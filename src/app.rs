@@ -37,6 +37,7 @@ pub enum PubSub {
     Esc,
     Question(String, String, Box<PubSub>),
     NextPendingJob,
+    NextPendingArchive,
 
     // Button bar events
     ButtonLabels(Vec<String>),
@@ -108,11 +109,14 @@ pub enum PubSub {
     DoDirscan(PathBuf, Vec<Entry>, String, OnConflict, DlgCpMvType),
 
     // Dialog Progress events
-    JobCompleted(DBJobEntry, Vec<DBFileEntry>, Option<Vec<DBDirListEntry>>),
+    JobCompleted(DBJobEntry, Vec<DBFileEntry>, Vec<DBDirListEntry>),
 
     // Dialog Report events
     PromptSaveReport(PathBuf, PathBuf),
     DoSaveReport(PathBuf),
+
+    // Dialog PendingJob events
+    MountArchivesForJob(DBJobEntry),
 }
 
 #[derive(Debug, Copy, Clone)]

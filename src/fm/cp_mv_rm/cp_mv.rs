@@ -82,6 +82,7 @@ pub fn cp_mv(
     cwd: &Path,
     dest: &Path,
     on_conflict: OnConflict,
+    replace_first_path: bool,
     ev_rx: Receiver<CpMvEvent>,
     info_tx: Sender<CpMvInfo>,
     pubsub_tx: Sender<PubSub>,
@@ -133,20 +134,6 @@ pub fn cp_mv(
         Some(db) => db.get_skip_dir_stack(job_id),
         None => Vec::new(),
     };
-
-    let replace_first_path = database
-        .as_ref()
-        .and_then(|db| db.get_replace_first_path(job_id));
-
-    let replace_first_path = replace_first_path.unwrap_or_else(|| {
-        let replace_first_path = !actual_dest.is_dir();
-
-        if let Some(db) = &database {
-            db.set_replace_first_path(job_id, replace_first_path);
-        }
-
-        replace_first_path
-    });
 
     let now = Instant::now();
     let mut timers = Timers {

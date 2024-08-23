@@ -169,6 +169,8 @@ impl DlgCpMvProgress {
             .on_conflict
             .expect("BUG: CP/MV operation without on_conflict");
 
+        let replace_first_path = self.job.replace_first_path;
+
         let db_file = self.db_file.clone();
         let archive_dirs = self.archive_dirs.clone();
 
@@ -182,6 +184,7 @@ impl DlgCpMvProgress {
                 &cwd,
                 &dest,
                 on_conflict,
+                replace_first_path,
                 ev_rx,
                 info_tx,
                 pubsub_tx.clone(),
@@ -287,7 +290,7 @@ impl Component for DlgCpMvProgress {
                         .send(PubSub::JobCompleted(
                             self.job.clone(),
                             result.files,
-                            Some(result.dirs),
+                            result.dirs,
                         ))
                         .unwrap();
                 }

@@ -1,6 +1,5 @@
 use std::{
     cmp::min,
-    io::{BufWriter, Write},
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -15,16 +14,13 @@ use ratatui::{
 };
 use termion::event::*;
 
-use atomicwrites::{AllowOverwrite, AtomicFile};
 use pathdiff::diff_paths;
 
 use crate::{
     app::{centered_rect, render_shadow, PubSub},
     component::{Component, Focus},
     config::Config,
-    fm::cp_mv_rm::database::{
-        DBDirListEntry, DBFileEntry, DBFileStatus, DBJobEntry, DBJobStatus, DataBase,
-    },
+    fm::cp_mv_rm::database::{DBJobEntry, DataBase},
     tilde_layout::tilde_layout,
     widgets::button::Button,
 };
@@ -115,7 +111,13 @@ impl Component for DlgPendingJob {
                 self.pubsub_tx.send(PubSub::NextPendingJob).unwrap();
             }
             Key::Char('\n') | Key::Char(' ') => match self.focus_position {
-                0 => todo!(),
+                0 => {
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                    self.pubsub_tx
+                        .send(PubSub::MountArchivesForJob(self.job.clone()))
+                        .unwrap();
+                }
                 1 => {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
                     self.pubsub_tx.send(PubSub::NextPendingJob).unwrap();

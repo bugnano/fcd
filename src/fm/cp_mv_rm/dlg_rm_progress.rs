@@ -226,7 +226,7 @@ impl Component for DlgRmProgress {
                         });
 
                     self.pubsub_tx
-                        .send(PubSub::JobCompleted(self.job.clone(), files, None))
+                        .send(PubSub::JobCompleted(self.job.clone(), files, Vec::new()))
                         .unwrap();
                 }
             }

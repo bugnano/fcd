@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     cwd TEXT NOT NULL,
     dest TEXT,
     on_conflict TEXT,
-    replace_first_path INTEGER,
+    replace_first_path INTEGER NOT NULL,
     status TEXT NOT NULL
 ) STRICT;
 

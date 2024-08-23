@@ -50,7 +50,7 @@ impl DlgReport {
         pubsub_tx: Sender<PubSub>,
         job: &DBJobEntry,
         files: &[DBFileEntry],
-        dirs: Option<&[DBDirListEntry]>,
+        dirs: &[DBDirListEntry],
         db_file: Option<&Path>,
     ) -> DlgReport {
         let mut messages: Vec<String> = files
@@ -86,51 +86,47 @@ impl DlgReport {
                     )),
                 },
             })
-            .chain(
-                dirs.unwrap_or_default()
-                    .iter()
-                    .filter_map(|entry| match entry.status {
-                        DBFileStatus::ToDo | DBFileStatus::InProgress => Some(format!(
+            .chain(dirs.iter().filter_map(|entry| match entry.status {
+                DBFileStatus::ToDo | DBFileStatus::InProgress => Some(format!(
                             "ABORTED [{}] {}",
                             entry.message,
                             diff_paths(&entry.file.file, &job.cwd)
                                 .unwrap()
                                 .to_string_lossy()
                         )),
-                        DBFileStatus::Error => Some(format!(
+                DBFileStatus::Error => Some(format!(
                             "ERROR [{}] {}",
                             entry.message,
                             diff_paths(&entry.file.file, &job.cwd)
                                 .unwrap()
                                 .to_string_lossy()
                         )),
-                        DBFileStatus::Skipped => Some(format!(
+                DBFileStatus::Skipped => Some(format!(
                             "SKIPPED [{}] {}",
                             entry.message,
                             diff_paths(&entry.file.file, &job.cwd)
                                 .unwrap()
                                 .to_string_lossy()
                         )),
-                        DBFileStatus::Done => match entry.message.is_empty() {
-                            true => match job.status {
-                                DBJobStatus::Aborted => Some(format!(
+                DBFileStatus::Done => match entry.message.is_empty() {
+                    true => match job.status {
+                        DBJobStatus::Aborted => Some(format!(
                                     "DONE [] {}",
                                     diff_paths(&entry.file.file, &job.cwd)
                                         .unwrap()
                                         .to_string_lossy()
                                 )),
-                                _ => None,
-                            },
-                            false => Some(format!(
+                        _ => None,
+                    },
+                    false => Some(format!(
                                 "WARNING [{}] {}",
                                 entry.message,
                                 diff_paths(&entry.file.file, &job.cwd)
                                     .unwrap()
                                     .to_string_lossy()
                             )),
-                        },
-                    }),
-            )
+                },
+            }))
             .collect();
 
         // We want to show errors first

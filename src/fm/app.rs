@@ -100,6 +100,8 @@ pub struct App {
     ctrl_o: bool,
     archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
     pending_jobs: Vec<DBJobEntry>,
+    pending_job: Option<DBJobEntry>,
+    pending_archives: Vec<PathBuf>,
 }
 
 impl App {
@@ -115,36 +117,10 @@ impl App {
 
         let archive_mounter_command_tx = archive_mounter::start();
 
-        let self_pid = process::id();
-        let self_exe = fs::canonicalize("/proc/self/exe");
-
         let pending_jobs: Vec<DBJobEntry> = db_file
             .and_then(|db_file| DataBase::new(db_file).ok())
-            .map(|db| db.get_jobs())
-            .unwrap_or_default()
-            .iter()
-            .rev()
-            .filter(|job| {
-                // If the pid stored in the job is the same as the current pid, then
-                // it's an interrupted job from a previous session, given that the
-                // current app has not started yet.
-                if job.pid == self_pid {
-                    return true;
-                }
-
-                match (
-                    &self_exe,
-                    &fs::canonicalize(&format!("/proc/{}/exe", job.pid)),
-                ) {
-                    // If the pid stored in the job has the same executable as me,
-                    // it means that the job is running in another instance,
-                    // and has not been interrupted.
-                    (Ok(exe1), Ok(exe2)) if exe1 == exe2 => false,
-                    _ => true,
-                }
-            })
-            .cloned()
-            .collect();
+            .map(|mut db| db.get_pending_jobs(process::id(), fs::canonicalize("/proc/self/exe")))
+            .unwrap_or_default();
 
         pubsub_tx.send(PubSub::NextPendingJob).unwrap();
 
@@ -188,6 +164,8 @@ impl App {
             ctrl_o: false,
             archive_mounter_command_tx,
             pending_jobs,
+            pending_job: None,
+            pending_archives: Vec::new(),
         })
     }
 
@@ -700,11 +678,26 @@ impl App {
                     archive_dirs = archive_mounter::get_archive_dirs(command_tx);
                 }
 
+                let archive_cwd = archive_mounter::archive_path_map(cwd, &archive_dirs);
+
+                // We only care about the archives that are (parents of) cwd
+                archive_dirs = archive_dirs
+                    .iter()
+                    .filter(|entry| {
+                        let ancestor_of_cwd = archive_cwd
+                            .ancestors()
+                            .any(|ancestor| entry.archive_file == ancestor);
+
+                        ancestor_of_cwd
+                    })
+                    .cloned()
+                    .collect();
+
                 let mut job = DBJobEntry {
                     id: 0,
                     pid: process::id(),
                     operation: DBJobOperation::Rm,
-                    cwd: archive_mounter::archive_path_map(cwd, &archive_dirs),
+                    cwd: archive_cwd,
                     entries: self.db_entries_from_entries(entries, &archive_dirs),
                     dest: None,
                     on_conflict: None,
@@ -712,7 +705,7 @@ impl App {
                         .iter()
                         .map(|archive_dir| archive_dir.archive_file.clone())
                         .collect(),
-                    replace_first_path: None,
+                    replace_first_path: false,
                     status: DBJobStatus::Dirscan,
                 };
 
@@ -851,10 +844,29 @@ impl App {
                 }
 
                 if do_dirscan {
-                    let archive_dirs = match &self.archive_mounter_command_tx {
+                    let mut archive_dirs = match &self.archive_mounter_command_tx {
                         Some(command_tx) => archive_mounter::get_archive_dirs(command_tx),
                         None => Vec::new(),
                     };
+
+                    let archive_cwd = archive_mounter::archive_path_map(cwd, &archive_dirs);
+
+                    // We only care about the archives that are (parents of) cwd or dest
+                    archive_dirs = archive_dirs
+                        .iter()
+                        .filter(|entry| {
+                            let ancestor_of_cwd = archive_cwd
+                                .ancestors()
+                                .any(|ancestor| entry.archive_file == ancestor);
+
+                            let ancestor_of_dest = archive_dest
+                                .ancestors()
+                                .any(|ancestor| entry.archive_file == ancestor);
+
+                            ancestor_of_cwd || ancestor_of_dest
+                        })
+                        .cloned()
+                        .collect();
 
                     let mut job = DBJobEntry {
                         id: 0,
@@ -863,7 +875,7 @@ impl App {
                             DlgCpMvType::Cp => DBJobOperation::Cp,
                             DlgCpMvType::Mv => DBJobOperation::Mv,
                         },
-                        cwd: archive_mounter::archive_path_map(cwd, &archive_dirs),
+                        cwd: archive_cwd,
                         entries: self.db_entries_from_entries(entries, &archive_dirs),
                         dest: Some(archive_dest.clone()),
                         on_conflict: Some(*on_conflict),
@@ -871,7 +883,7 @@ impl App {
                             .iter()
                             .map(|archive_dir| archive_dir.archive_file.clone())
                             .collect(),
-                        replace_first_path: None,
+                        replace_first_path: !dest.is_dir(),
                         status: DBJobStatus::Dirscan,
                     };
 
@@ -916,20 +928,11 @@ impl App {
                     .any(|entry| matches!(entry.status, DBFileStatus::Skipped));
 
                 let skipped_dirs = dirs
-                    .as_ref()
-                    .map(|entries| {
-                        entries
-                            .iter()
-                            .any(|entry| matches!(entry.status, DBFileStatus::Skipped))
-                    })
-                    .unwrap_or(false);
+                    .iter()
+                    .any(|entry| matches!(entry.status, DBFileStatus::Skipped));
 
                 let messages_files = files.iter().any(|entry| !entry.message.is_empty());
-
-                let messages_dirs = dirs
-                    .as_ref()
-                    .map(|entries| entries.iter().any(|entry| !entry.message.is_empty()))
-                    .unwrap_or(false);
+                let messages_dirs = dirs.iter().any(|entry| !entry.message.is_empty());
 
                 if job_aborted || skipped_files || skipped_dirs || messages_files || messages_dirs {
                     self.dialog = Some(Box::new(DlgReport::new(
@@ -937,7 +940,7 @@ impl App {
                         self.pubsub_tx.clone(),
                         job,
                         files,
-                        dirs.as_deref(),
+                        dirs,
                         self.db_file.as_deref(),
                     )));
                 } else {
@@ -997,6 +1000,116 @@ impl App {
                     None => {
                         // TODO: Umount all archives
                     }
+                }
+            }
+            PubSub::MountArchivesForJob(job) => {
+                self.pending_job = Some(job.clone());
+                self.pending_archives = job.archives.iter().rev().cloned().collect();
+
+                self.pubsub_tx.send(PubSub::NextPendingArchive).unwrap();
+            }
+            PubSub::NextPendingArchive => {
+                match self.pending_archives.pop() {
+                    Some(archive) => match &self.archive_mounter_command_tx {
+                        Some(_command_tx) => {
+                            self.pubsub_tx.send(PubSub::MountArchive(archive)).unwrap();
+                        }
+                        None => {
+                            self.pending_archives.clear();
+                            self.pending_job = None;
+
+                            // TODO: It would be nice to show the next pending jobs after dismissing the error
+                            self.pubsub_tx
+                                .send(PubSub::Error(String::from(
+                                    "archivefs/archivemount executable not found",
+                                )))
+                                .unwrap();
+                        }
+                    },
+                    None => {
+                        let job = self
+                            .pending_job
+                            .take()
+                            .expect("BUG: pending_job is None when processing its archives");
+
+                        let archive_dirs = match &self.archive_mounter_command_tx {
+                            Some(command_tx) => archive_mounter::get_archive_dirs(command_tx),
+                            None => Vec::new(),
+                        };
+
+                        match job.status {
+                            DBJobStatus::Dirscan => {
+                                self.dialog = Some(Box::new(DlgDirscan::new(
+                                    &self.config,
+                                    self.pubsub_tx.clone(),
+                                    &job,
+                                    &archive_dirs,
+                                    self.db_file.as_deref(),
+                                )));
+                            }
+                            DBJobStatus::InProgress => {
+                                let files = self
+                                    .db_file
+                                    .as_deref()
+                                    .and_then(|db_file| DataBase::new(db_file).ok())
+                                    .map(|db| db.get_file_list(job.id))
+                                    .unwrap_or_default();
+
+                                match job.operation {
+                                    DBJobOperation::Cp => {
+                                        self.pubsub_tx
+                                            .send(PubSub::DoCp(job, files, archive_dirs))
+                                            .unwrap();
+                                    }
+                                    DBJobOperation::Mv => {
+                                        self.pubsub_tx
+                                            .send(PubSub::DoMv(job, files, archive_dirs))
+                                            .unwrap();
+                                    }
+                                    DBJobOperation::Rm => {
+                                        self.pubsub_tx
+                                            .send(PubSub::DoRm(job, files, archive_dirs))
+                                            .unwrap();
+                                    }
+                                }
+                            }
+                            DBJobStatus::Aborted | DBJobStatus::Done => {
+                                let files = self
+                                    .db_file
+                                    .as_deref()
+                                    .and_then(|db_file| DataBase::new(db_file).ok())
+                                    .map(|db| db.get_file_list(job.id))
+                                    .unwrap_or_default();
+
+                                let dirs = self
+                                    .db_file
+                                    .as_deref()
+                                    .and_then(|db_file| DataBase::new(db_file).ok())
+                                    .map(|db| db.get_dir_list(job.id))
+                                    .unwrap_or_default();
+
+                                self.pubsub_tx
+                                    .send(PubSub::JobCompleted(job, files, dirs))
+                                    .unwrap();
+                            }
+                        }
+                    }
+                }
+            }
+            PubSub::ArchiveMounted(_archive_file, _temp_dir) => {
+                if self.pending_job.is_some() {
+                    self.pubsub_tx.send(PubSub::NextPendingArchive).unwrap();
+                }
+            }
+            PubSub::ArchiveMountError(_archive_file, error) => {
+                if self.pending_job.is_some() {
+                    self.pending_archives.clear();
+                    self.pending_job = None;
+
+                    // TODO: It would be nice to show the next pending jobs after dismissing the error
+                    self.pubsub_tx
+                        .send(PubSub::Error(String::from(error)))
+                        .unwrap();
                 }
             }
             _ => (),

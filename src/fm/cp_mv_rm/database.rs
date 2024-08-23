@@ -228,8 +228,8 @@ pub struct DBJobEntry {
     pub entries: Vec<DBEntriesEntry>,
     pub dest: Option<PathBuf>,
     pub on_conflict: Option<OnConflict>,
+    pub replace_first_path: bool,
     pub archives: Vec<PathBuf>,
-    pub replace_first_path: Option<bool>,
     pub status: DBJobStatus,
 }
 
@@ -306,6 +306,7 @@ impl DataBase {
                 cwd,
                 dest,
                 on_conflict,
+                replace_first_path,
                 status
             ) VALUES (
                 ?1,
@@ -313,7 +314,8 @@ impl DataBase {
                 ?3,
                 ?4,
                 ?5,
-                ?6
+                ?6,
+                ?7
             )",
             (
                 job.pid,
@@ -321,11 +323,14 @@ impl DataBase {
                 job.cwd.to_string_lossy(),
                 job.dest.as_ref().map(|x| x.to_string_lossy()),
                 job.on_conflict,
+                job.replace_first_path,
                 job.status,
             ),
         ) {
             Ok(_) => tx.last_insert_rowid(),
-            Err(_) => return 0,
+            Err(_) => {
+                return 0;
+            }
         };
 
         {
@@ -397,9 +402,12 @@ impl DataBase {
         job_id
     }
 
-    pub fn get_jobs(&self) -> Vec<DBJobEntry> {
-        let mut jobs: Vec<DBJobEntry> = self
-            .conn
+    pub fn get_pending_jobs(&mut self, pid: u32, exe: std::io::Result<PathBuf>) -> Vec<DBJobEntry> {
+        let Ok(tx) = self.conn.transaction() else {
+            return Vec::new();
+        };
+
+        let mut jobs: Vec<DBJobEntry> = tx
             .prepare(
                 "SELECT id,
                         pid,
@@ -410,7 +418,7 @@ impl DataBase {
                         replace_first_path,
                         status
                 FROM jobs
-                ORDER BY id",
+                ORDER BY id DESC",
             )
             .and_then(|mut stmt| {
                 stmt.query_map([], |row| {
@@ -427,12 +435,49 @@ impl DataBase {
                         status: row.get(7)?,
                     })
                 })
-                .and_then(|rows| rows.collect())
+                .and_then(|rows| rows.collect::<rusqlite::Result<Vec<DBJobEntry>>>())
             })
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .iter()
+            .filter(|job| {
+                // If the pid stored in the job is the same as the current pid, then
+                // it's an interrupted job from a previous session, given that the
+                // current app has not started yet.
+                if job.pid == pid {
+                    return true;
+                }
 
-        if let Ok(mut stmt) = self.conn.prepare(
-            "SELECT id,
+                match (&exe, &fs::canonicalize(&format!("/proc/{}/exe", job.pid))) {
+                    // If the pid stored in the job has the same executable as me,
+                    // it means that the job is running in another instance,
+                    // and has not been interrupted.
+                    (Ok(exe1), Ok(exe2)) if exe1 == exe2 => false,
+                    _ => true,
+                }
+            })
+            .cloned()
+            .collect();
+
+        {
+            // Set the pid of the pending jobs to the current one, so that we don't
+            // show the pending jobs to other processes
+            let Ok(mut stmt) = tx.prepare("UPDATE jobs SET pid = ?1 WHERE id = ?2") else {
+                return Vec::new();
+            };
+
+            for job in jobs.iter_mut() {
+                match stmt.execute((pid, job.id)) {
+                    Ok(_) => job.pid = pid,
+                    Err(_) => {
+                        return Vec::new();
+                    }
+                }
+            }
+        }
+
+        {
+            let Ok(mut stmt) = tx.prepare(
+                "SELECT id,
                     file,
                     is_file,
                     is_dir,
@@ -440,10 +485,13 @@ impl DataBase {
                     size,
                     uid,
                     gid
-            FROM entries
-            WHERE job_id = ?1
-            ORDER BY id",
-        ) {
+                FROM entries
+                WHERE job_id = ?1
+                ORDER BY id",
+            ) else {
+                return Vec::new();
+            };
+
             for job in jobs.iter_mut() {
                 job.entries = stmt
                     .query_map([job.id], |row| {
@@ -464,12 +512,16 @@ impl DataBase {
             }
         }
 
-        if let Ok(mut stmt) = self.conn.prepare(
-            "SELECT archive
-            FROM archives
-            WHERE job_id = ?1
-            ORDER BY id",
-        ) {
+        {
+            let Ok(mut stmt) = tx.prepare(
+                "SELECT archive
+                FROM archives
+                WHERE job_id = ?1
+                ORDER BY id",
+            ) else {
+                return Vec::new();
+            };
+
             for job in jobs.iter_mut() {
                 job.archives = stmt
                     .query_map([job.id], |row| {
@@ -478,6 +530,10 @@ impl DataBase {
                     .and_then(|rows| rows.collect())
                     .unwrap_or_default();
             }
+        }
+
+        if tx.commit().is_err() {
+            return Vec::new();
         }
 
         jobs
@@ -493,25 +549,6 @@ impl DataBase {
         let _ = self.conn.execute(
             "UPDATE jobs SET status = ?1 WHERE id = ?2",
             (status, job_id),
-        );
-    }
-
-    pub fn get_replace_first_path(&self, job_id: i64) -> Option<bool> {
-        self.conn
-            .query_row(
-                "SELECT replace_first_path
-                FROM jobs
-                WHERE id = ?1",
-                [job_id],
-                |row| row.get(0),
-            )
-            .unwrap_or(None)
-    }
-
-    pub fn set_replace_first_path(&self, job_id: i64, replace_first_path: bool) {
-        let _ = self.conn.execute(
-            "UPDATE jobs SET replace_first_path = ?1 WHERE id = ?2",
-            (replace_first_path, job_id),
         );
     }
 
