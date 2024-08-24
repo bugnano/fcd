@@ -96,6 +96,7 @@ pub struct App {
     quickviewer_position: usize,
     printwd: Option<PathBuf>,
     db_file: Option<PathBuf>,
+    vertical: bool,
     tabsize: u8,
     ctrl_o: bool,
     archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
@@ -111,6 +112,7 @@ impl App {
         initial_path: &Path,
         printwd: Option<&Path>,
         db_file: Option<&Path>,
+        vertical: bool,
         tabsize: u8,
     ) -> Result<App> {
         let (pubsub_tx, pubsub_rx) = crossbeam_channel::unbounded();
@@ -160,6 +162,7 @@ impl App {
             quickviewer_position: 2,
             printwd: printwd.map(PathBuf::from),
             db_file: db_file.map(PathBuf::from),
+            vertical,
             tabsize,
             ctrl_o: false,
             archive_mounter_command_tx,
@@ -335,6 +338,7 @@ impl App {
                                             self.panels[other_panel].chdir(&target_cwd);
                                         }
                                     }
+                                    Key::Alt('v') => self.vertical = !self.vertical,
                                     _ => log::debug!("{:?}", key),
                                 }
                             }
@@ -1392,7 +1396,10 @@ impl app::App for App {
             .split(f.area());
 
         let panel_chunks = Layout::default()
-            .direction(Direction::Horizontal)
+            .direction(match self.vertical {
+                true => Direction::Vertical,
+                false => Direction::Horizontal,
+            })
             .constraints([Constraint::Percentage(50), Constraint::Min(1)])
             .split(chunks[0]);
 

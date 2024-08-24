@@ -49,6 +49,10 @@ struct Cli {
     #[arg(short = 'n', long = "nodb", action = ArgAction::SetFalse)]
     use_db: bool,
 
+    /// Use vertical panel layout
+    #[arg(long)]
+    vertical: bool,
+
     /// file viewer
     #[arg(short, long, value_name = "FILE")]
     view: Option<PathBuf>,
@@ -150,6 +154,7 @@ fn main() -> Result<()> {
                 &initial_path,
                 cli.printwd.as_deref(),
                 db_file.as_deref(),
+                cli.vertical,
                 cli.tabsize,
             )?) as Box<dyn App>
         }
