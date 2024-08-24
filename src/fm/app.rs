@@ -1,7 +1,7 @@
 use std::{
     cell::RefCell,
     cmp::max,
-    fs,
+    fs, io,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     process,
@@ -12,7 +12,7 @@ use std::{
 use anyhow::Result;
 use crossbeam_channel::{select, Receiver, Sender};
 use ratatui::prelude::*;
-use termion::event::*;
+use termion::{event::*, raw::RawTerminal};
 
 use chrono::{DateTime, Datelike, Local};
 use itertools::Itertools;
@@ -109,6 +109,7 @@ impl App {
     pub fn new(
         config: &Rc<Config>,
         bookmarks: &Rc<RefCell<Bookmarks>>,
+        raw_output: &Rc<RawTerminal<io::Stdout>>,
         initial_path: &Path,
         printwd: Option<&Path>,
         db_file: Option<&Path>,
@@ -134,6 +135,7 @@ impl App {
                 Box::new(FilePanel::new(
                     config,
                     bookmarks,
+                    raw_output,
                     pubsub_tx.clone(),
                     initial_path,
                     archive_mounter_command_tx.clone(),
@@ -142,6 +144,7 @@ impl App {
                 Box::new(FilePanel::new(
                     config,
                     bookmarks,
+                    raw_output,
                     pubsub_tx.clone(),
                     initial_path,
                     archive_mounter_command_tx.clone(),

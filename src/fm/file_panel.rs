@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
     fs::{self, read_dir},
+    io::{self, Write},
     path::{Path, PathBuf},
     rc::Rc,
     thread,
@@ -15,7 +16,7 @@ use ratatui::{
         *,
     },
 };
-use termion::event::*;
+use termion::{event::*, raw::RawTerminal};
 
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use regex::RegexBuilder;
@@ -58,10 +59,10 @@ enum ArchiveMountRequest {
     None,
 }
 
-#[derive(Debug)]
 pub struct FilePanel {
     config: Rc<Config>,
     bookmarks: Rc<RefCell<Bookmarks>>,
+    raw_output: Rc<RawTerminal<io::Stdout>>,
     pubsub_tx: Sender<PubSub>,
     rect: Rect,
     component_pubsub_tx: Sender<ComponentPubSub>,
@@ -93,6 +94,7 @@ impl FilePanel {
     pub fn new(
         config: &Rc<Config>,
         bookmarks: &Rc<RefCell<Bookmarks>>,
+        raw_output: &Rc<RawTerminal<io::Stdout>>,
         pubsub_tx: Sender<PubSub>,
         initial_path: &Path,
         archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
@@ -104,6 +106,7 @@ impl FilePanel {
         let mut panel = FilePanel {
             config: Rc::clone(config),
             bookmarks: Rc::clone(bookmarks),
+            raw_output: Rc::clone(raw_output),
             pubsub_tx,
             rect: Rect::default(),
             component_pubsub_tx,
@@ -317,6 +320,39 @@ impl FilePanel {
             Some(command_tx) => archive_mounter::archive_path(command_tx, file),
             None => PathBuf::from(file),
         }
+    }
+
+    fn raw_output_activate(&self) {
+        self.raw_output
+            .activate_raw_mode()
+            .expect("failed to activate raw mode");
+
+        let mut output = io::stdout();
+
+        write!(output, "{}", termion::screen::ToAlternateScreen)
+            .expect("unable to enter alternate screen");
+
+        output.flush().expect("unable to enter alternate screen");
+
+        // TODO: terminal.clear()?;
+    }
+
+    fn raw_output_suspend(&self) {
+        let mut output = io::stdout();
+
+        write!(
+            output,
+            "{}{}",
+            termion::screen::ToMainScreen,
+            termion::cursor::Show
+        )
+        .expect("unable to exit alternate screen");
+
+        output.flush().expect("unable to exit alternate screen");
+
+        self.raw_output
+            .suspend_raw_mode()
+            .expect("failed to suspend raw mode");
     }
 }
 

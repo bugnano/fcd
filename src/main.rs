@@ -78,8 +78,10 @@ fn initialize_panic_handler() -> Result<()> {
                 termion::screen::ToMainScreen,
                 termion::cursor::Show
             )?;
-            raw_output.suspend_raw_mode()?;
             output.flush()?;
+
+            raw_output.suspend_raw_mode()?;
+
             Ok(())
         };
         panic_cleanup().expect("failed to clean up for panic");
@@ -103,10 +105,20 @@ fn main() -> Result<()> {
 
     initialize_panic_handler().context("failed to initialize panic handler")?;
 
+    let raw_output = Rc::new(
+        io::stdout()
+            .into_raw_mode()
+            .context("failed to activate raw mode")?,
+    );
+
+    raw_output
+        .suspend_raw_mode()
+        .context("failed to suspend raw mode")?;
+
     let output = MouseTerminal::from(
         io::stdout()
             .into_raw_mode()
-            .context("failed to enable raw mode")?
+            .context("failed to activate raw mode")?
             .into_alternate_screen()
             .context("unable to enter alternate screen")?,
     );
@@ -151,6 +163,7 @@ fn main() -> Result<()> {
             Box::new(fm::app::App::new(
                 &config,
                 &bookmarks,
+                &raw_output,
                 &initial_path,
                 cli.printwd.as_deref(),
                 db_file.as_deref(),
@@ -186,17 +199,30 @@ fn main() -> Result<()> {
                 break;
             }
             Action::CtrlZ => {
-                if !ctrl_o {
-                    let mut output = io::stdout();
-                    write!(
-                        output,
-                        "{}{}",
-                        termion::screen::ToMainScreen,
-                        termion::cursor::Show
-                    )?;
-                    //output.into_raw_mode()?.suspend_raw_mode()?;
-                    output.flush()?;
+                let mut output = io::stdout();
+
+                match ctrl_o {
+                    true => {
+                        write!(
+                            output,
+                            "{}{}",
+                            termion::cursor::Restore,
+                            termion::clear::UntilNewline,
+                        )?;
+                    }
+                    false => {
+                        write!(
+                            output,
+                            "{}{}",
+                            termion::screen::ToMainScreen,
+                            termion::cursor::Show
+                        )?;
+                    }
                 }
+
+                output.flush()?;
+
+                raw_output.suspend_raw_mode()?;
 
                 println!("Ctrl+Z");
 
@@ -205,6 +231,8 @@ fn main() -> Result<()> {
                 }
             }
             Action::SigCont => {
+                raw_output.activate_raw_mode()?;
+
                 let mut output = io::stdout();
 
                 match ctrl_o {
@@ -214,12 +242,10 @@ fn main() -> Result<()> {
                             "{}Press ENTER to continue...",
                             termion::cursor::Save
                         )?;
-                        //output.into_raw_mode()?;
                         output.flush()?;
                     }
                     false => {
                         write!(output, "{}", termion::screen::ToAlternateScreen)?;
-                        //output.into_raw_mode()?;
                         output.flush()?;
 
                         terminal.clear()?;
@@ -230,6 +256,7 @@ fn main() -> Result<()> {
                 ctrl_o = true;
 
                 let mut output = io::stdout();
+
                 write!(
                     output,
                     "{}{}{}Press ENTER to continue...",
@@ -243,6 +270,7 @@ fn main() -> Result<()> {
                 ctrl_o = false;
 
                 let mut output = io::stdout();
+
                 write!(
                     output,
                     "{}{}{}",
