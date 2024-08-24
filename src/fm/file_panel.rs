@@ -416,7 +416,7 @@ impl Component for FilePanel {
                     self.pubsub_tx.send(PubSub::Leader(Some(*c))).unwrap();
                 }
                 Key::Char('m') => {
-                    if self.archive_path(&self.cwd) == self.cwd {
+                    if self.shown_cwd == self.cwd {
                         self.leader = Some('m');
                         self.pubsub_tx.send(PubSub::Leader(self.leader)).unwrap();
                     } else {
@@ -437,9 +437,7 @@ impl Component for FilePanel {
                     self.pubsub_tx.send(PubSub::Leader(self.leader)).unwrap();
                 }
                 Key::Left | Key::Char('h') => {
-                    let cwd = self.archive_path(&self.cwd);
-
-                    if let Some(new_cwd) = cwd.parent() {
+                    if let Some(new_cwd) = self.shown_cwd.parent() {
                         self.chdir(&self.unarchive_path(new_cwd));
                     }
                 }
@@ -1191,6 +1189,10 @@ impl Panel for FilePanel {
         Some(self.cwd.clone())
     }
 
+    fn get_old_cwd(&self) -> Option<PathBuf> {
+        Some(self.old_cwd.clone())
+    }
+
     fn get_tagged_files(&self) -> Vec<Entry> {
         let mut tagged_files = self.tagged_files.clone();
 
@@ -1235,12 +1237,16 @@ impl Panel for FilePanel {
             self.first_line = 0;
 
             self.load_file_list(Some(&self.archive_path(&self.old_cwd)));
+
+            self.pubsub_tx
+                .send(PubSub::ChangedDirectory(self.cwd.clone()))
+                .unwrap();
         }
     }
 
     fn reload(&mut self, selected_file: Option<&Path>) {
         let new_cwd = self.unarchive_path(
-            self.archive_path(&self.cwd)
+            self.shown_cwd
                 .ancestors()
                 .find(|d| read_dir(self.unarchive_path(d)).is_ok())
                 .ok_or_else(|| anyhow!("failed to change directory"))

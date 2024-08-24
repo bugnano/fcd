@@ -64,6 +64,7 @@ pub enum PubSub {
 
     // File panel events
     SelectedEntry(Option<Entry>),
+    ChangedDirectory(PathBuf),
     ViewFile(PathBuf),
     Leader(Option<char>),
     SortFiles(SortBy, SortOrder),

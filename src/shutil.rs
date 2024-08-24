@@ -11,6 +11,7 @@ use rustix::fs::{
 use uzers::{get_current_uid, get_user_by_name, get_user_by_uid, os::unix::UserExt};
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub struct DiskUsage {
     /// Total space in bytes
     pub total: u64,

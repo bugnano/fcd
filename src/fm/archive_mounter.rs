@@ -22,8 +22,8 @@ use crate::shutil::which;
 pub enum ArchiveMounterCommand {
     GetExeName(Sender<String>),
     MountArchive(PathBuf, Sender<Result<PathBuf>>, Receiver<()>),
-    UmountArchive(PathBuf),
     UmountParents(Vec<PathBuf>, Sender<()>),
+    UmountUnrelated(Vec<PathBuf>),
     UnarchivePath(PathBuf, Sender<PathBuf>),
     ArchivePath(PathBuf, Sender<PathBuf>),
     GetArchiveDirs(Sender<Vec<ArchiveEntry>>),
@@ -59,13 +59,13 @@ pub fn start() -> Option<Sender<ArchiveMounterCommand>> {
                             let _ = mount_archive_tx
                                 .send(archive_mounter.mount_archive(&archive, cancel_rx));
                         }
-                        ArchiveMounterCommand::UmountArchive(archive) => {
-                            archive_mounter.umount_archive(&archive);
-                        }
                         ArchiveMounterCommand::UmountParents(parents, completed_tx) => {
                             archive_mounter.umount_parents(&parents);
 
                             let _ = completed_tx.send(());
+                        }
+                        ArchiveMounterCommand::UmountUnrelated(dirs) => {
+                            archive_mounter.umount_unrelated(&dirs);
                         }
                         ArchiveMounterCommand::UnarchivePath(file, unarchive_path_tx) => {
                             let _ = unarchive_path_tx.send(archive_mounter.unarchive_path(&file));
@@ -117,12 +117,6 @@ pub fn mount_archive(
     (mount_archive_rx, cancel_tx)
 }
 
-pub fn umount_archive(command_tx: &Sender<ArchiveMounterCommand>, archive: &Path) {
-    command_tx
-        .send(ArchiveMounterCommand::UmountArchive(PathBuf::from(archive)))
-        .unwrap();
-}
-
 pub fn umount_parents<T: AsRef<Path>>(command_tx: &Sender<ArchiveMounterCommand>, parents: &[T]) {
     let (completed_tx, completed_rx) = crossbeam_channel::unbounded();
 
@@ -137,6 +131,16 @@ pub fn umount_parents<T: AsRef<Path>>(command_tx: &Sender<ArchiveMounterCommand>
         .unwrap();
 
     let _ = completed_rx.recv();
+}
+
+pub fn umount_unrelated<T: AsRef<Path>>(command_tx: &Sender<ArchiveMounterCommand>, dirs: &[T]) {
+    command_tx
+        .send(ArchiveMounterCommand::UmountUnrelated(
+            dirs.iter()
+                .map(|file| PathBuf::from(file.as_ref()))
+                .collect(),
+        ))
+        .unwrap();
 }
 
 pub fn unarchive_path(command_tx: &Sender<ArchiveMounterCommand>, file: &Path) -> PathBuf {
@@ -179,10 +183,7 @@ pub fn unarchive_path_map(file: &Path, archive_dirs: &[ArchiveEntry]) -> PathBuf
     archive_dirs
         .iter()
         .rev()
-        .find(|entry| {
-            file.ancestors()
-                .any(|ancestor| ancestor == entry.archive_file)
-        })
+        .find(|entry| file.starts_with(&entry.archive_file))
         .map(|entry| {
             entry
                 .temp_dir
@@ -196,7 +197,7 @@ pub fn archive_path_map(file: &Path, archive_dirs: &[ArchiveEntry]) -> PathBuf {
     archive_dirs
         .iter()
         .rev()
-        .find(|entry| file.ancestors().any(|ancestor| ancestor == entry.temp_dir))
+        .find(|entry| file.starts_with(&entry.temp_dir))
         .map(|entry| {
             entry
                 .archive_file
@@ -336,22 +337,49 @@ impl ArchiveMounter {
 
     pub fn umount_parents<T: AsRef<Path>>(&mut self, parents: &[T]) {
         for file in parents.iter() {
+            let archive_file = self.archive_path(file.as_ref());
+
             let archives_to_umount: Vec<PathBuf> = self
                 .archive_dirs
                 .iter()
                 .rev()
-                .filter(|&entry| {
-                    entry
-                        .archive_file
-                        .ancestors()
-                        .any(|ancestor| ancestor == file.as_ref())
-                })
+                .filter(|&entry| entry.archive_file.starts_with(&archive_file))
                 .map(|entry| entry.archive_file.clone())
                 .collect();
 
             for archive in &archives_to_umount {
                 self.umount_archive(archive);
             }
+        }
+    }
+
+    pub fn umount_unrelated<T: AsRef<Path>>(&mut self, dirs: &[T]) {
+        let archive_dirs: Vec<PathBuf> = dirs
+            .iter()
+            .map(|file| self.archive_path(file.as_ref()))
+            .collect();
+
+        let archives_to_keep: Vec<PathBuf> = self
+            .archive_dirs
+            .iter()
+            .filter(|entry| {
+                archive_dirs
+                    .iter()
+                    .any(|archive_file| archive_file.starts_with(&entry.archive_file))
+            })
+            .map(|entry| entry.archive_file.clone())
+            .collect();
+
+        let archives_to_umount: Vec<PathBuf> = self
+            .archive_dirs
+            .iter()
+            .rev()
+            .filter(|entry| !archives_to_keep.contains(&entry.archive_file))
+            .map(|entry| entry.archive_file.clone())
+            .collect();
+
+        for archive in &archives_to_umount {
+            self.umount_archive(archive);
         }
     }
 

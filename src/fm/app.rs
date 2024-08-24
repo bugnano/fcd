@@ -494,7 +494,7 @@ impl App {
                     expanduser(&PathBuf::from(&self.apply_template(directory, Quote::No)));
 
                 let new_dir = match new_dir.is_absolute() {
-                    true => new_dir.clean(),
+                    true => self.unarchive_path(&new_dir.clean()),
                     false => {
                         let focus_position = match self.quickviewer_position {
                             2 => self.panel_focus_position,
@@ -504,13 +504,15 @@ impl App {
                             _ => self.panel_focus_position,
                         };
 
-                        let mut cwd = self.panels[focus_position]
-                            .get_cwd()
-                            .expect("BUG: The focused panel has no working directory set");
+                        let mut cwd = self.archive_path(
+                            &self.panels[focus_position]
+                                .get_cwd()
+                                .expect("BUG: The focused panel has no working directory set"),
+                        );
 
                         cwd.push(new_dir);
 
-                        cwd.clean()
+                        self.unarchive_path(&cwd.clean())
                     }
                 };
 
@@ -548,15 +550,17 @@ impl App {
                     .expect("BUG: The focused panel has no selected entry");
 
                 let mut new_name = match new_name.is_absolute() {
-                    true => new_name.clean(),
+                    true => self.unarchive_path(&new_name.clean()),
                     false => {
-                        let mut cwd = self.panels[focus_position]
-                            .get_cwd()
-                            .expect("BUG: The focused panel has no working directory set");
+                        let mut cwd = self.archive_path(
+                            &self.panels[focus_position]
+                                .get_cwd()
+                                .expect("BUG: The focused panel has no working directory set"),
+                        );
 
                         cwd.push(new_name);
 
-                        cwd.clean()
+                        self.unarchive_path(&cwd.clean())
                     }
                 };
 
@@ -673,37 +677,26 @@ impl App {
                 )));
             }
             PubSub::Rm(cwd, entries) => {
+                if let Some(command_tx) = &self.archive_mounter_command_tx {
+                    // If the files that we're deleting are (parents of) mounted archives,
+                    // we need to umount those archives before deleting.
+                    let parents: Vec<PathBuf> =
+                        entries.iter().map(|entry| entry.file.clone()).collect();
+
+                    archive_mounter::umount_parents(command_tx, &parents);
+                }
+
                 let mut archive_dirs = match &self.archive_mounter_command_tx {
                     Some(command_tx) => archive_mounter::get_archive_dirs(command_tx),
                     None => Vec::new(),
                 };
-
-                if let Some(command_tx) = &self.archive_mounter_command_tx {
-                    // If the files that we're deleting are (parents of) mounted archives,
-                    // we need to umount those archives before deleting.
-                    let parents: Vec<PathBuf> = entries
-                        .iter()
-                        .map(|entry| archive_mounter::archive_path_map(&entry.file, &archive_dirs))
-                        .collect();
-
-                    archive_mounter::umount_parents(command_tx, &parents);
-
-                    // Given that we umounted some archives, we need to fetch the new archives list
-                    archive_dirs = archive_mounter::get_archive_dirs(command_tx);
-                }
 
                 let archive_cwd = archive_mounter::archive_path_map(cwd, &archive_dirs);
 
                 // We only care about the archives that are (parents of) cwd
                 archive_dirs = archive_dirs
                     .iter()
-                    .filter(|entry| {
-                        let ancestor_of_cwd = archive_cwd
-                            .ancestors()
-                            .any(|ancestor| entry.archive_file == ancestor);
-
-                        ancestor_of_cwd
-                    })
+                    .filter(|entry| archive_cwd.starts_with(&entry.archive_file))
                     .cloned()
                     .collect();
 
@@ -864,6 +857,17 @@ impl App {
                 }
 
                 if do_dirscan {
+                    if let (DBJobOperation::Mv, Some(command_tx)) =
+                        (operation, &self.archive_mounter_command_tx)
+                    {
+                        // If the files that we're moving are (parents of) mounted archives,
+                        // we need to umount those archives before moving.
+                        let parents: Vec<PathBuf> =
+                            entries.iter().map(|entry| entry.file.clone()).collect();
+
+                        archive_mounter::umount_parents(command_tx, &parents);
+                    }
+
                     let mut archive_dirs = match &self.archive_mounter_command_tx {
                         Some(command_tx) => archive_mounter::get_archive_dirs(command_tx),
                         None => Vec::new(),
@@ -875,15 +879,8 @@ impl App {
                     archive_dirs = archive_dirs
                         .iter()
                         .filter(|entry| {
-                            let ancestor_of_cwd = archive_cwd
-                                .ancestors()
-                                .any(|ancestor| entry.archive_file == ancestor);
-
-                            let ancestor_of_dest = archive_dest
-                                .ancestors()
-                                .any(|ancestor| entry.archive_file == ancestor);
-
-                            ancestor_of_cwd || ancestor_of_dest
+                            archive_cwd.starts_with(&entry.archive_file)
+                                || archive_dest.starts_with(&entry.archive_file)
                         })
                         .cloned()
                         .collect();
@@ -1004,21 +1001,19 @@ impl App {
             PubSub::CommandBarError(msg) => {
                 self.command_bar = Some(Box::new(CommandBarError::new(&self.config, msg)));
             }
-            PubSub::NextPendingJob => {
-                match self.pending_jobs.pop() {
-                    Some(job) => {
-                        self.dialog = Some(Box::new(DlgPendingJob::new(
-                            &self.config,
-                            self.pubsub_tx.clone(),
-                            &job,
-                            self.db_file.as_deref(),
-                        )));
-                    }
-                    None => {
-                        // TODO: Umount all archives
-                    }
+            PubSub::NextPendingJob => match self.pending_jobs.pop() {
+                Some(job) => {
+                    self.dialog = Some(Box::new(DlgPendingJob::new(
+                        &self.config,
+                        self.pubsub_tx.clone(),
+                        &job,
+                        self.db_file.as_deref(),
+                    )));
                 }
-            }
+                None => {
+                    self.umount_unrelated();
+                }
+            },
             PubSub::MountArchivesForJob(job) => {
                 self.pending_job = Some(job.clone());
                 self.pending_archives = job.archives.iter().rev().cloned().collect();
@@ -1129,6 +1124,11 @@ impl App {
                         .unwrap();
                 }
             }
+            PubSub::ChangedDirectory(_cwd) => {
+                if self.pending_jobs.is_empty() {
+                    self.umount_unrelated();
+                }
+            }
             _ => (),
         }
 
@@ -1146,6 +1146,37 @@ impl App {
         match &self.archive_mounter_command_tx {
             Some(command_tx) => archive_mounter::archive_path(command_tx, file),
             None => PathBuf::from(file),
+        }
+    }
+
+    fn umount_unrelated(&self) {
+        if let Some(command_tx) = &self.archive_mounter_command_tx {
+            let (focus_position, other_position) = match self.quickviewer_position {
+                2 => (self.panel_focus_position, self.panel_focus_position ^ 1),
+                pos if pos == self.panel_focus_position => (self.panel_focus_position ^ 1, 2),
+                _ => (self.panel_focus_position, 2),
+            };
+
+            let cwd = self.panels[focus_position]
+                .get_cwd()
+                .expect("BUG: The focused panel has no working directory set");
+
+            let old_cwd = self.panels[focus_position]
+                .get_old_cwd()
+                .expect("BUG: The focused panel has no working directory set");
+
+            let other_cwd = self.panels[other_position]
+                .get_cwd()
+                .expect("BUG: The other panel has no working directory set");
+
+            let other_old_cwd = self.panels[other_position]
+                .get_old_cwd()
+                .expect("BUG: The other panel has no working directory set");
+
+            archive_mounter::umount_unrelated(
+                command_tx,
+                &[cwd, old_cwd, other_cwd, other_old_cwd],
+            );
         }
     }
 

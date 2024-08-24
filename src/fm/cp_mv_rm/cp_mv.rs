@@ -302,10 +302,7 @@ fn cp_mv_entry(
     let mut skip_dir = false;
     while !skip_dir_stack.is_empty() {
         let dir_to_skip = skip_dir_stack.last().unwrap().clone();
-        if cur_file
-            .ancestors()
-            .any(|ancestor| ancestor == dir_to_skip.file)
-        {
+        if cur_file.starts_with(&dir_to_skip.file) {
             skip_dir = true;
             break;
         } else {
@@ -329,10 +326,7 @@ fn cp_mv_entry(
 
     while !rename_dir_stack.is_empty() {
         let rename_dir_entry = rename_dir_stack.last().unwrap().clone();
-        if cur_target
-            .ancestors()
-            .any(|ancestor| ancestor == rename_dir_entry.existing_target)
-        {
+        if cur_target.starts_with(&rename_dir_entry.existing_target) {
             cur_target = rename_dir_entry
                 .cur_target
                 .join(diff_paths(&cur_target, &rename_dir_entry.existing_target).unwrap());

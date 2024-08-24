@@ -19,6 +19,10 @@ pub trait Panel {
         None
     }
 
+    fn get_old_cwd(&self) -> Option<PathBuf> {
+        None
+    }
+
     fn get_tagged_files(&self) -> Vec<Entry> {
         Vec::new()
     }
