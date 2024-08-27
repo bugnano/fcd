@@ -127,7 +127,10 @@ fn main() -> Result<()> {
     let mut terminal =
         Terminal::new(TermionBackend::new(output)).context("creating terminal failed")?;
 
-    let (_events_tx, mut events_rx) = init_events().context("initializing events failed")?;
+    let (stop_inputs_tx, stop_inputs_rx) = crossbeam_channel::unbounded();
+
+    let (events_tx, mut events_rx) =
+        init_events(stop_inputs_rx.clone()).context("initializing events failed")?;
 
     let mut app = match cli.view {
         Some(file) => Box::new(viewer::app::App::new(&config, &file, cli.tabsize)?) as Box<dyn App>,
@@ -164,6 +167,9 @@ fn main() -> Result<()> {
                 &config,
                 &bookmarks,
                 &raw_output,
+                &events_tx,
+                &stop_inputs_tx,
+                &stop_inputs_rx,
                 &initial_path,
                 cli.printwd.as_deref(),
                 db_file.as_deref(),

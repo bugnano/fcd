@@ -181,6 +181,7 @@ impl App {
                 action = Action::NextLoop;
             }
             PubSub::CloseDialog => self.dialog = None,
+            PubSub::Redraw => action = Action::Redraw,
             PubSub::DlgGoto(goto_type) => {
                 self.dialog = Some(Box::new(DlgGoto::new(
                     &self.config,
@@ -231,18 +232,23 @@ impl app::App for App {
     }
 
     fn render(&mut self, f: &mut Frame) {
+        let mut constraints = vec![Constraint::Length(1), Constraint::Min(1)];
+
+        if self.config.options.show_button_bar {
+            constraints.push(Constraint::Length(1));
+        };
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),
-                Constraint::Min(1),
-                Constraint::Length(1),
-            ])
+            .constraints(&constraints)
             .split(f.area());
 
         self.top_bar.render(f, &chunks[0], Focus::Normal);
         self.viewer.render(f, &chunks[1], Focus::Focused);
-        self.button_bar.render(f, &chunks[2], Focus::Normal);
+
+        if self.config.options.show_button_bar {
+            self.button_bar.render(f, &chunks[2], Focus::Normal);
+        }
 
         if let Some(dlg) = &mut self.dialog {
             dlg.render(f, &chunks[1], Focus::Focused);

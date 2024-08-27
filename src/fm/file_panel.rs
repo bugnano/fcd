@@ -1,8 +1,9 @@
 use std::{
     cell::RefCell,
     fs::{self, read_dir},
-    io::{self, Write},
+    io,
     path::{Path, PathBuf},
+    process::Command,
     rc::Rc,
     thread,
 };
@@ -23,11 +24,14 @@ use regex::RegexBuilder;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    app::PubSub,
+    app::{start_inputs, Events, PubSub},
     component::{Component, Focus},
     config::Config,
     fm::{
-        app::{human_readable_size, tar_stem, tar_suffix, LABELS},
+        app::{
+            human_readable_size, raw_output_activate, raw_output_suspend, tar_stem, tar_suffix,
+            LABELS,
+        },
         archive_mounter::{self, ArchiveMounterCommand},
         bookmarks::{Bookmarks, BOOKMARK_KEYS},
         entry::{
@@ -63,6 +67,9 @@ pub struct FilePanel {
     config: Rc<Config>,
     bookmarks: Rc<RefCell<Bookmarks>>,
     raw_output: Rc<RawTerminal<io::Stdout>>,
+    events_tx: Sender<Events>,
+    stop_inputs_tx: Sender<()>,
+    stop_inputs_rx: Receiver<()>,
     pubsub_tx: Sender<PubSub>,
     rect: Rect,
     component_pubsub_tx: Sender<ComponentPubSub>,
@@ -91,10 +98,14 @@ pub struct FilePanel {
 }
 
 impl FilePanel {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &Rc<Config>,
         bookmarks: &Rc<RefCell<Bookmarks>>,
         raw_output: &Rc<RawTerminal<io::Stdout>>,
+        events_tx: &Sender<Events>,
+        stop_inputs_tx: &Sender<()>,
+        stop_inputs_rx: &Receiver<()>,
         pubsub_tx: Sender<PubSub>,
         initial_path: &Path,
         archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
@@ -107,6 +118,9 @@ impl FilePanel {
             config: Rc::clone(config),
             bookmarks: Rc::clone(bookmarks),
             raw_output: Rc::clone(raw_output),
+            events_tx: events_tx.clone(),
+            stop_inputs_tx: stop_inputs_tx.clone(),
+            stop_inputs_rx: stop_inputs_rx.clone(),
             pubsub_tx,
             rect: Rect::default(),
             component_pubsub_tx,
@@ -322,37 +336,20 @@ impl FilePanel {
         }
     }
 
-    fn raw_output_activate(&self) {
-        self.raw_output
-            .activate_raw_mode()
-            .expect("failed to activate raw mode");
+    fn open_file(&mut self, file: &Path) {
+        self.stop_inputs_tx.send(()).unwrap();
+        raw_output_suspend(&self.raw_output);
 
-        let mut output = io::stdout();
+        let _ = Command::new(&self.config.options.opener)
+            .arg(file)
+            .current_dir(&self.cwd)
+            .status();
 
-        write!(output, "{}", termion::screen::ToAlternateScreen)
-            .expect("unable to enter alternate screen");
+        start_inputs(self.events_tx.clone(), self.stop_inputs_rx.clone());
+        raw_output_activate(&self.raw_output);
 
-        output.flush().expect("unable to enter alternate screen");
-
-        // TODO: terminal.clear()?;
-    }
-
-    fn raw_output_suspend(&self) {
-        let mut output = io::stdout();
-
-        write!(
-            output,
-            "{}{}",
-            termion::screen::ToMainScreen,
-            termion::cursor::Show
-        )
-        .expect("unable to exit alternate screen");
-
-        output.flush().expect("unable to exit alternate screen");
-
-        self.raw_output
-            .suspend_raw_mode()
-            .expect("failed to suspend raw mode");
+        self.pubsub_tx.send(PubSub::Redraw).unwrap();
+        self.pubsub_tx.send(PubSub::Reload).unwrap();
     }
 }
 
@@ -553,7 +550,7 @@ impl Component for FilePanel {
                                 .send(PubSub::MountArchive(entry.file.clone()))
                                 .unwrap();
                         } else {
-                            // TODO: Handle regular files
+                            self.open_file(&entry.file);
                         }
                     }
                 }
@@ -647,7 +644,23 @@ impl Component for FilePanel {
 
                         match entry.stat.is_dir() {
                             true => self.chdir(&entry.file),
-                            false => self.pubsub_tx.send(PubSub::ViewFile(entry.file)).unwrap(),
+                            false => self
+                                .pubsub_tx
+                                .send(PubSub::ViewFile(self.cwd.clone(), entry.file))
+                                .unwrap(),
+                        }
+                    }
+                }
+                Key::Char('e') | Key::F(4) | Key::Char('4') => {
+                    if !self.shown_file_list.is_empty() {
+                        let entry = self.shown_file_list[self.cursor_position].clone();
+
+                        match entry.stat.is_dir() {
+                            true => self.chdir(&entry.file),
+                            false => self
+                                .pubsub_tx
+                                .send(PubSub::EditFile(self.cwd.clone(), entry.file))
+                                .unwrap(),
                         }
                     }
                 }
@@ -967,7 +980,7 @@ impl Component for FilePanel {
                     if archive == archive_file {
                         self.archive_mount_request = ArchiveMountRequest::None;
 
-                        // TODO: Fallback to file opener
+                        self.open_file(archive_file);
                     }
                 }
                 ArchiveMountRequest::None => (),

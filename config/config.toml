@@ -1,3 +1,12 @@
+[options]
+opener = "xdg-open"
+pager = "less"
+editor = "vi"
+
+show_button_bar = true
+use_shadows = true
+use_internal_viewer = true
+
 [ui]
 hotkey_fg = "white"
 hotkey_bg = "black"
@@ -8,7 +17,6 @@ selected_bg = "cyan"
 marked_fg = "light yellow"
 markselect_fg = "light yellow"
 
-use_shadows = true
 shadow_fg = "dark gray"
 shadow_bg = "black"
 

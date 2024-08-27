@@ -104,7 +104,7 @@ impl Component for DlgError {
 
         f.render_widget(Clear, area);
         f.render_widget(Block::default().style(style), area);
-        if self.config.ui.use_shadows {
+        if self.config.options.use_shadows {
             render_shadow(
                 f,
                 &area,

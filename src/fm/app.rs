@@ -1,10 +1,12 @@
 use std::{
     cell::RefCell,
     cmp::max,
-    fs, io,
+    fs,
+    io::{self, Write},
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     process,
+    process::Command,
     rc::Rc,
     time::SystemTime,
 };
@@ -22,7 +24,7 @@ use signal_hook::consts::signal::*;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::{
-    app::{self, Action, Events, PubSub},
+    app::{self, start_inputs, Action, Events, PubSub},
     button_bar::ButtonBar,
     component::{Component, Focus},
     config::Config,
@@ -82,11 +84,14 @@ enum Quote {
     No,
 }
 
-#[derive(Debug)]
 pub struct App {
     config: Rc<Config>,
     pubsub_tx: Sender<PubSub>,
     pubsub_rx: Receiver<PubSub>,
+    raw_output: Rc<RawTerminal<io::Stdout>>,
+    events_tx: Sender<Events>,
+    stop_inputs_tx: Sender<()>,
+    stop_inputs_rx: Receiver<()>,
     panels: Vec<Box<dyn PanelComponent>>,
     command_bar: Option<Box<dyn CommandBarComponent>>,
     button_bar: ButtonBar,
@@ -106,10 +111,14 @@ pub struct App {
 }
 
 impl App {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &Rc<Config>,
         bookmarks: &Rc<RefCell<Bookmarks>>,
         raw_output: &Rc<RawTerminal<io::Stdout>>,
+        events_tx: &Sender<Events>,
+        stop_inputs_tx: &Sender<()>,
+        stop_inputs_rx: &Receiver<()>,
         initial_path: &Path,
         printwd: Option<&Path>,
         db_file: Option<&Path>,
@@ -131,11 +140,18 @@ impl App {
             config: Rc::clone(config),
             pubsub_tx: pubsub_tx.clone(),
             pubsub_rx,
+            raw_output: Rc::clone(raw_output),
+            events_tx: events_tx.clone(),
+            stop_inputs_tx: stop_inputs_tx.clone(),
+            stop_inputs_rx: stop_inputs_rx.clone(),
             panels: vec![
                 Box::new(FilePanel::new(
                     config,
                     bookmarks,
                     raw_output,
+                    events_tx,
+                    stop_inputs_tx,
+                    stop_inputs_rx,
                     pubsub_tx.clone(),
                     initial_path,
                     archive_mounter_command_tx.clone(),
@@ -145,6 +161,9 @@ impl App {
                     config,
                     bookmarks,
                     raw_output,
+                    events_tx,
+                    stop_inputs_tx,
+                    stop_inputs_rx,
                     pubsub_tx.clone(),
                     initial_path,
                     archive_mounter_command_tx.clone(),
@@ -425,6 +444,7 @@ impl App {
             }
             PubSub::CloseDialog => self.dialog = None,
             PubSub::Esc => self.command_bar = None,
+            PubSub::Redraw => action = Action::Redraw,
             PubSub::DlgGoto(goto_type) => {
                 self.dialog = Some(Box::new(DlgGoto::new(
                     &self.config,
@@ -446,11 +466,44 @@ impl App {
                     hex_search,
                 )));
             }
-            PubSub::ViewFile(file) => {
-                // TODO: If there's an external viewer configured, run that viewer
-                if let Ok(app) = viewer::app::App::new(&self.config, file, self.tabsize) {
-                    self.fg_app = Some(Box::new(app));
+            PubSub::ViewFile(cwd, file) => match self.config.options.use_internal_viewer {
+                true => {
+                    if let Ok(app) = viewer::app::App::new(&self.config, file, self.tabsize) {
+                        self.fg_app = Some(Box::new(app));
+                    }
                 }
+                false => {
+                    self.stop_inputs_tx.send(()).unwrap();
+                    raw_output_suspend(&self.raw_output);
+
+                    let _ = Command::new(&self.config.options.pager)
+                        .arg(file)
+                        .current_dir(cwd)
+                        .status();
+
+                    start_inputs(self.events_tx.clone(), self.stop_inputs_rx.clone());
+                    raw_output_activate(&self.raw_output);
+
+                    self.pubsub_tx.send(PubSub::Reload).unwrap();
+
+                    action = Action::Redraw;
+                }
+            },
+            PubSub::EditFile(cwd, file) => {
+                self.stop_inputs_tx.send(()).unwrap();
+                raw_output_suspend(&self.raw_output);
+
+                let _ = Command::new(&self.config.options.editor)
+                    .arg(file)
+                    .current_dir(cwd)
+                    .status();
+
+                start_inputs(self.events_tx.clone(), self.stop_inputs_rx.clone());
+                raw_output_activate(&self.raw_output);
+
+                self.pubsub_tx.send(PubSub::Reload).unwrap();
+
+                action = Action::Redraw;
             }
             PubSub::CloseCommandBar => self.command_bar = None,
             PubSub::Leader(leader) => {
@@ -1389,13 +1442,15 @@ impl app::App for App {
             return;
         }
 
+        let mut constraints = vec![Constraint::Min(1), Constraint::Length(1)];
+
+        if self.config.options.show_button_bar {
+            constraints.push(Constraint::Length(1));
+        };
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-            ])
+            .constraints(&constraints)
             .split(f.area());
 
         let panel_chunks = Layout::default()
@@ -1440,7 +1495,9 @@ impl app::App for App {
             );
         }
 
-        self.button_bar.render(f, &chunks[2], Focus::Normal);
+        if self.config.options.show_button_bar {
+            self.button_bar.render(f, &chunks[2], Focus::Normal);
+        }
 
         if let Some(dlg) = &mut self.dialog {
             dlg.render(
@@ -1539,4 +1596,35 @@ pub fn format_seconds(t: u64) -> String {
 
 pub fn natsort_key(s: &str) -> String {
     caseless::default_case_fold_str(s).nfkd().collect()
+}
+
+pub fn raw_output_activate(raw_output: &RawTerminal<io::Stdout>) {
+    raw_output
+        .activate_raw_mode()
+        .expect("failed to activate raw mode");
+
+    let mut output = io::stdout();
+
+    write!(output, "{}", termion::screen::ToAlternateScreen)
+        .expect("unable to enter alternate screen");
+
+    output.flush().expect("unable to enter alternate screen");
+}
+
+pub fn raw_output_suspend(raw_output: &RawTerminal<io::Stdout>) {
+    let mut output = io::stdout();
+
+    write!(
+        output,
+        "{}{}",
+        termion::screen::ToMainScreen,
+        termion::cursor::Show
+    )
+    .expect("unable to exit alternate screen");
+
+    output.flush().expect("unable to exit alternate screen");
+
+    raw_output
+        .suspend_raw_mode()
+        .expect("failed to suspend raw mode");
 }

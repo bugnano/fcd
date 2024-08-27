@@ -310,7 +310,7 @@ impl Component for DlgCpMvProgress {
             ),
             area,
         );
-        if self.config.ui.use_shadows {
+        if self.config.options.use_shadows {
             render_shadow(
                 f,
                 &area,

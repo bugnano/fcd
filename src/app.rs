@@ -32,6 +32,7 @@ pub enum PubSub {
     CloseDialog,
     ComponentThreadEvent,
     Esc,
+    Redraw,
     Question(String, String, Box<PubSub>),
     NextPendingJob,
     NextPendingArchive,
@@ -65,7 +66,8 @@ pub enum PubSub {
     // File panel events
     SelectedEntry(Option<Entry>),
     ChangedDirectory(PathBuf),
-    ViewFile(PathBuf),
+    ViewFile(PathBuf, PathBuf),
+    EditFile(PathBuf, PathBuf),
     Leader(Option<char>),
     SortFiles(SortBy, SortOrder),
     ToggleHidden,
@@ -142,20 +144,12 @@ impl fmt::Debug for dyn App + '_ {
     }
 }
 
-pub fn init_events() -> Result<(Sender<Events>, Receiver<Events>)> {
+pub fn init_events(stop_inputs_rx: Receiver<()>) -> Result<(Sender<Events>, Receiver<Events>)> {
     let (tx, rx) = crossbeam_channel::unbounded();
-    let input_tx = tx.clone();
+    let events_tx = tx.clone();
     let signals_tx = tx.clone();
 
-    thread::spawn(move || {
-        let stdin = io::stdin();
-        for event in stdin.events().flatten() {
-            if let Err(err) = input_tx.send(Events::Input(event)) {
-                eprintln!("{}", err);
-                return;
-            }
-        }
-    });
+    start_inputs(events_tx, stop_inputs_rx);
 
     let mut signals = Signals::new([SIGWINCH, SIGINT, SIGTERM, SIGCONT])?;
 
@@ -169,6 +163,23 @@ pub fn init_events() -> Result<(Sender<Events>, Receiver<Events>)> {
     });
 
     Ok((tx, rx))
+}
+
+pub fn start_inputs(events_tx: Sender<Events>, stop_inputs_rx: Receiver<()>) {
+    thread::spawn(move || {
+        let stdin = io::stdin();
+        for event in stdin.events().flatten() {
+            if !stop_inputs_rx.is_empty() {
+                let _ = stop_inputs_rx.recv();
+                return;
+            }
+
+            if let Err(err) = events_tx.send(Events::Input(event)) {
+                eprintln!("{}", err);
+                return;
+            }
+        }
+    });
 }
 
 pub fn centered_rect(width: u16, height: u16, r: &Rect) -> Rect {

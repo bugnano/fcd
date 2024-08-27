@@ -200,7 +200,7 @@ impl TextViewer {
     fn highlight(&self) {
         let filename = self.filename.clone();
         let lines = self.lines.clone();
-        let config = *self.config.clone();
+        let config = self.config.as_ref().clone();
         let component_pubsub_tx = self.component_pubsub_tx.clone();
         let pubsub_tx = self.pubsub_tx.clone();
         let highlight_rx = self.highlight_rx.clone();

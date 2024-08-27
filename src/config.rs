@@ -6,6 +6,17 @@ use ratatui::prelude::*;
 use clap::crate_name;
 use serde::Deserialize;
 
+#[derive(Deserialize, Debug, Clone)]
+pub struct Options {
+    pub opener: String,
+    pub pager: String,
+    pub editor: String,
+
+    pub show_button_bar: bool,
+    pub use_shadows: bool,
+    pub use_internal_viewer: bool,
+}
+
 #[derive(Deserialize, Debug, Copy, Clone)]
 pub struct Ui {
     pub hotkey_fg: Color,
@@ -15,8 +26,6 @@ pub struct Ui {
 
     pub marked_fg: Color,
     pub markselect_fg: Color,
-
-    pub use_shadows: bool,
 
     pub shadow_fg: Color,
     pub shadow_bg: Color,
@@ -98,8 +107,9 @@ pub struct Highlight {
     pub base0f: Color,
 }
 
-#[derive(Deserialize, Debug, Copy, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Config {
+    pub options: Options,
     pub ui: Ui,
     pub panel: Panel,
     pub error: Error,
