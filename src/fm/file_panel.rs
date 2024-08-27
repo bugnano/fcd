@@ -24,7 +24,7 @@ use regex::RegexBuilder;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    app::{start_inputs, Events, PubSub},
+    app::{start_inputs, Events, Inputs, PubSub},
     component::{Component, Focus},
     config::Config,
     fm::{
@@ -68,8 +68,8 @@ pub struct FilePanel {
     bookmarks: Rc<RefCell<Bookmarks>>,
     raw_output: Rc<RawTerminal<io::Stdout>>,
     events_tx: Sender<Events>,
-    stop_inputs_tx: Sender<()>,
-    stop_inputs_rx: Receiver<()>,
+    stop_inputs_tx: Sender<Inputs>,
+    stop_inputs_rx: Receiver<Inputs>,
     pubsub_tx: Sender<PubSub>,
     rect: Rect,
     component_pubsub_tx: Sender<ComponentPubSub>,
@@ -104,8 +104,8 @@ impl FilePanel {
         bookmarks: &Rc<RefCell<Bookmarks>>,
         raw_output: &Rc<RawTerminal<io::Stdout>>,
         events_tx: &Sender<Events>,
-        stop_inputs_tx: &Sender<()>,
-        stop_inputs_rx: &Receiver<()>,
+        stop_inputs_tx: &Sender<Inputs>,
+        stop_inputs_rx: &Receiver<Inputs>,
         pubsub_tx: Sender<PubSub>,
         initial_path: &Path,
         archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
@@ -337,7 +337,7 @@ impl FilePanel {
     }
 
     fn open_file(&mut self, file: &Path) {
-        self.stop_inputs_tx.send(()).unwrap();
+        self.stop_inputs_tx.send(Inputs::Stop).unwrap();
         raw_output_suspend(&self.raw_output);
 
         let _ = Command::new(&self.config.options.opener)
@@ -345,6 +345,7 @@ impl FilePanel {
             .current_dir(&self.cwd)
             .status();
 
+        self.stop_inputs_tx.send(Inputs::Start).unwrap();
         start_inputs(self.events_tx.clone(), self.stop_inputs_rx.clone());
         raw_output_activate(&self.raw_output);
 

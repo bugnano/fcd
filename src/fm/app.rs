@@ -25,7 +25,7 @@ use unicode_normalization::UnicodeNormalization;
 use uzers::{get_current_uid, get_effective_uid, get_user_by_uid, os::unix::UserExt};
 
 use crate::{
-    app::{self, start_inputs, Action, Events, PubSub},
+    app::{self, start_inputs, Action, Events, Inputs, PubSub},
     button_bar::ButtonBar,
     component::{Component, Focus},
     config::Config,
@@ -91,8 +91,8 @@ pub struct App {
     pubsub_rx: Receiver<PubSub>,
     raw_output: Rc<RawTerminal<io::Stdout>>,
     events_tx: Sender<Events>,
-    stop_inputs_tx: Sender<()>,
-    stop_inputs_rx: Receiver<()>,
+    stop_inputs_tx: Sender<Inputs>,
+    stop_inputs_rx: Receiver<Inputs>,
     panels: Vec<Box<dyn PanelComponent>>,
     command_bar: Option<Box<dyn CommandBarComponent>>,
     button_bar: ButtonBar,
@@ -118,8 +118,8 @@ impl App {
         bookmarks: &Rc<RefCell<Bookmarks>>,
         raw_output: &Rc<RawTerminal<io::Stdout>>,
         events_tx: &Sender<Events>,
-        stop_inputs_tx: &Sender<()>,
-        stop_inputs_rx: &Receiver<()>,
+        stop_inputs_tx: &Sender<Inputs>,
+        stop_inputs_rx: &Receiver<Inputs>,
         initial_path: &Path,
         printwd: Option<&Path>,
         db_file: Option<&Path>,
@@ -474,7 +474,7 @@ impl App {
                     }
                 }
                 false => {
-                    self.stop_inputs_tx.send(()).unwrap();
+                    self.stop_inputs_tx.send(Inputs::Stop).unwrap();
                     raw_output_suspend(&self.raw_output);
 
                     let _ = Command::new(&self.config.options.pager)
@@ -482,6 +482,7 @@ impl App {
                         .current_dir(cwd)
                         .status();
 
+                    self.stop_inputs_tx.send(Inputs::Start).unwrap();
                     start_inputs(self.events_tx.clone(), self.stop_inputs_rx.clone());
                     raw_output_activate(&self.raw_output);
 
@@ -491,7 +492,7 @@ impl App {
                 }
             },
             PubSub::EditFile(cwd, file) => {
-                self.stop_inputs_tx.send(()).unwrap();
+                self.stop_inputs_tx.send(Inputs::Stop).unwrap();
                 raw_output_suspend(&self.raw_output);
 
                 let _ = Command::new(&self.config.options.editor)
@@ -499,6 +500,7 @@ impl App {
                     .current_dir(cwd)
                     .status();
 
+                self.stop_inputs_tx.send(Inputs::Start).unwrap();
                 start_inputs(self.events_tx.clone(), self.stop_inputs_rx.clone());
                 raw_output_activate(&self.raw_output);
 
@@ -740,7 +742,7 @@ impl App {
                     None => PathBuf::from("sh"),
                 };
 
-                self.stop_inputs_tx.send(()).unwrap();
+                self.stop_inputs_tx.send(Inputs::Stop).unwrap();
                 raw_output_suspend(&self.raw_output);
 
                 println!("[{}]{} {}", cwd.to_string_lossy(), prompt, cmd);
@@ -750,6 +752,7 @@ impl App {
                     .current_dir(cwd)
                     .status();
 
+                self.stop_inputs_tx.send(Inputs::Start).unwrap();
                 start_inputs(self.events_tx.clone(), self.stop_inputs_rx.clone());
                 raw_output_activate(&self.raw_output);
 

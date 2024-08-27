@@ -23,6 +23,12 @@ pub enum Events {
     Signal(i32),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum Inputs {
+    Stop,
+    Start,
+}
+
 #[derive(Debug, Clone)]
 pub enum PubSub {
     // App-wide events
@@ -146,7 +152,7 @@ impl fmt::Debug for dyn App + '_ {
     }
 }
 
-pub fn init_events(stop_inputs_rx: Receiver<()>) -> Result<(Sender<Events>, Receiver<Events>)> {
+pub fn init_events(stop_inputs_rx: Receiver<Inputs>) -> Result<(Sender<Events>, Receiver<Events>)> {
     let (tx, rx) = crossbeam_channel::unbounded();
     let events_tx = tx.clone();
     let signals_tx = tx.clone();
@@ -167,20 +173,44 @@ pub fn init_events(stop_inputs_rx: Receiver<()>) -> Result<(Sender<Events>, Rece
     Ok((tx, rx))
 }
 
-pub fn start_inputs(events_tx: Sender<Events>, stop_inputs_rx: Receiver<()>) {
+pub fn start_inputs(events_tx: Sender<Events>, stop_inputs_rx: Receiver<Inputs>) {
     thread::spawn(move || {
         let stdin = io::stdin();
 
         for event in stdin.events() {
-            if let Err(err) = event.map(|event| events_tx.send(Events::Input(event))) {
-                eprintln!("{}", err);
+            let mut stop = false;
+            let mut send_event = true;
 
-                #[cfg(debug_assertions)]
-                log::debug!("{:?}", err);
+            // The problem here is that stdin.events() is blocking, so given that
+            // stop_inputs_rx is used for stopping the inputs before running a command,
+            // it is possible that the command returns before the stdin.events() iterator
+            // generated a new value.
+            // So:
+            // - If we receive Inputs::Stop, and immediately after Inputs::Start, it means
+            //   that the command has completed before generating the value.
+            //   In this case we want to send the event.
+            // - If we recieve Inputs::Stop, but nothing else, it means that this is an input
+            //   during the command execution.
+            //   In this case we do *not* want to send the event.
+            if let Ok(Inputs::Stop) = stop_inputs_rx.try_recv() {
+                stop = true;
+                send_event = false;
+
+                if let Ok(Inputs::Start) = stop_inputs_rx.try_recv() {
+                    send_event = true;
+                }
             }
 
-            if !stop_inputs_rx.is_empty() {
-                let _ = stop_inputs_rx.recv();
+            if send_event {
+                if let Err(err) = event.map(|event| events_tx.send(Events::Input(event))) {
+                    eprintln!("{}", err);
+
+                    #[cfg(debug_assertions)]
+                    log::debug!("{:?}", err);
+                }
+            }
+
+            if stop {
                 return;
             }
         }
