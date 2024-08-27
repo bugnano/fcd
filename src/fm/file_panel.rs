@@ -579,6 +579,29 @@ impl Component for FilePanel {
                         }
                     }
                 }
+                Key::Char('x') => {
+                    if !self.shown_file_list.is_empty() {
+                        let entry = &self.shown_file_list[self.cursor_position];
+
+                        self.stop_inputs_tx.send(Inputs::Stop).unwrap();
+                        raw_output_suspend(&self.raw_output);
+
+                        let status = Command::new(&entry.file).current_dir(&self.cwd).status();
+
+                        self.stop_inputs_tx.send(Inputs::Start).unwrap();
+                        start_inputs(self.events_tx.clone(), self.stop_inputs_rx.clone());
+                        raw_output_activate(&self.raw_output);
+
+                        self.pubsub_tx.send(PubSub::Redraw).unwrap();
+                        self.pubsub_tx.send(PubSub::Reload).unwrap();
+
+                        if let Err(e) = status {
+                            self.pubsub_tx
+                                .send(PubSub::Error(e.to_string(), None))
+                                .unwrap();
+                        }
+                    }
+                }
                 Key::Up | Key::Char('k') => {
                     self.handle_up();
                 }
