@@ -22,6 +22,7 @@ use path_clean::PathClean;
 use pathdiff::diff_paths;
 use signal_hook::consts::signal::*;
 use unicode_normalization::UnicodeNormalization;
+use uzers::{get_current_uid, get_effective_uid, get_user_by_uid, os::unix::UserExt};
 
 use crate::{
     app::{self, start_inputs, Action, Events, PubSub},
@@ -716,6 +717,45 @@ impl App {
                             .unwrap(),
                     },
                 }
+            }
+            PubSub::PromptShell(cwd) => {
+                self.command_bar = Some(Box::new(CmdBar::new(
+                    &self.config,
+                    self.pubsub_tx.clone(),
+                    CmdBarType::Shell(cwd.clone()),
+                    "shell: ",
+                    "",
+                    0,
+                )));
+            }
+            PubSub::Shell(cwd, cmd) => {
+                let cmd = self.apply_template(cmd, Quote::Yes);
+                let prompt = match get_effective_uid() {
+                    0 => "#",
+                    _ => "$",
+                };
+
+                let shell = match get_user_by_uid(get_current_uid()) {
+                    Some(user) => PathBuf::from(user.shell()),
+                    None => PathBuf::from("sh"),
+                };
+
+                self.stop_inputs_tx.send(()).unwrap();
+                raw_output_suspend(&self.raw_output);
+
+                println!("[{}]{} {}", cwd.to_string_lossy(), prompt, cmd);
+
+                let _ = Command::new(&shell)
+                    .args(["-c", &cmd])
+                    .current_dir(cwd)
+                    .status();
+
+                start_inputs(self.events_tx.clone(), self.stop_inputs_rx.clone());
+                raw_output_activate(&self.raw_output);
+
+                self.pubsub_tx.send(PubSub::Reload).unwrap();
+
+                action = Action::Redraw;
             }
             PubSub::MountArchive(archive) => {
                 if let Some(command_tx) = &self.archive_mounter_command_tx {

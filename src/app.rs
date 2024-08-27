@@ -77,6 +77,7 @@ pub enum PubSub {
     PromptUntagGlob,
     PromptMkdir,
     PromptRename(String, usize),
+    PromptShell(PathBuf),
     MountArchive(PathBuf),
     Rm(PathBuf, Vec<Entry>),
     Cp(PathBuf, Vec<Entry>),
@@ -93,6 +94,7 @@ pub enum PubSub {
     UntagGlob(String),
     Mkdir(String),
     Rename(String),
+    Shell(PathBuf, String),
     SaveReport(PathBuf, String),
 
     // Dialog MountArchive events
@@ -168,14 +170,17 @@ pub fn init_events(stop_inputs_rx: Receiver<()>) -> Result<(Sender<Events>, Rece
 pub fn start_inputs(events_tx: Sender<Events>, stop_inputs_rx: Receiver<()>) {
     thread::spawn(move || {
         let stdin = io::stdin();
-        for event in stdin.events().flatten() {
-            if !stop_inputs_rx.is_empty() {
-                let _ = stop_inputs_rx.recv();
-                return;
+
+        for event in stdin.events() {
+            if let Err(err) = event.map(|event| events_tx.send(Events::Input(event))) {
+                eprintln!("{}", err);
+
+                #[cfg(debug_assertions)]
+                log::debug!("{:?}", err);
             }
 
-            if let Err(err) = events_tx.send(Events::Input(event)) {
-                eprintln!("{}", err);
+            if !stop_inputs_rx.is_empty() {
+                let _ = stop_inputs_rx.recv();
                 return;
             }
         }

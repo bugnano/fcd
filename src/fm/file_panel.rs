@@ -780,6 +780,11 @@ impl Component for FilePanel {
                             .unwrap();
                     }
                 }
+                Key::Char(':') | Key::Char('!') => {
+                    self.pubsub_tx
+                        .send(PubSub::PromptShell(self.cwd.clone()))
+                        .unwrap();
+                }
                 Key::F(8) | Key::Char('8') => {
                     let selected_files = self.get_selected_files();
 
