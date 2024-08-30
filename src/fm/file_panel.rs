@@ -19,7 +19,10 @@ use ratatui::{
 };
 use termion::{event::*, raw::RawTerminal};
 
-use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+use nucleo_matcher::{
+    pattern::{CaseMatching, Normalization, Pattern},
+    Matcher, Utf32Str,
+};
 use regex::RegexBuilder;
 use unicode_width::UnicodeWidthStr;
 
@@ -898,31 +901,37 @@ impl Component for FilePanel {
                             CursorPosition::Reset,
                         );
 
-                        if !self.shown_file_list.is_empty() {
-                            let matcher = SkimMatcherV2::default();
+                        if !self.shown_file_list.is_empty() && !filter.is_empty() {
+                            let mut matcher =
+                                Matcher::new(nucleo_matcher::Config::DEFAULT.match_paths());
 
-                            let scores: Vec<i64> = self
+                            let pattern =
+                                Pattern::parse(filter, CaseMatching::Ignore, Normalization::Smart);
+
+                            let mut buf = Vec::new();
+
+                            let scores: Vec<(usize, u32, usize)> = self
                                 .shown_file_list
                                 .iter()
-                                .map(|entry| {
-                                    matcher.fuzzy_match(&entry.key, filter).unwrap_or(i64::MIN)
+                                .enumerate()
+                                .map(|(i, entry)| {
+                                    let utf32_str = Utf32Str::new(entry.key.as_ref(), &mut buf);
+
+                                    let score = pattern.score(utf32_str, &mut matcher).unwrap_or(0);
+
+                                    (i, score, utf32_str.len())
                                 })
                                 .collect();
 
-                            let new_cursor_position = self.clamp_cursor(
+                            self.cursor_position = self.clamp_cursor(
                                 scores
                                     .iter()
-                                    .enumerate()
-                                    .max_by_key(|(_i, &score)| score)
-                                    .map(|(i, _score)| i)
+                                    .max_by(|(i1, score1, len1), (i2, score2, len2)| {
+                                        score1.cmp(score2).then(len2.cmp(len1)).then(i2.cmp(i1))
+                                    })
+                                    .map(|(i, _score, _len)| *i)
                                     .unwrap_or_default(),
                             );
-
-                            if new_cursor_position != self.cursor_position
-                                && scores[new_cursor_position] > scores[self.cursor_position]
-                            {
-                                self.cursor_position = new_cursor_position;
-                            }
                         }
 
                         if let Focus::Focused = self.focus {

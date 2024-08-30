@@ -9,8 +9,11 @@ use anyhow::Result;
 use crossbeam_channel::Receiver;
 use ratatui::prelude::*;
 
-use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use libc::{S_IXGRP, S_IXOTH, S_IXUSR};
+use nucleo_matcher::{
+    pattern::{CaseMatching, Normalization, Pattern},
+    Matcher, Utf32Str,
+};
 use path_clean::PathClean;
 use thousands::Separable;
 use uzers::{Groups, Users, UsersCache};
@@ -323,7 +326,9 @@ pub fn filter_file_list(
     file_filter: &str,
 ) -> Vec<Entry> {
     let file_filter = natsort_key(file_filter);
-    let matcher = SkimMatcherV2::default();
+    let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT.match_paths());
+    let pattern = Pattern::parse(&file_filter, CaseMatching::Ignore, Normalization::Smart);
+    let mut buf = Vec::new();
 
     file_list
         .iter()
@@ -336,7 +341,9 @@ pub fn filter_file_list(
                 return true;
             }
 
-            matcher.fuzzy_match(&entry.key, &file_filter).is_some()
+            pattern
+                .score(Utf32Str::new(entry.key.as_ref(), &mut buf), &mut matcher)
+                .is_some()
         })
         .cloned()
         .collect()
