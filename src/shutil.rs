@@ -99,7 +99,7 @@ pub fn expanduser(path: &Path) -> PathBuf {
 pub fn copystat(src: &Path, dst: &Path) -> rustix::io::Result<()> {
     let st = lstat(src)?;
 
-    utimensat(
+    let _ = utimensat(
         CWD,
         dst,
         &Timestamps {
@@ -113,7 +113,7 @@ pub fn copystat(src: &Path, dst: &Path) -> rustix::io::Result<()> {
             },
         },
         AtFlags::SYMLINK_NOFOLLOW,
-    )?;
+    );
 
     // We must copy extended attributes before the file is (potentially)
     // chmod()'ed read-only, otherwise setxattr() will error with -EACCES.
