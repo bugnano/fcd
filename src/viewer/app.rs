@@ -123,7 +123,7 @@ impl App {
             }
             Events::Signal(signal) => match *signal {
                 SIGWINCH => (),
-                SIGINT => action = Action::CtrlC,
+                SIGINT => (),
                 SIGTERM => action = Action::SigTerm,
                 SIGCONT => action = Action::SigCont,
                 _ => unreachable!(),
