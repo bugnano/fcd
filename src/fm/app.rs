@@ -1,7 +1,7 @@
 use std::{
     cell::RefCell,
     cmp::max,
-    fs,
+    env, fs,
     io::{self, Write},
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
@@ -59,7 +59,7 @@ use crate::{
         panel::PanelComponent,
         quickview::QuickView,
     },
-    shutil::expanduser,
+    shutil::{expanduser, which},
     template,
     viewer::{
         self, dlg_goto::DlgGoto, dlg_hex_search::DlgHexSearch, dlg_text_search::DlgTextSearch,
@@ -737,10 +737,12 @@ impl App {
                     _ => "$",
                 };
 
-                let shell = match get_user_by_uid(get_current_uid()) {
-                    Some(user) => PathBuf::from(user.shell()),
-                    None => PathBuf::from("sh"),
-                };
+                let shell = env::var_os("SHELL").and_then(which).unwrap_or_else(|| {
+                    match get_user_by_uid(get_current_uid()) {
+                        Some(user) => PathBuf::from(user.shell()),
+                        None => PathBuf::from("sh"),
+                    }
+                });
 
                 self.stop_inputs_tx.send(Inputs::Stop).unwrap();
                 raw_output_suspend(&self.raw_output);
