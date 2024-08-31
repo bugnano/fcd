@@ -13,8 +13,8 @@ use termion::event::*;
 use crate::{
     app::PubSub,
     component::{Component, Focus},
-    config::Config,
     fm::entry::{get_file_list, sort_by_function, SortBy, SortOrder},
+    palette::Palette,
     viewer::{
         dir_viewer::DirViewer,
         hex_viewer::{HexViewer, ViewerType},
@@ -31,7 +31,7 @@ pub struct FileViewer {
 
 impl FileViewer {
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         filename: &Path,
         tabsize: u8,
@@ -41,7 +41,7 @@ impl FileViewer {
 
         let main_viewer = match attr.is_dir() {
             true => {
-                let mut file_list = get_file_list(filename, None)?;
+                let mut file_list = get_file_list(filename, palette.as_ref(), None)?;
 
                 // TODO: It would be nice to use the same hidden file filter, sort method and sort
                 // order of the other panel when using the file viewer as a quick preview
@@ -50,7 +50,7 @@ impl FileViewer {
                 });
 
                 Box::new(DirViewer::new(
-                    config,
+                    palette,
                     pubsub_tx.clone(),
                     filename,
                     &filename_str,
@@ -75,7 +75,7 @@ impl FileViewer {
                         f.read_to_end(&mut buffer)?;
 
                         Box::new(TextViewer::new(
-                            config,
+                            palette,
                             pubsub_tx.clone(),
                             filename,
                             &filename_str,
@@ -84,7 +84,7 @@ impl FileViewer {
                         )) as Box<dyn Component>
                     }
                     false => Box::new(HexViewer::new(
-                        config,
+                        palette,
                         pubsub_tx.clone(),
                         filename,
                         &filename_str,
@@ -98,7 +98,7 @@ impl FileViewer {
         let hex_viewer = match attr.is_dir() {
             true => None,
             false => Some(HexViewer::new(
-                config,
+                palette,
                 pubsub_tx.clone(),
                 filename,
                 &filename_str,

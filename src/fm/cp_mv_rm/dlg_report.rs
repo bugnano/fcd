@@ -18,20 +18,20 @@ use atomicwrites::{AllowOverwrite, AtomicFile};
 use pathdiff::diff_paths;
 
 use crate::{
-    app::{centered_rect, render_shadow, PubSub},
+    app::{centered_rect, render_shadow, PubSub, MIDDLE_BORDER_SET},
     component::{Component, Focus},
-    config::Config,
     dlg_error::DialogType,
     fm::cp_mv_rm::database::{
         DBDirListEntry, DBFileEntry, DBFileStatus, DBJobEntry, DBJobStatus, DataBase,
     },
+    palette::Palette,
     tilde_layout::tilde_layout,
     widgets::button::Button,
 };
 
 #[derive(Debug)]
 pub struct DlgReport {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     job: DBJobEntry,
     db_file: Option<PathBuf>,
@@ -46,7 +46,7 @@ pub struct DlgReport {
 
 impl DlgReport {
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         job: &DBJobEntry,
         files: &[DBFileEntry],
@@ -146,28 +146,14 @@ impl DlgReport {
         };
 
         let (style, focused_style, active_style) = match dialog_type {
-            DialogType::Error => (
-                Style::default().fg(config.error.fg).bg(config.error.bg),
-                Style::default()
-                    .fg(config.error.focus_fg)
-                    .bg(config.error.focus_bg),
-                Style::default()
-                    .fg(config.error.title_fg)
-                    .bg(config.error.bg),
-            ),
-            DialogType::Warning | DialogType::Info => (
-                Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
-            ),
+            DialogType::Error => (palette.error, palette.error_focus, palette.error_title),
+            DialogType::Warning | DialogType::Info => {
+                (palette.dialog, palette.dialog_focus, palette.dialog_title)
+            }
         };
 
         DlgReport {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx,
             job: job.clone(),
             db_file: db_file.map(PathBuf::from),
@@ -319,41 +305,17 @@ impl Component for DlgReport {
         );
 
         let (style, title_style) = match self.dialog_type {
-            DialogType::Error => (
-                Style::default()
-                    .fg(self.config.error.fg)
-                    .bg(self.config.error.bg),
-                Style::default()
-                    .fg(self.config.error.title_fg)
-                    .bg(self.config.error.bg),
-            ),
-            DialogType::Warning | DialogType::Info => (
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-                Style::default()
-                    .fg(self.config.dialog.title_fg)
-                    .bg(self.config.dialog.bg),
-            ),
+            DialogType::Error => (self.palette.error, self.palette.error_title),
+            DialogType::Warning | DialogType::Info => {
+                (self.palette.dialog, self.palette.dialog_title)
+            }
         };
 
         f.render_widget(Clear, area);
         f.render_widget(Block::default().style(style), area);
-        if self.config.options.use_shadows {
-            render_shadow(
-                f,
-                &area,
-                &Style::default()
-                    .bg(self.config.ui.shadow_bg)
-                    .fg(self.config.ui.shadow_fg),
-            );
+        if let Some(shadow) = self.palette.shadow {
+            render_shadow(f, &area, &shadow);
         }
-
-        let middle_border_set = symbols::border::Set {
-            top_left: symbols::line::NORMAL.vertical_right,
-            top_right: symbols::line::NORMAL.vertical_left,
-            ..symbols::border::PLAIN
-        };
 
         let sections = Layout::default()
             .direction(Direction::Vertical)
@@ -401,7 +363,7 @@ impl Component for DlgReport {
 
         let lower_block = Block::default()
             .borders(Borders::ALL)
-            .border_set(middle_border_set)
+            .border_set(MIDDLE_BORDER_SET)
             .style(style);
 
         let lower_area = Layout::default()

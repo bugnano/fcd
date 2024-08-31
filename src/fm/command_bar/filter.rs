@@ -9,8 +9,8 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
     app::PubSub,
     component::{Component, Focus},
-    config::Config,
     fm::command_bar::component::{CommandBar, CommandBarComponent},
+    palette::Palette,
     widgets::input::Input,
 };
 
@@ -21,7 +21,7 @@ pub struct Filter {
 }
 
 impl Filter {
-    pub fn new(_config: &Rc<Config>, pubsub_tx: Sender<PubSub>, filter: &str) -> Filter {
+    pub fn new(_palette: &Rc<Palette>, pubsub_tx: Sender<PubSub>, filter: &str) -> Filter {
         Filter {
             pubsub_tx,
             input: Input::new(&Style::default(), filter, filter.len()),

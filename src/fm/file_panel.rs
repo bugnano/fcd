@@ -21,15 +21,14 @@ use termion::{event::*, raw::RawTerminal};
 
 use nucleo_matcher::{
     pattern::{CaseMatching, Normalization, Pattern},
-    Matcher, Utf32Str,
+    Config, Matcher, Utf32Str,
 };
 use regex::RegexBuilder;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    app::{start_inputs, Events, Inputs, PubSub},
+    app::{start_inputs, Events, Inputs, PubSub, MIDDLE_BORDER_SET},
     component::{Component, Focus},
-    config::Config,
     fm::{
         app::{
             human_readable_size, raw_output_activate, raw_output_suspend, tar_stem, tar_suffix,
@@ -38,12 +37,13 @@ use crate::{
         archive_mounter::{self, ArchiveMounterCommand},
         bookmarks::{Bookmarks, BOOKMARK_KEYS},
         entry::{
-            count_directories, filter_file_list, get_file_list, sort_by_function,
-            style_from_palette, Entry, HiddenFiles, SortBy, SortOrder, ARCHIVE_EXTENSIONS,
+            count_directories, filter_file_list, get_file_list, sort_by_function, Entry,
+            HiddenFiles, SortBy, SortOrder, ARCHIVE_EXTENSIONS,
         },
         panel::{Panel, PanelComponent},
     },
     fnmatch,
+    palette::Palette,
     shutil::disk_usage,
     tilde_layout::tilde_layout,
 };
@@ -67,13 +67,14 @@ enum ArchiveMountRequest {
 }
 
 pub struct FilePanel {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     bookmarks: Rc<RefCell<Bookmarks>>,
     raw_output: Rc<RawTerminal<io::Stdout>>,
     events_tx: Sender<Events>,
     stop_inputs_tx: Sender<Inputs>,
     stop_inputs_rx: Receiver<Inputs>,
     pubsub_tx: Sender<PubSub>,
+    opener: String,
     rect: Rect,
     component_pubsub_tx: Sender<ComponentPubSub>,
     component_pubsub_rx: Receiver<ComponentPubSub>,
@@ -103,13 +104,14 @@ pub struct FilePanel {
 impl FilePanel {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         bookmarks: &Rc<RefCell<Bookmarks>>,
         raw_output: &Rc<RawTerminal<io::Stdout>>,
         events_tx: &Sender<Events>,
         stop_inputs_tx: &Sender<Inputs>,
         stop_inputs_rx: &Receiver<Inputs>,
         pubsub_tx: Sender<PubSub>,
+        opener: &str,
         initial_path: &Path,
         archive_mounter_command_tx: Option<Sender<ArchiveMounterCommand>>,
         focus: Focus,
@@ -118,13 +120,14 @@ impl FilePanel {
         let (file_list_tx, file_list_rx) = crossbeam_channel::unbounded();
 
         let mut panel = FilePanel {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             bookmarks: Rc::clone(bookmarks),
             raw_output: Rc::clone(raw_output),
             events_tx: events_tx.clone(),
             stop_inputs_tx: stop_inputs_tx.clone(),
             stop_inputs_rx: stop_inputs_rx.clone(),
             pubsub_tx,
+            opener: String::from(opener),
             rect: Rect::default(),
             component_pubsub_tx,
             component_pubsub_rx,
@@ -191,6 +194,7 @@ impl FilePanel {
         let file_list_rx = self.file_list_rx.clone();
         let component_pubsub_tx = self.component_pubsub_tx.clone();
         let pubsub_tx = self.pubsub_tx.clone();
+        let palette = self.palette.as_ref().clone();
 
         thread::spawn(move || {
             loop {
@@ -208,7 +212,8 @@ impl FilePanel {
                 };
 
                 // Step 1: Get the current file list without counting the directories
-                let file_list = get_file_list(&cwd, Some(file_list_rx.clone())).unwrap_or_default();
+                let file_list =
+                    get_file_list(&cwd, &palette, Some(file_list_rx.clone())).unwrap_or_default();
 
                 // Send the current result only if there are no newer file list requests in the queue,
                 // otherwise discard the current result
@@ -343,7 +348,7 @@ impl FilePanel {
         self.stop_inputs_tx.send(Inputs::Stop).unwrap();
         raw_output_suspend(&self.raw_output);
 
-        let _ = Command::new(&self.config.options.opener)
+        let _ = Command::new(&self.opener)
             .arg(file)
             .current_dir(&self.cwd)
             .status();
@@ -902,8 +907,7 @@ impl Component for FilePanel {
                         );
 
                         if !self.shown_file_list.is_empty() && !filter.is_empty() {
-                            let mut matcher =
-                                Matcher::new(nucleo_matcher::Config::DEFAULT.match_paths());
+                            let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
 
                             let pattern =
                                 Pattern::parse(filter, CaseMatching::Ignore, Normalization::Smart);
@@ -1036,12 +1040,6 @@ impl Component for FilePanel {
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {
-        let middle_border_set = symbols::border::Set {
-            top_left: symbols::line::NORMAL.vertical_right,
-            top_right: symbols::line::NORMAL.vertical_left,
-            ..symbols::border::PLAIN
-        };
-
         let sections = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(1), Constraint::Length(3)])
@@ -1057,12 +1055,8 @@ impl Component for FilePanel {
                             chunk.width.saturating_sub(4).into(),
                         ),
                         match focus {
-                            Focus::Focused => Style::default()
-                                .fg(self.config.panel.reverse_fg)
-                                .bg(self.config.panel.reverse_bg),
-                            _ => Style::default()
-                                .fg(self.config.panel.fg)
-                                .bg(self.config.panel.bg),
+                            Focus::Focused => self.palette.panel_reverse,
+                            _ => self.palette.panel,
                         },
                     ),
                     Span::raw(symbols::line::NORMAL.horizontal),
@@ -1071,11 +1065,7 @@ impl Component for FilePanel {
                 .alignment(Alignment::Left),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-            .style(
-                Style::default()
-                    .fg(self.config.panel.fg)
-                    .bg(self.config.panel.bg),
-            );
+            .style(self.palette.panel);
 
         let upper_inner = upper_block.inner(sections[0]);
         let upper_height = (upper_inner.height as usize).saturating_sub(1);
@@ -1098,7 +1088,7 @@ impl Component for FilePanel {
                 f.render_widget(
                     Block::default()
                         .title("Loading...")
-                        .style(Style::default().fg(self.config.panel.fg)),
+                        .style(self.palette.panel),
                     upper_inner,
                 );
             }
@@ -1147,17 +1137,11 @@ impl Component for FilePanel {
                                 is_selected,
                                 matches!(focus, Focus::Focused),
                             ) {
-                                (true, true, true) => {
-                                    Style::default().fg(self.config.ui.markselect_fg)
-                                }
-                                (true, true, false) => {
-                                    Style::default().fg(self.config.ui.marked_fg)
-                                }
-                                (true, false, _) => Style::default().fg(self.config.ui.marked_fg),
-                                (false, true, true) => {
-                                    Style::default().fg(self.config.ui.selected_fg)
-                                }
-                                (false, _, _) => style_from_palette(&self.config, entry.palette),
+                                (true, true, true) => self.palette.markselect,
+                                (true, true, false) => self.palette.marked,
+                                (true, false, _) => self.palette.marked,
+                                (false, true, true) => self.palette.selected,
+                                (false, _, _) => entry.style,
                             },
                         )
                         .into()
@@ -1165,7 +1149,7 @@ impl Component for FilePanel {
                     .collect();
 
                 let items = List::new(items).highlight_style(match focus {
-                    Focus::Focused => Style::default().bg(self.config.ui.selected_bg),
+                    Focus::Focused => self.palette.selected_bg,
                     _ => Style::default(),
                 });
 
@@ -1216,19 +1200,15 @@ impl Component for FilePanel {
                             ),
                             chunk.width.saturating_sub(4).into(),
                         ),
-                        Style::default().fg(self.config.ui.marked_fg),
+                        self.palette.marked,
                     ),
                 })
                 .position(Position::Top)
                 .alignment(Alignment::Center),
             )
             .borders(Borders::ALL)
-            .border_set(middle_border_set)
-            .style(
-                Style::default()
-                    .fg(self.config.panel.fg)
-                    .bg(self.config.panel.bg),
-            );
+            .border_set(MIDDLE_BORDER_SET)
+            .style(self.palette.panel);
 
         let lower_inner = lower_block.inner(sections[1]);
 
@@ -1241,11 +1221,7 @@ impl Component for FilePanel {
                         &self.shown_file_list[self.cursor_position].details,
                         lower_inner.width.into(),
                     ))
-                    .style(
-                        Style::default()
-                            .fg(self.config.panel.fg)
-                            .bg(self.config.panel.bg),
-                    ),
+                    .style(self.palette.panel),
                 lower_inner,
             );
         }

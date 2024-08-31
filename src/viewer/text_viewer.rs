@@ -18,8 +18,8 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::{
     app::PubSub,
     component::{Component, Focus},
-    config::Config,
     fnmatch,
+    palette::Palette,
     viewer::{
         dlg_goto::GotoType,
         dlg_text_search::{SearchType, TextSearch},
@@ -83,7 +83,7 @@ enum ComponentPubSub {
 
 #[derive(Debug)]
 pub struct TextViewer {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     component_pubsub_tx: Sender<ComponentPubSub>,
     component_pubsub_rx: Receiver<ComponentPubSub>,
@@ -108,19 +108,13 @@ pub struct TextViewer {
 
 impl TextViewer {
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         filename: &Path,
         filename_str: &str,
         tabsize: u8,
         data: Vec<u8>,
     ) -> TextViewer {
-        let tab_size = if tabsize > 0 {
-            tabsize
-        } else {
-            config.viewer.tab_size
-        };
-
         let content = match str::from_utf8(&data) {
             Ok(content) => universal_newlines(content),
             Err(e) => {
@@ -138,12 +132,7 @@ impl TextViewer {
         // Default to unstyled text
         let styled_lines: Vec<Vec<(String, Style)>> = lines
             .iter()
-            .map(|line| {
-                vec![(
-                    String::from(line),
-                    Style::default().fg(config.highlight.base05),
-                )]
-            })
+            .map(|line| vec![(String::from(line), palette.base05)])
             .collect();
 
         let mut total_offset = 0;
@@ -158,7 +147,7 @@ impl TextViewer {
         let (highlight_tx, highlight_rx) = crossbeam_channel::unbounded();
 
         let mut viewer = TextViewer {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx,
             component_pubsub_tx,
             component_pubsub_rx,
@@ -167,7 +156,7 @@ impl TextViewer {
             rect: Rect::default(),
             filename: filename.to_path_buf(),
             filename_str: String::from(filename_str),
-            tabsize: tab_size,
+            tabsize,
             data,
             line_offset,
             lines,
@@ -200,7 +189,7 @@ impl TextViewer {
     fn highlight(&self) {
         let filename = self.filename.clone();
         let lines = self.lines.clone();
-        let config = self.config.as_ref().clone();
+        let palette = self.palette.as_ref().clone();
         let component_pubsub_tx = self.component_pubsub_tx.clone();
         let pubsub_tx = self.pubsub_tx.clone();
         let highlight_rx = self.highlight_rx.clone();
@@ -233,23 +222,23 @@ impl TextViewer {
                             .map(|(style, text)| {
                                 (
                                     String::from(text.trim_end_matches('\n')),
-                                    Style::default().fg(match style.foreground.r {
-                                        0x00 => config.highlight.base00,
-                                        0x01 => config.highlight.base08,
-                                        0x02 => config.highlight.base0b,
-                                        0x03 => config.highlight.base0a,
-                                        0x04 => config.highlight.base0d,
-                                        0x05 => config.highlight.base0e,
-                                        0x06 => config.highlight.base0c,
-                                        0x07 => config.highlight.base05,
-                                        0x08 => config.highlight.base03,
-                                        0x09 => config.highlight.base09,
-                                        0x0F => config.highlight.base0f,
+                                    match style.foreground.r {
+                                        0x00 => palette.base00,
+                                        0x01 => palette.base08,
+                                        0x02 => palette.base0b,
+                                        0x03 => palette.base0a,
+                                        0x04 => palette.base0d,
+                                        0x05 => palette.base0e,
+                                        0x06 => palette.base0c,
+                                        0x07 => palette.base05,
+                                        0x08 => palette.base03,
+                                        0x09 => palette.base09,
+                                        0x0F => palette.base0f,
                                         _ => {
                                             log::debug!("{:?}", style);
-                                            config.highlight.base05
+                                            palette.base05
                                         }
-                                    }),
+                                    },
                                 )
                             })
                             .collect(),
@@ -636,13 +625,11 @@ impl Component for TextViewer {
             .take(chunk.height.into())
             .enumerate()
             .map(|(i, e)| {
-                let highlighted_style = Style::default()
-                    .fg(if (self.first_line + i) == self.search_pos {
-                        self.config.ui.markselect_fg
-                    } else {
-                        self.config.ui.selected_fg
-                    })
-                    .bg(self.config.ui.selected_bg);
+                let highlighted_style = if (self.first_line + i) == self.search_pos {
+                    self.palette.markselect
+                } else {
+                    self.palette.selected
+                };
 
                 let highlighted_line = match (
                     &self.expression,
@@ -773,7 +760,7 @@ impl Component for TextViewer {
                             self.first_line + i + 1,
                             width = line_number_width
                         ),
-                        Style::default().fg(self.config.viewer.lineno_fg),
+                        self.palette.lineno,
                     )),
                     Cell::from(e.clone()),
                 ])
@@ -782,7 +769,7 @@ impl Component for TextViewer {
             .collect();
 
         let table = Table::new(items, widths)
-            .block(Block::default().style(Style::default().bg(self.config.highlight.base00)))
+            .block(Block::default().style(self.palette.panel))
             .column_spacing(0);
 
         f.render_widget(table, *chunk);

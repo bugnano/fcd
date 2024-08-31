@@ -14,7 +14,7 @@ use termion::event::*;
 use crate::{
     app::PubSub,
     component::{Component, Focus},
-    config::Config,
+    palette::Palette,
     viewer::{dlg_goto::GotoType, dlg_hex_search::HexSearch},
 };
 
@@ -120,7 +120,7 @@ pub enum ViewerType {
 
 #[derive(Debug)]
 pub struct HexViewer {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     rect: Rect,
     filename_str: String,
@@ -138,7 +138,7 @@ pub struct HexViewer {
 
 impl HexViewer {
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         filename: &Path,
         filename_str: &str,
@@ -151,7 +151,7 @@ impl HexViewer {
         let len_address = format!("{:X}", file_length).len();
 
         let mut viewer = HexViewer {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx,
             rect: Rect::default(),
             filename_str: String::from(filename_str),
@@ -708,12 +708,6 @@ impl Component for HexViewer {
             .copied()
             .collect();
 
-        let style_hex_even = Style::default().fg(self.config.viewer.hex_even_fg);
-        let style_hex_odd = Style::default().fg(self.config.viewer.hex_odd_fg);
-        let style_even = Style::default().fg(self.config.viewer.hex_text_even_fg);
-        let style_odd = Style::default().fg(self.config.viewer.hex_text_odd_fg);
-        let style_dump = Style::default().fg(self.config.highlight.base05);
-
         let items: Vec<Row> = buffer_with_matches[self.offset.saturating_sub(buf_start) as usize..]
             .chunks(self.line_width)
             .enumerate()
@@ -726,12 +720,10 @@ impl Component for HexViewer {
                     }
                 };
 
-                let style_highlighted = Style::default()
-                    .fg(match highlight {
-                        true => self.config.ui.markselect_fg,
-                        false => self.config.ui.selected_fg,
-                    })
-                    .bg(self.config.ui.selected_bg);
+                let style_highlighted = match highlight {
+                    true => self.palette.markselect,
+                    false => self.palette.selected,
+                };
 
                 match self.viewer_type {
                     ViewerType::Hex => Row::new(vec![
@@ -741,30 +733,27 @@ impl Component for HexViewer {
                                 self.offset + ((self.line_width * i) as u64),
                                 width = self.len_address
                             ),
-                            Style::default().fg(self.config.viewer.lineno_fg),
+                            self.palette.lineno,
                         )),
                         Cell::from(Line::from(hex_string(
                             line,
-                            &style_hex_even,
-                            &style_hex_odd,
+                            &self.palette.hex_even,
+                            &self.palette.hex_odd,
                             &style_highlighted,
                         ))),
                         Cell::from(Line::from(
-                            std::iter::once(Span::styled(
-                                " \u{2502}",
-                                Style::default().fg(self.config.viewer.lineno_fg),
-                            ))
-                            .chain(masked_string(
-                                line,
-                                &style_even,
-                                &style_odd,
-                                &style_highlighted,
-                            ))
-                            .chain(std::iter::once(Span::styled(
-                                "\u{2502}",
-                                Style::default().fg(self.config.viewer.lineno_fg),
-                            )))
-                            .collect::<Vec<Span>>(),
+                            std::iter::once(Span::styled(" \u{2502}", self.palette.lineno))
+                                .chain(masked_string(
+                                    line,
+                                    &self.palette.hex_text_even,
+                                    &self.palette.hex_text_odd,
+                                    &style_highlighted,
+                                ))
+                                .chain(std::iter::once(Span::styled(
+                                    "\u{2502}",
+                                    self.palette.lineno,
+                                )))
+                                .collect::<Vec<Span>>(),
                         )),
                     ]),
                     ViewerType::Dump => Row::new(vec![
@@ -774,12 +763,12 @@ impl Component for HexViewer {
                                 self.offset + ((self.line_width * i) as u64),
                                 width = self.len_address
                             ),
-                            Style::default().fg(self.config.viewer.lineno_fg),
+                            self.palette.lineno,
                         )),
                         Cell::from(Line::from(masked_string(
                             line,
-                            &style_dump,
-                            &style_dump,
+                            &self.palette.base05,
+                            &self.palette.base05,
                             &style_highlighted,
                         ))),
                     ]),
@@ -788,7 +777,7 @@ impl Component for HexViewer {
             .collect();
 
         let table = Table::new(items, widths)
-            .block(Block::default().style(Style::default().bg(self.config.highlight.base00)))
+            .block(Block::default().style(self.palette.panel))
             .column_spacing(0);
 
         f.render_widget(table, *chunk);

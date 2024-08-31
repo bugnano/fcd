@@ -18,17 +18,17 @@ use termion::event::*;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    app::{centered_rect, render_shadow, PubSub},
+    app::{centered_rect, render_shadow, PubSub, MIDDLE_BORDER_SET},
     component::{Component, Focus},
-    config::Config,
     fm::archive_mounter::{self, ArchiveMounterCommand},
+    palette::Palette,
     tilde_layout::tilde_layout,
     widgets::button::Button,
 };
 
 #[derive(Debug)]
 pub struct DlgMountArchive {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     archive: PathBuf,
     title: String,
@@ -39,7 +39,7 @@ pub struct DlgMountArchive {
 
 impl DlgMountArchive {
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         archive: &Path,
         command_tx: &Sender<ArchiveMounterCommand>,
@@ -67,7 +67,7 @@ impl DlgMountArchive {
         });
 
         DlgMountArchive {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx,
             archive: PathBuf::from(archive),
             title,
@@ -75,13 +75,9 @@ impl DlgMountArchive {
             cancel_tx,
             btn_cancel: Button::new(
                 "Cancel",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
             ),
         }
     }
@@ -154,29 +150,10 @@ impl Component for DlgMountArchive {
         let area = centered_rect((message.width() + 6) as u16, 7, chunk);
 
         f.render_widget(Clear, area);
-        f.render_widget(
-            Block::default().style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            ),
-            area,
-        );
-        if self.config.options.use_shadows {
-            render_shadow(
-                f,
-                &area,
-                &Style::default()
-                    .bg(self.config.ui.shadow_bg)
-                    .fg(self.config.ui.shadow_fg),
-            );
+        f.render_widget(Block::default().style(self.palette.dialog), area);
+        if let Some(shadow) = self.palette.shadow {
+            render_shadow(f, &area, &shadow);
         }
-
-        let middle_border_set = symbols::border::Set {
-            top_left: symbols::line::NORMAL.vertical_right,
-            top_right: symbols::line::NORMAL.vertical_left,
-            ..symbols::border::PLAIN
-        };
 
         let sections = Layout::default()
             .direction(Direction::Vertical)
@@ -193,18 +170,14 @@ impl Component for DlgMountArchive {
             .title(
                 Title::from(Span::styled(
                     tilde_layout(&format!(" {} ", self.title), sections[0].width as usize),
-                    Style::default().fg(self.config.dialog.title_fg),
+                    self.palette.dialog_title,
                 ))
                 .position(Position::Top)
                 .alignment(Alignment::Center),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .style(self.palette.dialog);
 
         let upper_area = upper_block.inner(sections[0]);
 
@@ -217,12 +190,8 @@ impl Component for DlgMountArchive {
 
         let lower_block = Block::default()
             .borders(Borders::ALL)
-            .border_set(middle_border_set)
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .border_set(MIDDLE_BORDER_SET)
+            .style(self.palette.dialog);
 
         let lower_area = centered_rect(
             self.btn_cancel.width() as u16,

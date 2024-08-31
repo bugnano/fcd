@@ -13,9 +13,9 @@ use termion::event::*;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    app::{centered_rect, render_shadow, PubSub},
+    app::{centered_rect, render_shadow, PubSub, MIDDLE_BORDER_SET},
     component::{Component, Focus},
-    config::Config,
+    palette::Palette,
     widgets::{button::Button, input::Input},
 };
 
@@ -27,7 +27,7 @@ pub enum GotoType {
 
 #[derive(Debug)]
 pub struct DlgGoto {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     goto_type: GotoType,
     input: Input,
@@ -38,37 +38,23 @@ pub struct DlgGoto {
 }
 
 impl DlgGoto {
-    pub fn new(config: &Rc<Config>, pubsub_tx: Sender<PubSub>, goto_type: GotoType) -> DlgGoto {
+    pub fn new(palette: &Rc<Palette>, pubsub_tx: Sender<PubSub>, goto_type: GotoType) -> DlgGoto {
         DlgGoto {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx,
             goto_type,
-            input: Input::new(
-                &Style::default()
-                    .fg(config.dialog.input_fg)
-                    .bg(config.dialog.input_bg),
-                "",
-                0,
-            ),
+            input: Input::new(&palette.dialog_input, "", 0),
             btn_ok: Button::new(
                 "OK",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
             ),
             btn_cancel: Button::new(
                 "Cancel",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
             ),
             section_focus_position: 0,
             button_focus_position: 0,
@@ -134,29 +120,10 @@ impl Component for DlgGoto {
         let area = centered_rect(30, 7, chunk);
 
         f.render_widget(Clear, area);
-        f.render_widget(
-            Block::default().style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            ),
-            area,
-        );
-        if self.config.options.use_shadows {
-            render_shadow(
-                f,
-                &area,
-                &Style::default()
-                    .bg(self.config.ui.shadow_bg)
-                    .fg(self.config.ui.shadow_fg),
-            );
+        f.render_widget(Block::default().style(self.palette.dialog), area);
+        if let Some(shadow) = self.palette.shadow {
+            render_shadow(f, &area, &shadow);
         }
-
-        let middle_border_set = symbols::border::Set {
-            top_left: symbols::line::NORMAL.vertical_right,
-            top_right: symbols::line::NORMAL.vertical_left,
-            ..symbols::border::PLAIN
-        };
 
         let sections = Layout::default()
             .direction(Direction::Vertical)
@@ -176,20 +143,13 @@ impl Component for DlgGoto {
 
         let upper_block = Block::default()
             .title(
-                Title::from(Span::styled(
-                    " Goto ",
-                    Style::default().fg(self.config.dialog.title_fg),
-                ))
-                .position(Position::Top)
-                .alignment(Alignment::Center),
+                Title::from(Span::styled(" Goto ", self.palette.dialog_title))
+                    .position(Position::Top)
+                    .alignment(Alignment::Center),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .style(self.palette.dialog);
 
         let upper_area = Layout::default()
             .direction(Direction::Horizontal)
@@ -211,12 +171,8 @@ impl Component for DlgGoto {
 
         let lower_block = Block::default()
             .borders(Borders::ALL)
-            .border_set(middle_border_set)
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .border_set(MIDDLE_BORDER_SET)
+            .style(self.palette.dialog);
 
         let lower_area = Layout::default()
             .direction(Direction::Horizontal)

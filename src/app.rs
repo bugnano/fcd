@@ -141,6 +141,12 @@ pub enum Action {
     ExitCtrlO,
 }
 
+pub const MIDDLE_BORDER_SET: symbols::border::Set = symbols::border::Set {
+    top_left: symbols::line::NORMAL.vertical_right,
+    top_right: symbols::line::NORMAL.vertical_left,
+    ..symbols::border::PLAIN
+};
+
 pub trait App {
     fn handle_events(&mut self, events_rx: &mut Receiver<Events>) -> Action;
     fn render(&mut self, f: &mut Frame);

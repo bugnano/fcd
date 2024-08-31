@@ -59,6 +59,7 @@ use crate::{
         panel::PanelComponent,
         quickview::QuickView,
     },
+    palette::Palette,
     shutil::{expanduser, which},
     template,
     viewer::{
@@ -87,6 +88,7 @@ enum Quote {
 
 pub struct App {
     config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     pubsub_rx: Receiver<PubSub>,
     raw_output: Rc<RawTerminal<io::Stdout>>,
@@ -115,6 +117,7 @@ impl App {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &Rc<Config>,
+        palette: &Rc<Palette>,
         bookmarks: &Rc<RefCell<Bookmarks>>,
         raw_output: &Rc<RawTerminal<io::Stdout>>,
         events_tx: &Sender<Events>,
@@ -139,6 +142,7 @@ impl App {
 
         Ok(App {
             config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx: pubsub_tx.clone(),
             pubsub_rx,
             raw_output: Rc::clone(raw_output),
@@ -147,38 +151,40 @@ impl App {
             stop_inputs_rx: stop_inputs_rx.clone(),
             panels: vec![
                 Box::new(FilePanel::new(
-                    config,
+                    palette,
                     bookmarks,
                     raw_output,
                     events_tx,
                     stop_inputs_tx,
                     stop_inputs_rx,
                     pubsub_tx.clone(),
+                    &config.options.opener,
                     initial_path,
                     archive_mounter_command_tx.clone(),
                     Focus::Focused,
                 )),
                 Box::new(FilePanel::new(
-                    config,
+                    palette,
                     bookmarks,
                     raw_output,
                     events_tx,
                     stop_inputs_tx,
                     stop_inputs_rx,
                     pubsub_tx.clone(),
+                    &config.options.opener,
                     initial_path,
                     archive_mounter_command_tx.clone(),
                     Focus::Normal,
                 )),
                 Box::new(QuickView::new(
-                    config,
+                    palette,
                     pubsub_tx.clone(),
                     tabsize,
                     Focus::Normal,
                 )),
             ],
             command_bar: None,
-            button_bar: ButtonBar::new(config, LABELS),
+            button_bar: ButtonBar::new(palette, LABELS),
             dialog: None,
             fg_app: None,
             panel_focus_position: 0,
@@ -410,7 +416,7 @@ impl App {
         match pubsub {
             PubSub::Error(msg, next_action) => {
                 self.dialog = Some(Box::new(DlgError::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     msg,
                     "Error",
@@ -420,7 +426,7 @@ impl App {
             }
             PubSub::Warning(title, msg) => {
                 self.dialog = Some(Box::new(DlgError::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     msg,
                     title,
@@ -430,7 +436,7 @@ impl App {
             }
             PubSub::Info(title, msg) => {
                 self.dialog = Some(Box::new(DlgError::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     msg,
                     title,
@@ -448,28 +454,30 @@ impl App {
             PubSub::Redraw => action = Action::Redraw,
             PubSub::DlgGoto(goto_type) => {
                 self.dialog = Some(Box::new(DlgGoto::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     *goto_type,
                 )));
             }
             PubSub::DlgTextSearch(text_search) => {
                 self.dialog = Some(Box::new(DlgTextSearch::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     text_search,
                 )));
             }
             PubSub::DlgHexSearch(hex_search) => {
                 self.dialog = Some(Box::new(DlgHexSearch::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     hex_search,
                 )));
             }
             PubSub::ViewFile(cwd, file) => match self.config.options.use_internal_viewer {
                 true => {
-                    if let Ok(app) = viewer::app::App::new(&self.config, file, self.tabsize) {
+                    if let Ok(app) =
+                        viewer::app::App::new(&self.config, &self.palette, file, self.tabsize)
+                    {
                         self.fg_app = Some(Box::new(app));
                     }
                 }
@@ -511,20 +519,20 @@ impl App {
             PubSub::CloseCommandBar => self.command_bar = None,
             PubSub::Leader(leader) => {
                 self.command_bar = match leader {
-                    Some(c) => Some(Box::new(Leader::new(&self.config, *c))),
+                    Some(c) => Some(Box::new(Leader::new(&self.palette, *c))),
                     None => None,
                 }
             }
             PubSub::PromptFileFilter(filter) => {
                 self.command_bar = Some(Box::new(Filter::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     filter,
                 )));
             }
             PubSub::PromptTagGlob => {
                 self.command_bar = Some(Box::new(CmdBar::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     CmdBarType::TagGlob,
                     "tag: ",
@@ -534,7 +542,7 @@ impl App {
             }
             PubSub::PromptUntagGlob => {
                 self.command_bar = Some(Box::new(CmdBar::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     CmdBarType::UntagGlob,
                     "untag: ",
@@ -544,7 +552,7 @@ impl App {
             }
             PubSub::PromptMkdir => {
                 self.command_bar = Some(Box::new(CmdBar::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     CmdBarType::Mkdir,
                     "mkdir: ",
@@ -590,7 +598,7 @@ impl App {
             }
             PubSub::PromptRename(file_name, cursor_position) => {
                 self.command_bar = Some(Box::new(CmdBar::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     CmdBarType::Rename,
                     "rename: ",
@@ -722,7 +730,7 @@ impl App {
             }
             PubSub::PromptShell(cwd) => {
                 self.command_bar = Some(Box::new(CmdBar::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     CmdBarType::Shell(cwd.clone()),
                     "shell: ",
@@ -765,7 +773,7 @@ impl App {
             PubSub::MountArchive(archive) => {
                 if let Some(command_tx) = &self.archive_mounter_command_tx {
                     self.dialog = Some(Box::new(DlgMountArchive::new(
-                        &self.config,
+                        &self.palette,
                         self.pubsub_tx.clone(),
                         archive,
                         command_tx,
@@ -774,7 +782,7 @@ impl App {
             }
             PubSub::Question(title, question, on_yes) => {
                 self.dialog = Some(Box::new(DlgQuestion::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     title,
                     question,
@@ -827,7 +835,7 @@ impl App {
                     .map(|mut db| db.new_job(&mut job));
 
                 self.dialog = Some(Box::new(DlgDirscan::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     &job,
                     &archive_dirs,
@@ -836,7 +844,7 @@ impl App {
             }
             PubSub::DoRm(job, files, archive_dirs) => {
                 self.dialog = Some(Box::new(DlgRmProgress::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     job,
                     files,
@@ -866,7 +874,7 @@ impl App {
                 };
 
                 self.dialog = Some(Box::new(DlgCpMv::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     cwd,
                     entries,
@@ -1012,7 +1020,7 @@ impl App {
                         .map(|mut db| db.new_job(&mut job));
 
                     self.dialog = Some(Box::new(DlgDirscan::new(
-                        &self.config,
+                        &self.palette,
                         self.pubsub_tx.clone(),
                         &job,
                         &archive_dirs,
@@ -1028,7 +1036,7 @@ impl App {
                 };
 
                 self.dialog = Some(Box::new(DlgCpMvProgress::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     job,
                     files,
@@ -1055,7 +1063,7 @@ impl App {
 
                 if job_aborted || skipped_files || skipped_dirs || messages_files || messages_dirs {
                     self.dialog = Some(Box::new(DlgReport::new(
-                        &self.config,
+                        &self.palette,
                         self.pubsub_tx.clone(),
                         job,
                         files,
@@ -1076,7 +1084,7 @@ impl App {
                 let chars: Vec<char> = str_path.chars().collect();
 
                 self.command_bar = Some(Box::new(CmdBar::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     CmdBarType::SaveReport(cwd.clone()),
                     "save: ",
@@ -1104,12 +1112,12 @@ impl App {
                 self.pubsub_tx.send(PubSub::DoSaveReport(path)).unwrap();
             }
             PubSub::CommandBarError(msg) => {
-                self.command_bar = Some(Box::new(CommandBarError::new(&self.config, msg)));
+                self.command_bar = Some(Box::new(CommandBarError::new(&self.palette, msg)));
             }
             PubSub::NextPendingJob => match self.pending_jobs.pop() {
                 Some(job) => {
                     self.dialog = Some(Box::new(DlgPendingJob::new(
-                        &self.config,
+                        &self.palette,
                         self.pubsub_tx.clone(),
                         &job,
                         self.db_file.as_deref(),
@@ -1156,7 +1164,7 @@ impl App {
                     match job.status {
                         DBJobStatus::Dirscan => {
                             self.dialog = Some(Box::new(DlgDirscan::new(
-                                &self.config,
+                                &self.palette,
                                 self.pubsub_tx.clone(),
                                 &job,
                                 &archive_dirs,

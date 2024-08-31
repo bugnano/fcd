@@ -13,6 +13,7 @@ use crate::{
     component::{Component, Focus},
     config::Config,
     dlg_error::{DialogType, DlgError},
+    palette::Palette,
     viewer::{
         dlg_goto::DlgGoto, dlg_hex_search::DlgHexSearch, dlg_text_search::DlgTextSearch,
         file_viewer::FileViewer, top_bar::TopBar,
@@ -35,6 +36,7 @@ pub const LABELS: &[&str] = &[
 #[derive(Debug)]
 pub struct App {
     config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     pubsub_rx: Receiver<PubSub>,
     top_bar: TopBar,
@@ -45,16 +47,22 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(config: &Rc<Config>, filename: &Path, tabsize: u8) -> Result<App> {
+    pub fn new(
+        config: &Rc<Config>,
+        palette: &Rc<Palette>,
+        filename: &Path,
+        tabsize: u8,
+    ) -> Result<App> {
         let (pubsub_tx, pubsub_rx) = crossbeam_channel::unbounded();
 
         Ok(App {
             config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx: pubsub_tx.clone(),
             pubsub_rx,
-            top_bar: TopBar::new(config),
-            viewer: FileViewer::new(config, pubsub_tx.clone(), filename, tabsize)?,
-            button_bar: ButtonBar::new(config, LABELS),
+            top_bar: TopBar::new(palette),
+            viewer: FileViewer::new(palette, pubsub_tx.clone(), filename, tabsize)?,
+            button_bar: ButtonBar::new(palette, LABELS),
             dialog: None,
             ctrl_o: false,
         })
@@ -147,7 +155,7 @@ impl App {
         match pubsub {
             PubSub::Error(msg, next_action) => {
                 self.dialog = Some(Box::new(DlgError::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     msg,
                     "Error",
@@ -157,7 +165,7 @@ impl App {
             }
             PubSub::Warning(title, msg) => {
                 self.dialog = Some(Box::new(DlgError::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     msg,
                     title,
@@ -167,7 +175,7 @@ impl App {
             }
             PubSub::Info(title, msg) => {
                 self.dialog = Some(Box::new(DlgError::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     msg,
                     title,
@@ -184,21 +192,21 @@ impl App {
             PubSub::Redraw => action = Action::Redraw,
             PubSub::DlgGoto(goto_type) => {
                 self.dialog = Some(Box::new(DlgGoto::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     *goto_type,
                 )));
             }
             PubSub::DlgTextSearch(text_search) => {
                 self.dialog = Some(Box::new(DlgTextSearch::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     text_search,
                 )));
             }
             PubSub::DlgHexSearch(hex_search) => {
                 self.dialog = Some(Box::new(DlgHexSearch::new(
-                    &self.config,
+                    &self.palette,
                     self.pubsub_tx.clone(),
                     hex_search,
                 )));

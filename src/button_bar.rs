@@ -5,22 +5,22 @@ use ratatui::{prelude::*, widgets::*};
 use crate::{
     app::PubSub,
     component::{Component, Focus},
-    config::Config,
+    palette::Palette,
 };
 
 #[derive(Debug)]
 pub struct ButtonBar {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     labels: Vec<String>,
 }
 
 impl ButtonBar {
     pub fn new<T: IntoIterator<Item = U>, U: AsRef<str>>(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         labels: T,
     ) -> ButtonBar {
         ButtonBar {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             labels: labels
                 .into_iter()
                 .map(|label| String::from(label.as_ref()))
@@ -73,23 +73,13 @@ impl Component for ButtonBar {
 
         let items = Row::new(self.labels.iter().enumerate().flat_map(|(i, label)| {
             [
-                Span::styled(
-                    format!("{:2}", i + 1),
-                    Style::default()
-                        .fg(self.config.ui.hotkey_fg)
-                        .bg(self.config.ui.hotkey_bg),
-                ),
-                Span::styled(
-                    label,
-                    Style::default()
-                        .fg(self.config.ui.selected_fg)
-                        .bg(self.config.ui.selected_bg),
-                ),
+                Span::styled(format!("{:2}", i + 1), self.palette.hotkey),
+                Span::styled(label, self.palette.selected),
             ]
         }));
 
         let table = Table::new([items], &widths)
-            .block(Block::default().style(Style::default().bg(self.config.ui.selected_bg)))
+            .block(Block::default().style(self.palette.selected))
             .column_spacing(0);
 
         f.render_widget(table, *chunk);

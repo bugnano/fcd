@@ -4,20 +4,20 @@ use ratatui::{prelude::*, widgets::*};
 
 use crate::{
     component::{Component, Focus},
-    config::Config,
     fm::command_bar::component::{CommandBar, CommandBarComponent},
+    palette::Palette,
 };
 
 #[derive(Debug)]
 pub struct CommandBarError {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     label: String,
 }
 
 impl CommandBarError {
-    pub fn new(config: &Rc<Config>, label: &str) -> CommandBarError {
+    pub fn new(palette: &Rc<Palette>, label: &str) -> CommandBarError {
         CommandBarError {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             label: format!("ERROR: {}", label),
         }
     }
@@ -25,13 +25,8 @@ impl CommandBarError {
 
 impl Component for CommandBarError {
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
-        let label = Paragraph::new(Line::from(Span::raw(&self.label))).block(
-            Block::default().style(
-                Style::default()
-                    .fg(self.config.ui.error_fg)
-                    .bg(self.config.ui.error_bg),
-            ),
-        );
+        let label = Paragraph::new(Line::from(Span::raw(&self.label)))
+            .block(Block::default().style(self.palette.cmdbar_error));
 
         f.render_widget(label, *chunk);
     }

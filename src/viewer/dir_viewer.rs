@@ -10,9 +10,9 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
     app::PubSub,
     component::{Component, Focus},
-    config::Config,
-    fm::entry::{style_from_palette, Entry},
+    fm::entry::Entry,
     fnmatch,
+    palette::Palette,
     tilde_layout::{tilde_layout, tilde_layout_styled},
     viewer::{
         dlg_goto::GotoType,
@@ -22,7 +22,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct DirViewer {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     rect: Rect,
     filename_str: String,
@@ -37,14 +37,14 @@ pub struct DirViewer {
 
 impl DirViewer {
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         _filename: &Path,
         filename_str: &str,
         file_list: Vec<Entry>,
     ) -> DirViewer {
         let mut viewer = DirViewer {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx,
             rect: Rect::default(),
             filename_str: String::from(filename_str),
@@ -398,15 +398,13 @@ impl Component for DirViewer {
                 let filename = tilde_layout(&entry.label, filename_max_width);
                 let filename_width = filename.width();
 
-                let normal_style = style_from_palette(&self.config, entry.palette);
+                let normal_style = entry.style;
 
-                let highlighted_style = Style::default()
-                    .fg(if (self.first_line + i) == self.search_pos {
-                        self.config.ui.markselect_fg
-                    } else {
-                        self.config.ui.selected_fg
-                    })
-                    .bg(self.config.ui.selected_bg);
+                let highlighted_style = if (self.first_line + i) == self.search_pos {
+                    self.palette.markselect
+                } else {
+                    self.palette.selected
+                };
 
                 let mut line = match (
                     &self.expression,
@@ -464,8 +462,7 @@ impl Component for DirViewer {
             })
             .collect();
 
-        let items = List::new(items)
-            .block(Block::default().style(Style::default().bg(self.config.panel.bg)));
+        let items = List::new(items).block(Block::default().style(self.palette.panel));
 
         f.render_widget(items, *chunk);
     }

@@ -19,9 +19,8 @@ use termion::event::*;
 use thousands::Separable;
 
 use crate::{
-    app::{centered_rect, render_shadow, PubSub},
+    app::{centered_rect, render_shadow, PubSub, MIDDLE_BORDER_SET},
     component::{Component, Focus},
-    config::Config,
     fm::{
         app::format_seconds,
         archive_mounter::ArchiveEntry,
@@ -30,13 +29,14 @@ use crate::{
             rm::{rm, RmEvent, RmInfo},
         },
     },
+    palette::Palette,
     tilde_layout::tilde_layout,
     widgets::button::Button,
 };
 
 #[derive(Debug)]
 pub struct DlgRmProgress {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     job: DBJobEntry,
     files: Vec<DBFileEntry>,
@@ -57,7 +57,7 @@ pub struct DlgRmProgress {
 
 impl DlgRmProgress {
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         job: &DBJobEntry,
         files: &[DBFileEntry],
@@ -69,7 +69,7 @@ impl DlgRmProgress {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
         let mut dlg = DlgRmProgress {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx,
             job: job.clone(),
             files: Vec::from(files),
@@ -80,33 +80,21 @@ impl DlgRmProgress {
             result_rx,
             btn_suspend: Button::new(
                 "Suspend ",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
             ),
             btn_skip: Button::new(
                 "Skip",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
             ),
             btn_abort: Button::new(
                 "Abort",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
             ),
             current: String::from(""),
             num_files: 0,
@@ -238,29 +226,10 @@ impl Component for DlgRmProgress {
         let area = centered_rect((((chunk.width as usize) * 3) / 4) as u16, 11, chunk);
 
         f.render_widget(Clear, area);
-        f.render_widget(
-            Block::default().style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            ),
-            area,
-        );
-        if self.config.options.use_shadows {
-            render_shadow(
-                f,
-                &area,
-                &Style::default()
-                    .bg(self.config.ui.shadow_bg)
-                    .fg(self.config.ui.shadow_fg),
-            );
+        f.render_widget(Block::default().style(self.palette.dialog), area);
+        if let Some(shadow) = self.palette.shadow {
+            render_shadow(f, &area, &shadow);
         }
-
-        let middle_border_set = symbols::border::Set {
-            top_left: symbols::line::NORMAL.vertical_right,
-            top_right: symbols::line::NORMAL.vertical_left,
-            ..symbols::border::PLAIN
-        };
 
         let sections = Layout::default()
             .direction(Direction::Vertical)
@@ -281,18 +250,14 @@ impl Component for DlgRmProgress {
             .title(
                 Title::from(Span::styled(
                     tilde_layout(" Delete ", sections[0].width as usize),
-                    Style::default().fg(self.config.dialog.title_fg),
+                    self.palette.dialog_title,
                 ))
                 .position(Position::Top)
                 .alignment(Alignment::Center),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .style(self.palette.dialog);
 
         let upper_area = upper_block.inner(sections[0]);
 
@@ -320,13 +285,9 @@ impl Component for DlgRmProgress {
                 .alignment(Alignment::Center),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-            .border_set(middle_border_set)
+            .border_set(MIDDLE_BORDER_SET)
             .padding(Padding::horizontal(1))
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .style(self.palette.dialog);
 
         let middle_area = Layout::default()
             .direction(Direction::Vertical)
@@ -352,11 +313,7 @@ impl Component for DlgRmProgress {
         };
 
         let gauge = Gauge::default()
-            .gauge_style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            )
+            .gauge_style(self.palette.dialog)
             .label(tilde_layout(
                 &format!("{} %", (ratio * 100.0) as usize),
                 gauge_area[1].width as usize,
@@ -405,12 +362,8 @@ impl Component for DlgRmProgress {
 
         let lower_block = Block::default()
             .borders(Borders::ALL)
-            .border_set(middle_border_set)
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .border_set(MIDDLE_BORDER_SET)
+            .style(self.palette.dialog);
 
         let lower_area = Layout::default()
             .direction(Direction::Horizontal)

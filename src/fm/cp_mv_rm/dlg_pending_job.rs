@@ -17,17 +17,17 @@ use termion::event::*;
 use pathdiff::diff_paths;
 
 use crate::{
-    app::{centered_rect, render_shadow, PubSub},
+    app::{centered_rect, render_shadow, PubSub, MIDDLE_BORDER_SET},
     component::{Component, Focus},
-    config::Config,
     fm::cp_mv_rm::database::{DBJobEntry, DataBase},
+    palette::Palette,
     tilde_layout::tilde_layout,
     widgets::button::Button,
 };
 
 #[derive(Debug)]
 pub struct DlgPendingJob {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     job: DBJobEntry,
     db_file: Option<PathBuf>,
@@ -42,7 +42,7 @@ pub struct DlgPendingJob {
 
 impl DlgPendingJob {
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         job: &DBJobEntry,
         db_file: Option<&Path>,
@@ -66,25 +66,30 @@ impl DlgPendingJob {
             )
         }));
 
-        let (style, focused_style, active_style) = (
-            Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-            Style::default()
-                .fg(config.dialog.focus_fg)
-                .bg(config.dialog.focus_bg),
-            Style::default()
-                .fg(config.dialog.title_fg)
-                .bg(config.dialog.bg),
-        );
-
         DlgPendingJob {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx,
             job: job.clone(),
             db_file: db_file.map(PathBuf::from),
             messages,
-            btn_continue: Button::new("Continue", &style, &focused_style, &active_style),
-            btn_skip: Button::new("Skip", &style, &focused_style, &active_style),
-            btn_abort: Button::new("Abort", &style, &focused_style, &active_style),
+            btn_continue: Button::new(
+                "Continue",
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
+            ),
+            btn_skip: Button::new(
+                "Skip",
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
+            ),
+            btn_abort: Button::new(
+                "Abort",
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
+            ),
             first_line: 0,
             focus_position: 0,
             rect: Rect::default(),
@@ -180,32 +185,11 @@ impl Component for DlgPendingJob {
             chunk,
         );
 
-        let (style, title_style) = (
-            Style::default()
-                .fg(self.config.dialog.fg)
-                .bg(self.config.dialog.bg),
-            Style::default()
-                .fg(self.config.dialog.title_fg)
-                .bg(self.config.dialog.bg),
-        );
-
         f.render_widget(Clear, area);
-        f.render_widget(Block::default().style(style), area);
-        if self.config.options.use_shadows {
-            render_shadow(
-                f,
-                &area,
-                &Style::default()
-                    .bg(self.config.ui.shadow_bg)
-                    .fg(self.config.ui.shadow_fg),
-            );
+        f.render_widget(Block::default().style(self.palette.dialog), area);
+        if let Some(shadow) = self.palette.shadow {
+            render_shadow(f, &area, &shadow);
         }
-
-        let middle_border_set = symbols::border::Set {
-            top_left: symbols::line::NORMAL.vertical_right,
-            top_right: symbols::line::NORMAL.vertical_left,
-            ..symbols::border::PLAIN
-        };
 
         let sections = Layout::default()
             .direction(Direction::Vertical)
@@ -222,14 +206,14 @@ impl Component for DlgPendingJob {
             .title(
                 Title::from(Span::styled(
                     tilde_layout(" Interrupted Job ", sections[0].width as usize),
-                    title_style,
+                    self.palette.dialog_title,
                 ))
                 .position(Position::Top)
                 .alignment(Alignment::Center),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))
-            .style(style);
+            .style(self.palette.dialog);
 
         let upper_area = upper_block.inner(sections[0]);
 
@@ -253,8 +237,8 @@ impl Component for DlgPendingJob {
 
         let lower_block = Block::default()
             .borders(Borders::ALL)
-            .border_set(middle_border_set)
-            .style(style);
+            .border_set(MIDDLE_BORDER_SET)
+            .style(self.palette.dialog);
 
         let lower_area = Layout::default()
             .direction(Direction::Horizontal)

@@ -13,18 +13,18 @@ use termion::event::*;
 use crate::{
     app::PubSub,
     component::{Component, Focus},
-    config::Config,
     fm::{
         entry::Entry,
         panel::{Panel, PanelComponent},
     },
+    palette::Palette,
     tilde_layout::tilde_layout,
     viewer::{app::LABELS, file_viewer::FileViewer},
 };
 
 #[derive(Debug)]
 pub struct QuickView {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     enabled: bool,
     filename: String,
@@ -34,13 +34,13 @@ pub struct QuickView {
 
 impl QuickView {
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         tabsize: u8,
         _focus: Focus,
     ) -> QuickView {
         QuickView {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx,
             enabled: false,
             filename: String::from(""),
@@ -65,7 +65,7 @@ impl QuickView {
                     // We use the quick viewer only for regular files and directories
                     if entry.stat.is_file() || entry.stat.is_dir() {
                         self.viewer = FileViewer::new(
-                            &self.config,
+                            &self.palette,
                             self.pubsub_tx.clone(),
                             &entry.file,
                             self.tabsize,
@@ -126,12 +126,8 @@ impl Component for QuickView {
                             chunk.width.saturating_sub(4).into(),
                         ),
                         match focus {
-                            Focus::Focused => Style::default()
-                                .fg(self.config.panel.reverse_fg)
-                                .bg(self.config.panel.reverse_bg),
-                            _ => Style::default()
-                                .fg(self.config.panel.fg)
-                                .bg(self.config.panel.bg),
+                            Focus::Focused => self.palette.panel_reverse,
+                            _ => self.palette.panel,
                         },
                     ),
                     Span::raw(symbols::line::NORMAL.horizontal),
@@ -140,11 +136,7 @@ impl Component for QuickView {
                 .alignment(Alignment::Left),
             )
             .borders(Borders::ALL)
-            .style(
-                Style::default()
-                    .fg(self.config.panel.fg)
-                    .bg(self.config.panel.bg),
-            );
+            .style(self.palette.panel);
 
         let inner = block.inner(*chunk);
 

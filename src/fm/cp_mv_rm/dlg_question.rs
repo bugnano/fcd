@@ -13,16 +13,16 @@ use termion::event::*;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    app::{centered_rect, render_shadow, PubSub},
+    app::{centered_rect, render_shadow, PubSub, MIDDLE_BORDER_SET},
     component::{Component, Focus},
-    config::Config,
+    palette::Palette,
     tilde_layout::tilde_layout,
     widgets::button::Button,
 };
 
 #[derive(Debug)]
 pub struct DlgQuestion {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     btn_yes: Button,
     btn_no: Button,
@@ -34,34 +34,26 @@ pub struct DlgQuestion {
 
 impl DlgQuestion {
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         title: &str,
         question: &str,
         on_yes: &PubSub,
     ) -> DlgQuestion {
         DlgQuestion {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx,
             btn_yes: Button::new(
                 "Yes",
-                &Style::default().fg(config.error.fg).bg(config.error.bg),
-                &Style::default()
-                    .fg(config.error.focus_fg)
-                    .bg(config.error.focus_bg),
-                &Style::default()
-                    .fg(config.error.title_fg)
-                    .bg(config.error.bg),
+                &palette.error,
+                &palette.error_focus,
+                &palette.error_title,
             ),
             btn_no: Button::new(
                 "No",
-                &Style::default().fg(config.error.fg).bg(config.error.bg),
-                &Style::default()
-                    .fg(config.error.focus_fg)
-                    .bg(config.error.focus_bg),
-                &Style::default()
-                    .fg(config.error.title_fg)
-                    .bg(config.error.bg),
+                &palette.error,
+                &palette.error_focus,
+                &palette.error_title,
             ),
             title: format!(" {} ", title),
             question: String::from(question),
@@ -104,29 +96,10 @@ impl Component for DlgQuestion {
         let area = centered_rect(max(self.question.width() + 6, 21) as u16, 7, chunk);
 
         f.render_widget(Clear, area);
-        f.render_widget(
-            Block::default().style(
-                Style::default()
-                    .fg(self.config.error.fg)
-                    .bg(self.config.error.bg),
-            ),
-            area,
-        );
-        if self.config.options.use_shadows {
-            render_shadow(
-                f,
-                &area,
-                &Style::default()
-                    .bg(self.config.ui.shadow_bg)
-                    .fg(self.config.ui.shadow_fg),
-            );
+        f.render_widget(Block::default().style(self.palette.error), area);
+        if let Some(shadow) = self.palette.shadow {
+            render_shadow(f, &area, &shadow);
         }
-
-        let middle_border_set = symbols::border::Set {
-            top_left: symbols::line::NORMAL.vertical_right,
-            top_right: symbols::line::NORMAL.vertical_left,
-            ..symbols::border::PLAIN
-        };
 
         let sections = Layout::default()
             .direction(Direction::Vertical)
@@ -143,18 +116,14 @@ impl Component for DlgQuestion {
             .title(
                 Title::from(Span::styled(
                     tilde_layout(&self.title, sections[0].width as usize),
-                    Style::default().fg(self.config.error.title_fg),
+                    self.palette.error_title,
                 ))
                 .position(Position::Top)
                 .alignment(Alignment::Center),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))
-            .style(
-                Style::default()
-                    .fg(self.config.error.fg)
-                    .bg(self.config.error.bg),
-            );
+            .style(self.palette.error);
 
         let upper_area = upper_block.inner(sections[0]);
 
@@ -170,12 +139,8 @@ impl Component for DlgQuestion {
 
         let lower_block = Block::default()
             .borders(Borders::ALL)
-            .border_set(middle_border_set)
-            .style(
-                Style::default()
-                    .fg(self.config.error.fg)
-                    .bg(self.config.error.bg),
-            );
+            .border_set(MIDDLE_BORDER_SET)
+            .style(self.palette.error);
 
         let lower_area = Layout::default()
             .direction(Direction::Horizontal)

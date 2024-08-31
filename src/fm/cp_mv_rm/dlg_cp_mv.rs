@@ -17,20 +17,20 @@ use termion::event::*;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    app::{centered_rect, render_shadow, PubSub},
+    app::{centered_rect, render_shadow, PubSub, MIDDLE_BORDER_SET},
     component::{Component, Focus},
-    config::Config,
     fm::{
         cp_mv_rm::database::{DBJobOperation, OnConflict},
         entry::Entry,
     },
+    palette::Palette,
     tilde_layout::tilde_layout,
     widgets::{button::Button, input::Input, radio_box::RadioBox},
 };
 
 #[derive(Debug)]
 pub struct DlgCpMv {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     cwd: PathBuf,
     entries: Vec<Entry>,
@@ -45,7 +45,7 @@ pub struct DlgCpMv {
 
 impl DlgCpMv {
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         cwd: &Path,
         entries: &[Entry],
@@ -53,45 +53,29 @@ impl DlgCpMv {
         operation: DBJobOperation,
     ) -> DlgCpMv {
         DlgCpMv {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx,
             cwd: PathBuf::from(cwd),
             entries: Vec::from(entries),
             operation,
-            input: Input::new(
-                &Style::default()
-                    .fg(config.dialog.input_fg)
-                    .bg(config.dialog.input_bg),
-                dest,
-                dest.len(),
-            ),
+            input: Input::new(&palette.dialog_input, dest, dest.len()),
             radio: RadioBox::new(
                 ["Overwrite", "Skip", "Rename Existing", "Rename Copy"],
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
+                &palette.dialog,
+                &palette.dialog_focus,
                 2,
             ),
             btn_ok: Button::new(
                 "OK",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
             ),
             btn_cancel: Button::new(
                 "Cancel",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
             ),
             section_focus_position: 0,
             button_focus_position: 0,
@@ -176,29 +160,10 @@ impl Component for DlgCpMv {
         let area = centered_rect((((chunk.width as usize) * 17) / 20) as u16, 14, chunk);
 
         f.render_widget(Clear, area);
-        f.render_widget(
-            Block::default().style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            ),
-            area,
-        );
-        if self.config.options.use_shadows {
-            render_shadow(
-                f,
-                &area,
-                &Style::default()
-                    .bg(self.config.ui.shadow_bg)
-                    .fg(self.config.ui.shadow_fg),
-            );
+        f.render_widget(Block::default().style(self.palette.dialog), area);
+        if let Some(shadow) = self.palette.shadow {
+            render_shadow(f, &area, &shadow);
         }
-
-        let middle_border_set = symbols::border::Set {
-            top_left: symbols::line::NORMAL.vertical_right,
-            top_right: symbols::line::NORMAL.vertical_left,
-            ..symbols::border::PLAIN
-        };
 
         let sections = Layout::default()
             .direction(Direction::Vertical)
@@ -221,18 +186,14 @@ impl Component for DlgCpMv {
             .title(
                 Title::from(Span::styled(
                     tilde_layout(&format!(" {} ", title), sections[0].width as usize),
-                    Style::default().fg(self.config.dialog.title_fg),
+                    self.palette.dialog_title,
                 ))
                 .position(Position::Top)
                 .alignment(Alignment::Center),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .style(self.palette.dialog);
 
         let upper_area = Layout::default()
             .direction(Direction::Vertical)
@@ -264,13 +225,9 @@ impl Component for DlgCpMv {
 
         let middle_block = Block::default()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-            .border_set(middle_border_set)
+            .border_set(MIDDLE_BORDER_SET)
             .padding(Padding::horizontal(1))
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .style(self.palette.dialog);
 
         let middle_area = Layout::default()
             .direction(Direction::Vertical)
@@ -301,12 +258,8 @@ impl Component for DlgCpMv {
 
         let lower_block = Block::default()
             .borders(Borders::ALL)
-            .border_set(middle_border_set)
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .border_set(MIDDLE_BORDER_SET)
+            .style(self.palette.dialog);
 
         let lower_area = Layout::default()
             .direction(Direction::Horizontal)

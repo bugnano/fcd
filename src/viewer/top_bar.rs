@@ -10,22 +10,22 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
     app::PubSub,
     component::{Component, Focus},
-    config::Config,
+    palette::Palette,
     tilde_layout::tilde_layout,
 };
 
 #[derive(Debug)]
 pub struct TopBar {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     filename: String,
     position: String,
     percent: String,
 }
 
 impl TopBar {
-    pub fn new(config: &Rc<Config>) -> TopBar {
+    pub fn new(palette: &Rc<Palette>) -> TopBar {
         TopBar {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             filename: String::new(),
             position: String::new(),
             percent: String::new(),
@@ -67,25 +67,15 @@ impl Component for TopBar {
                 &self.filename,
                 filename_width.into(),
             )))
-            .style(
-                Style::default()
-                    .fg(self.config.ui.selected_fg)
-                    .bg(self.config.ui.selected_bg),
-            );
+            .style(self.palette.selected);
 
         let position_block = Block::default()
             .title(Title::from(Span::raw(&self.position)).alignment(Alignment::Center))
-            .style(
-                Style::default()
-                    .fg(self.config.ui.selected_fg)
-                    .bg(self.config.ui.selected_bg),
-            );
+            .style(self.palette.selected);
 
-        let percent_block = Block::default().title(Span::raw(&self.percent)).style(
-            Style::default()
-                .fg(self.config.ui.selected_fg)
-                .bg(self.config.ui.selected_bg),
-        );
+        let percent_block = Block::default()
+            .title(Span::raw(&self.percent))
+            .style(self.palette.selected);
 
         f.render_widget(filename_block, sections[0]);
         f.render_widget(position_block, sections[1]);

@@ -18,9 +18,8 @@ use termion::event::*;
 use thousands::Separable;
 
 use crate::{
-    app::{centered_rect, render_shadow, PubSub},
+    app::{centered_rect, render_shadow, PubSub, MIDDLE_BORDER_SET},
     component::{Component, Focus},
-    config::Config,
     fm::{
         app::human_readable_size,
         archive_mounter::ArchiveEntry,
@@ -29,13 +28,14 @@ use crate::{
             dirscan::{dirscan, DirScanEvent, DirScanInfo, ReadMetadata},
         },
     },
+    palette::Palette,
     tilde_layout::tilde_layout,
     widgets::button::Button,
 };
 
 #[derive(Debug)]
 pub struct DlgDirscan {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     job: DBJobEntry,
     archive_dirs: Vec<ArchiveEntry>,
@@ -55,7 +55,7 @@ pub struct DlgDirscan {
 
 impl DlgDirscan {
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         job: &DBJobEntry,
         archive_dirs: &[ArchiveEntry],
@@ -66,7 +66,7 @@ impl DlgDirscan {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
         let mut dlg = DlgDirscan {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx,
             job: job.clone(),
             archive_dirs: Vec::from(archive_dirs),
@@ -76,33 +76,21 @@ impl DlgDirscan {
             result_rx,
             btn_suspend: Button::new(
                 "Suspend ",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
             ),
             btn_skip: Button::new(
                 "Skip",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
             ),
             btn_abort: Button::new(
                 "Abort",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
             ),
             current: job.cwd.to_string_lossy().to_string(),
             num_files: 0,
@@ -286,29 +274,10 @@ impl Component for DlgDirscan {
         let area = centered_rect((((chunk.width as usize) * 3) / 4) as u16, 9, chunk);
 
         f.render_widget(Clear, area);
-        f.render_widget(
-            Block::default().style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            ),
-            area,
-        );
-        if self.config.options.use_shadows {
-            render_shadow(
-                f,
-                &area,
-                &Style::default()
-                    .bg(self.config.ui.shadow_bg)
-                    .fg(self.config.ui.shadow_fg),
-            );
+        f.render_widget(Block::default().style(self.palette.dialog), area);
+        if let Some(shadow) = self.palette.shadow {
+            render_shadow(f, &area, &shadow);
         }
-
-        let middle_border_set = symbols::border::Set {
-            top_left: symbols::line::NORMAL.vertical_right,
-            top_right: symbols::line::NORMAL.vertical_left,
-            ..symbols::border::PLAIN
-        };
 
         let sections = Layout::default()
             .direction(Direction::Vertical)
@@ -325,18 +294,14 @@ impl Component for DlgDirscan {
             .title(
                 Title::from(Span::styled(
                     tilde_layout(" Directory scanning ", sections[0].width as usize),
-                    Style::default().fg(self.config.dialog.title_fg),
+                    self.palette.dialog_title,
                 ))
                 .position(Position::Top)
                 .alignment(Alignment::Center),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .style(self.palette.dialog);
 
         let upper_area = Layout::default()
             .direction(Direction::Vertical)
@@ -375,12 +340,8 @@ impl Component for DlgDirscan {
 
         let lower_block = Block::default()
             .borders(Borders::ALL)
-            .border_set(middle_border_set)
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .border_set(MIDDLE_BORDER_SET)
+            .style(self.palette.dialog);
 
         let lower_area = Layout::default()
             .direction(Direction::Horizontal)

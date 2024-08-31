@@ -4,8 +4,8 @@ use ratatui::{prelude::*, widgets::*};
 
 use crate::{
     component::{Component, Focus},
-    config::Config,
     fm::command_bar::component::{CommandBar, CommandBarComponent},
+    palette::Palette,
 };
 
 #[derive(Debug)]
@@ -14,7 +14,7 @@ pub struct Leader {
 }
 
 impl Leader {
-    pub fn new(_config: &Rc<Config>, label: char) -> Leader {
+    pub fn new(_palette: &Rc<Palette>, label: char) -> Leader {
         Leader {
             label: String::from(label),
         }

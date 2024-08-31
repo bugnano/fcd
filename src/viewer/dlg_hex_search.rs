@@ -11,9 +11,9 @@ use ratatui::{
 use termion::event::*;
 
 use crate::{
-    app::{centered_rect, render_shadow, PubSub},
+    app::{centered_rect, render_shadow, PubSub, MIDDLE_BORDER_SET},
     component::{Component, Focus},
-    config::Config,
+    palette::Palette,
     widgets::{button::Button, check_box::CheckBox, input::Input},
 };
 
@@ -26,7 +26,7 @@ pub struct HexSearch {
 
 #[derive(Debug)]
 pub struct DlgHexSearch {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     input: Input,
     check_boxes: Vec<CheckBox>,
@@ -39,57 +39,39 @@ pub struct DlgHexSearch {
 
 impl DlgHexSearch {
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         hex_search: &HexSearch,
     ) -> DlgHexSearch {
         DlgHexSearch {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx,
-            input: Input::new(
-                &Style::default()
-                    .fg(config.dialog.input_fg)
-                    .bg(config.dialog.input_bg),
-                "",
-                0,
-            ),
+            input: Input::new(&palette.dialog_input, "", 0),
             check_boxes: vec![
                 CheckBox::new(
                     "Hexadecimal",
-                    &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                    &Style::default()
-                        .fg(config.dialog.focus_fg)
-                        .bg(config.dialog.focus_bg),
+                    &palette.dialog,
+                    &palette.dialog_focus,
                     hex_search.hexadecimal,
                 ),
                 CheckBox::new(
                     "Backwards",
-                    &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                    &Style::default()
-                        .fg(config.dialog.focus_fg)
-                        .bg(config.dialog.focus_bg),
+                    &palette.dialog,
+                    &palette.dialog_focus,
                     hex_search.backwards,
                 ),
             ],
             btn_ok: Button::new(
                 "OK",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
             ),
             btn_cancel: Button::new(
                 "Cancel",
-                &Style::default().fg(config.dialog.fg).bg(config.dialog.bg),
-                &Style::default()
-                    .fg(config.dialog.focus_fg)
-                    .bg(config.dialog.focus_bg),
-                &Style::default()
-                    .fg(config.dialog.title_fg)
-                    .bg(config.dialog.bg),
+                &palette.dialog,
+                &palette.dialog_focus,
+                &palette.dialog_title,
             ),
             section_focus_position: 0,
             check_focus_position: 0,
@@ -171,29 +153,10 @@ impl Component for DlgHexSearch {
         let area = centered_rect(58, 10, chunk);
 
         f.render_widget(Clear, area);
-        f.render_widget(
-            Block::default().style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            ),
-            area,
-        );
-        if self.config.options.use_shadows {
-            render_shadow(
-                f,
-                &area,
-                &Style::default()
-                    .bg(self.config.ui.shadow_bg)
-                    .fg(self.config.ui.shadow_fg),
-            );
+        f.render_widget(Block::default().style(self.palette.dialog), area);
+        if let Some(shadow) = self.palette.shadow {
+            render_shadow(f, &area, &shadow);
         }
-
-        let middle_border_set = symbols::border::Set {
-            top_left: symbols::line::NORMAL.vertical_right,
-            top_right: symbols::line::NORMAL.vertical_left,
-            ..symbols::border::PLAIN
-        };
 
         let sections = Layout::default()
             .direction(Direction::Vertical)
@@ -212,20 +175,13 @@ impl Component for DlgHexSearch {
 
         let upper_block = Block::default()
             .title(
-                Title::from(Span::styled(
-                    " Search ",
-                    Style::default().fg(self.config.dialog.title_fg),
-                ))
-                .position(Position::Top)
-                .alignment(Alignment::Center),
+                Title::from(Span::styled(" Search ", self.palette.dialog_title))
+                    .position(Position::Top)
+                    .alignment(Alignment::Center),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .style(self.palette.dialog);
 
         let upper_area = Layout::default()
             .direction(Direction::Vertical)
@@ -249,13 +205,9 @@ impl Component for DlgHexSearch {
 
         let middle_block = Block::default()
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-            .border_set(middle_border_set)
+            .border_set(MIDDLE_BORDER_SET)
             .padding(Padding::horizontal(1))
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .style(self.palette.dialog);
 
         let check_sections = Layout::default()
             .direction(Direction::Horizontal)
@@ -283,12 +235,8 @@ impl Component for DlgHexSearch {
 
         let lower_block = Block::default()
             .borders(Borders::ALL)
-            .border_set(middle_border_set)
-            .style(
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-            );
+            .border_set(MIDDLE_BORDER_SET)
+            .style(self.palette.dialog);
 
         let lower_area = Layout::default()
             .direction(Direction::Horizontal)

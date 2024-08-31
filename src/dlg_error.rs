@@ -15,7 +15,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
     app::{centered_rect, render_shadow, PubSub},
     component::{Component, Focus},
-    config::Config,
+    palette::Palette,
     tilde_layout::tilde_layout,
 };
 
@@ -28,7 +28,7 @@ pub enum DialogType {
 
 #[derive(Debug)]
 pub struct DlgError {
-    config: Rc<Config>,
+    palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     message: String,
     title: String,
@@ -38,7 +38,7 @@ pub struct DlgError {
 
 impl DlgError {
     pub fn new(
-        config: &Rc<Config>,
+        palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         message: &str,
         title: &str,
@@ -46,7 +46,7 @@ impl DlgError {
         next_action: Option<Box<PubSub>>,
     ) -> DlgError {
         DlgError {
-            config: Rc::clone(config),
+            palette: Rc::clone(palette),
             pubsub_tx,
             message: String::from(message),
             title: String::from(title),
@@ -84,34 +84,16 @@ impl Component for DlgError {
         let area = centered_rect((self.message.width() + 6) as u16, 7, chunk);
 
         let (style, title_style) = match self.dialog_type {
-            DialogType::Error => (
-                Style::default()
-                    .fg(self.config.error.fg)
-                    .bg(self.config.error.bg),
-                Style::default()
-                    .fg(self.config.error.title_fg)
-                    .bg(self.config.error.bg),
-            ),
-            DialogType::Warning | DialogType::Info => (
-                Style::default()
-                    .fg(self.config.dialog.fg)
-                    .bg(self.config.dialog.bg),
-                Style::default()
-                    .fg(self.config.dialog.title_fg)
-                    .bg(self.config.dialog.bg),
-            ),
+            DialogType::Error => (self.palette.error, self.palette.error_title),
+            DialogType::Warning | DialogType::Info => {
+                (self.palette.dialog, self.palette.dialog_title)
+            }
         };
 
         f.render_widget(Clear, area);
         f.render_widget(Block::default().style(style), area);
-        if self.config.options.use_shadows {
-            render_shadow(
-                f,
-                &area,
-                &Style::default()
-                    .bg(self.config.ui.shadow_bg)
-                    .fg(self.config.ui.shadow_fg),
-            );
+        if let Some(shadow) = self.palette.shadow {
+            render_shadow(f, &area, &shadow);
         }
 
         let section = centered_rect(

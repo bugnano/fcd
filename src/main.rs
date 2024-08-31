@@ -21,6 +21,7 @@ mod config;
 mod dlg_error;
 mod fm;
 mod fnmatch;
+mod palette;
 mod shutil;
 mod stat;
 mod template;
@@ -32,6 +33,7 @@ use crate::{
     app::{init_events, Action, App},
     config::load_config,
     fm::bookmarks::Bookmarks,
+    palette::{get_monochrome_palette, get_palette},
 };
 
 #[derive(Parser, Debug)]
@@ -48,6 +50,10 @@ struct Cli {
     /// Do not use database
     #[arg(short = 'n', long = "nodb", action = ArgAction::SetFalse)]
     use_db: bool,
+
+    /// Requests to run in black and white
+    #[arg(short = 'b', long = "nocolor")]
+    monochrome: bool,
 
     /// Use vertical panel layout
     #[arg(long)]
@@ -94,7 +100,18 @@ fn initialize_panic_handler() -> Result<()> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let config = Rc::new(load_config().context("failed to load config")?);
+    let mut config = load_config().context("failed to load config")?;
+
+    let palette = Rc::new(match cli.monochrome {
+        true => get_monochrome_palette(),
+        false => get_palette(&config),
+    });
+
+    if cli.monochrome {
+        config.options.use_shadows = false;
+    }
+
+    let config = Rc::new(config);
 
     #[cfg(debug_assertions)]
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
@@ -132,8 +149,15 @@ fn main() -> Result<()> {
     let (events_tx, mut events_rx) =
         init_events(stop_inputs_rx.clone()).context("initializing events failed")?;
 
+    let tab_size = match cli.tabsize {
+        0 => config.viewer.tab_size,
+        tabsize => tabsize,
+    };
+
     let mut app = match cli.view {
-        Some(file) => Box::new(viewer::app::App::new(&config, &file, cli.tabsize)?) as Box<dyn App>,
+        Some(file) => {
+            Box::new(viewer::app::App::new(&config, &palette, &file, tab_size)?) as Box<dyn App>
+        }
         None => {
             let bookmark_path = xdg::BaseDirectories::with_prefix(crate_name!())
                 .ok()
@@ -165,6 +189,7 @@ fn main() -> Result<()> {
 
             Box::new(fm::app::App::new(
                 &config,
+                &palette,
                 &bookmarks,
                 &raw_output,
                 &events_tx,
@@ -174,7 +199,7 @@ fn main() -> Result<()> {
                 cli.printwd.as_deref(),
                 db_file.as_deref(),
                 cli.vertical,
-                cli.tabsize,
+                tab_size,
             )?) as Box<dyn App>
         }
     };

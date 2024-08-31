@@ -10,12 +10,14 @@ use_internal_viewer = true
 [ui]
 hotkey_fg = "white"
 hotkey_bg = "black"
-selected_fg = "black"
-#selected_bg = { user = "cyan", root = "red" }
-selected_bg = "cyan"
+selected_fg_root = "black"
+selected_fg_user = "black"
+selected_bg_root = "red"
+selected_bg_user = "cyan"
 
 marked_fg = "light yellow"
-markselect_fg = "light yellow"
+markselect_fg_root = "light yellow"
+markselect_fg_user = "light yellow"
 
 shadow_fg = "dark gray"
 shadow_bg = "black"

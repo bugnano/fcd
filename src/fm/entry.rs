@@ -12,15 +12,15 @@ use ratatui::prelude::*;
 use libc::{S_IXGRP, S_IXOTH, S_IXUSR};
 use nucleo_matcher::{
     pattern::{CaseMatching, Normalization, Pattern},
-    Matcher, Utf32Str,
+    Config, Matcher, Utf32Str,
 };
 use path_clean::PathClean;
 use thousands::Separable;
 use uzers::{Groups, Users, UsersCache};
 
 use crate::{
-    config::Config,
     fm::app::{format_date, human_readable_size, natsort_key, tar_suffix},
+    palette::Palette,
     stat::filemode,
 };
 
@@ -57,33 +57,6 @@ pub const ARCHIVE_EXTENSIONS: &[&str] = &[
     ".7z",
 ];
 
-#[derive(Debug, Clone, Copy)]
-pub enum Palette {
-    DirSymlink,
-    Archive,
-    Symlink,
-    Stalelink,
-    Directory,
-    Device,
-    Special,
-    Executable,
-    Panel,
-}
-
-pub fn style_from_palette(config: &Config, palette: Palette) -> Style {
-    Style::default().fg(match palette {
-        Palette::DirSymlink => config.file_manager.dir_symlink_fg,
-        Palette::Archive => config.file_manager.archive_fg,
-        Palette::Symlink => config.file_manager.symlink_fg,
-        Palette::Stalelink => config.file_manager.stalelink_fg,
-        Palette::Directory => config.file_manager.directory_fg,
-        Palette::Device => config.file_manager.device_fg,
-        Palette::Special => config.file_manager.special_fg,
-        Palette::Executable => config.file_manager.executable_fg,
-        Palette::Panel => config.panel.fg,
-    })
-}
-
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub file: PathBuf,
@@ -91,7 +64,7 @@ pub struct Entry {
     pub key: String,
     pub extension: String,
     pub label: String,
-    pub palette: Palette,
+    pub style: Style,
     pub lstat: Metadata,
     pub stat: Metadata,
     pub shown_mtime: String,
@@ -107,7 +80,11 @@ impl PartialEq for Entry {
     }
 }
 
-pub fn get_file_list(cwd: &Path, file_list_rx: Option<Receiver<PathBuf>>) -> Result<Vec<Entry>> {
+pub fn get_file_list(
+    cwd: &Path,
+    palette: &Palette,
+    file_list_rx: Option<Receiver<PathBuf>>,
+) -> Result<Vec<Entry>> {
     let users_cache = UsersCache::new();
 
     Ok(read_dir(cwd)?
@@ -130,18 +107,18 @@ pub fn get_file_list(cwd: &Path, file_list_rx: Option<Receiver<PathBuf>>) -> Res
             let file_name = entry.file_name().to_string_lossy().to_string();
             let extension: String = natsort_key(&tar_suffix(&file_name));
 
-            let (stat, label, palette) = if metadata.is_symlink() {
+            let (stat, label, style) = if metadata.is_symlink() {
                 match fs::metadata(entry.path()) {
                     Ok(stat) => {
                         if stat.is_dir() {
-                            (stat, format!("~{}", file_name), Palette::DirSymlink)
+                            (stat, format!("~{}", file_name), palette.dir_symlink)
                         } else {
                             (
                                 stat,
                                 format!("@{}", file_name),
                                 match ARCHIVE_EXTENSIONS.contains(&extension.as_str()) {
-                                    true => Palette::Archive,
-                                    false => Palette::Symlink,
+                                    true => palette.archive,
+                                    false => palette.symlink,
                                 },
                             )
                         }
@@ -149,38 +126,30 @@ pub fn get_file_list(cwd: &Path, file_list_rx: Option<Receiver<PathBuf>>) -> Res
                     Err(_) => (
                         metadata.clone(),
                         format!("!{}", file_name),
-                        Palette::Stalelink,
+                        palette.stalelink,
                     ),
                 }
             } else if metadata.is_dir() {
                 (
                     metadata.clone(),
                     format!("/{}", file_name),
-                    Palette::Directory,
+                    palette.directory,
                 )
             } else if metadata.file_type().is_char_device() {
-                (metadata.clone(), format!("-{}", file_name), Palette::Device)
+                (metadata.clone(), format!("-{}", file_name), palette.device)
             } else if metadata.file_type().is_block_device() {
-                (metadata.clone(), format!("+{}", file_name), Palette::Device)
+                (metadata.clone(), format!("+{}", file_name), palette.device)
             } else if metadata.file_type().is_fifo() {
-                (
-                    metadata.clone(),
-                    format!("|{}", file_name),
-                    Palette::Special,
-                )
+                (metadata.clone(), format!("|{}", file_name), palette.special)
             } else if metadata.file_type().is_socket() {
-                (
-                    metadata.clone(),
-                    format!("={}", file_name),
-                    Palette::Special,
-                )
+                (metadata.clone(), format!("={}", file_name), palette.special)
             } else if (metadata.mode() & (S_IXUSR | S_IXGRP | S_IXOTH)) != 0 {
                 (
                     metadata.clone(),
                     format!("*{}", file_name),
                     match ARCHIVE_EXTENSIONS.contains(&extension.as_str()) {
-                        true => Palette::Archive,
-                        false => Palette::Executable,
+                        true => palette.archive,
+                        false => palette.executable,
                     },
                 )
             } else {
@@ -188,8 +157,8 @@ pub fn get_file_list(cwd: &Path, file_list_rx: Option<Receiver<PathBuf>>) -> Res
                     metadata.clone(),
                     format!(" {}", file_name),
                     match ARCHIVE_EXTENSIONS.contains(&extension.as_str()) {
-                        true => Palette::Archive,
-                        false => Palette::Panel,
+                        true => palette.archive,
+                        false => palette.panel,
                     },
                 )
             };
@@ -264,7 +233,7 @@ pub fn get_file_list(cwd: &Path, file_list_rx: Option<Receiver<PathBuf>>) -> Res
                 file_name,
                 extension,
                 label,
-                palette,
+                style,
                 lstat: metadata,
                 stat,
                 shown_mtime,
@@ -326,7 +295,7 @@ pub fn filter_file_list(
     file_filter: &str,
 ) -> Vec<Entry> {
     let file_filter = natsort_key(file_filter);
-    let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT.match_paths());
+    let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
     let pattern = Pattern::parse(&file_filter, CaseMatching::Ignore, Normalization::Smart);
     let mut buf = Vec::new();
 

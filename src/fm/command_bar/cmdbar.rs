@@ -9,8 +9,8 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
     app::PubSub,
     component::{Component, Focus},
-    config::Config,
     fm::command_bar::component::{CommandBar, CommandBarComponent},
+    palette::Palette,
     widgets::input::Input,
 };
 
@@ -34,7 +34,7 @@ pub struct CmdBar {
 
 impl CmdBar {
     pub fn new(
-        _config: &Rc<Config>,
+        _palette: &Rc<Palette>,
         pubsub_tx: Sender<PubSub>,
         command_bar_type: CmdBarType,
         label: &str,

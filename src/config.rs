@@ -21,11 +21,14 @@ pub struct Options {
 pub struct Ui {
     pub hotkey_fg: Color,
     pub hotkey_bg: Color,
-    pub selected_fg: Color,
-    pub selected_bg: Color,
+    pub selected_fg_root: Color,
+    pub selected_fg_user: Color,
+    pub selected_bg_root: Color,
+    pub selected_bg_user: Color,
 
     pub marked_fg: Color,
-    pub markselect_fg: Color,
+    pub markselect_fg_root: Color,
+    pub markselect_fg_user: Color,
 
     pub shadow_fg: Color,
     pub shadow_bg: Color,
