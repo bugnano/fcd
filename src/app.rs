@@ -72,6 +72,7 @@ pub enum PubSub {
     // File panel events
     SelectedEntry(Option<Entry>),
     ChangedDirectory(PathBuf),
+    DirCreated(PathBuf),
     ViewFile(PathBuf, PathBuf),
     EditFile(PathBuf, PathBuf),
     Leader(Option<char>),

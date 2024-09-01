@@ -1035,6 +1035,19 @@ impl Component for FilePanel {
                 }
                 ArchiveMountRequest::None => (),
             },
+            PubSub::DirCreated(new_dir) => match self.focus {
+                Focus::Focused => match new_dir.starts_with(&self.cwd) {
+                    true => {
+                        self.reload(new_dir.ancestors().find(|new_dir| {
+                            matches!(new_dir.parent(), Some(parent) if parent == self.cwd)
+                        }));
+                    }
+                    false => {
+                        self.reload(self.get_selected_file().as_deref());
+                    }
+                },
+                _ => self.reload(self.get_selected_file().as_deref()),
+            },
             _ => (),
         }
     }

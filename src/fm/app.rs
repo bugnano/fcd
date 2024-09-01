@@ -587,8 +587,12 @@ impl App {
                     }
                 };
 
-                match fs::create_dir_all(new_dir) {
-                    Ok(()) => self.pubsub_tx.send(PubSub::Reload).unwrap(),
+                match fs::create_dir_all(&new_dir) {
+                    Ok(()) => {
+                        self.pubsub_tx
+                            .send(PubSub::DirCreated(new_dir.clone()))
+                            .unwrap();
+                    }
                     Err(e) => {
                         self.pubsub_tx
                             .send(PubSub::Error(e.to_string(), None))
