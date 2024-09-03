@@ -155,7 +155,7 @@ impl FilePanel {
         };
 
         panel.file_list_thread();
-        panel.chdir(initial_path);
+        panel.chdir(initial_path, None);
         panel.old_cwd.clone_from(&panel.cwd);
 
         panel
@@ -244,7 +244,7 @@ impl FilePanel {
     fn chdir_old_cwd(&mut self) {
         let old_cwd = self.old_cwd.clone();
 
-        self.chdir(&old_cwd)
+        self.chdir(&old_cwd, None)
     }
 
     fn get_selected_file(&self) -> Option<PathBuf> {
@@ -386,7 +386,7 @@ impl Component for FilePanel {
                             });
 
                     if let Some(cwd) = bookmark {
-                        self.chdir(&cwd);
+                        self.chdir(&cwd, None);
                     }
                 }
                 ('m', Key::Char(c)) if BOOKMARK_KEYS.contains(*c) => {
@@ -480,7 +480,7 @@ impl Component for FilePanel {
                 }
                 Key::Left | Key::Char('h') => {
                     if let Some(new_cwd) = self.shown_cwd.parent() {
-                        self.chdir(&self.unarchive_path(new_cwd));
+                        self.chdir(&self.unarchive_path(new_cwd), None);
                     }
                 }
                 Key::Right | Key::Char('\n') | Key::Char('l') => {
@@ -488,7 +488,7 @@ impl Component for FilePanel {
                         let entry = self.shown_file_list[self.cursor_position].clone();
 
                         if entry.stat.is_dir() {
-                            self.chdir(&entry.file);
+                            self.chdir(&entry.file, None);
                         } else if let Some(path) = &entry.link_target {
                             let _ = path
                                 .try_exists()
@@ -506,7 +506,7 @@ impl Component for FilePanel {
                                             // Change directory only if we can change to that exact directory
                                             read_dir(path)?;
 
-                                            self.chdir(path);
+                                            self.chdir(path, None);
                                         }
                                         false => {
                                             let parent = path.parent().ok_or_else(|| {
@@ -516,7 +516,7 @@ impl Component for FilePanel {
                                             // Change directory only if we can change to that exact directory
                                             read_dir(parent)?;
 
-                                            self.chdir(parent);
+                                            self.chdir(parent, None);
 
                                             if self.cwd == parent {
                                                 let old_cursor_position = self.cursor_position;
@@ -675,7 +675,7 @@ impl Component for FilePanel {
                         let entry = self.shown_file_list[self.cursor_position].clone();
 
                         match entry.stat.is_dir() {
-                            true => self.chdir(&entry.file),
+                            true => self.chdir(&entry.file, None),
                             false => self
                                 .pubsub_tx
                                 .send(PubSub::ViewFile(self.cwd.clone(), entry.file))
@@ -688,7 +688,7 @@ impl Component for FilePanel {
                         let entry = self.shown_file_list[self.cursor_position].clone();
 
                         match entry.stat.is_dir() {
-                            true => self.chdir(&entry.file),
+                            true => self.chdir(&entry.file, None),
                             false => self
                                 .pubsub_tx
                                 .send(PubSub::EditFile(self.cwd.clone(), entry.file))
@@ -853,6 +853,14 @@ impl Component for FilePanel {
                             .unwrap();
                     }
                 }
+                Key::Ctrl('p') => self
+                    .pubsub_tx
+                    .send(PubSub::Fzf(
+                        self.cwd.clone(),
+                        self.file_list.clone(),
+                        self.hidden_files,
+                    ))
+                    .unwrap(),
                 _ => key_handled = false,
             }
         }
@@ -919,11 +927,12 @@ impl Component for FilePanel {
                                 .iter()
                                 .enumerate()
                                 .map(|(i, entry)| {
-                                    let utf32_str = Utf32Str::new(entry.key.as_ref(), &mut buf);
+                                    let utf32_str = Utf32Str::new(&entry.key, &mut buf);
+                                    let len_utf32_str = utf32_str.len();
 
                                     let score = pattern.score(utf32_str, &mut matcher).unwrap_or(0);
 
-                                    (i, score, utf32_str.len())
+                                    (i, score, len_utf32_str)
                                 })
                                 .collect();
 
@@ -1003,7 +1012,7 @@ impl Component for FilePanel {
                     if archive == archive_file {
                         self.archive_mount_request = ArchiveMountRequest::None;
 
-                        self.chdir(temp_dir);
+                        self.chdir(temp_dir, None);
                     }
                 }
                 ArchiveMountRequest::None => (),
@@ -1048,6 +1057,26 @@ impl Component for FilePanel {
                 },
                 _ => self.reload(self.get_selected_file().as_deref()),
             },
+            PubSub::SelectFile((selected_file, _is_dir)) => {
+                if let Focus::Focused = self.focus {
+                    match selected_file.parent() {
+                        Some(parent) if parent == self.cwd => {
+                            self.selected_file = Some(selected_file.clone());
+                            self.filter_and_sort_file_list(
+                                self.selected_file
+                                    .as_ref()
+                                    .map(|selected_file| self.archive_path(selected_file))
+                                    .as_deref(),
+                                CursorPosition::Keep,
+                            );
+                        }
+                        Some(parent) => {
+                            self.chdir(parent, Some(selected_file));
+                        }
+                        None => unreachable!(),
+                    }
+                }
+            }
             _ => (),
         }
     }
@@ -1293,7 +1322,7 @@ impl Panel for FilePanel {
         }
     }
 
-    fn chdir(&mut self, cwd: &Path) {
+    fn chdir(&mut self, cwd: &Path, selected_file: Option<&Path>) {
         let new_cwd = self.unarchive_path(
             self.archive_path(cwd)
                 .ancestors()
@@ -1312,7 +1341,12 @@ impl Panel for FilePanel {
             self.cursor_position = 0;
             self.first_line = 0;
 
-            self.load_file_list(Some(&self.archive_path(&self.old_cwd)));
+            self.load_file_list(
+                selected_file
+                    .map(|selected_file| self.archive_path(selected_file))
+                    .or(Some(self.archive_path(&self.old_cwd)))
+                    .as_deref(),
+            );
 
             self.pubsub_tx
                 .send(PubSub::ChangedDirectory(self.cwd.clone()))
@@ -1330,7 +1364,7 @@ impl Panel for FilePanel {
         );
 
         if new_cwd != self.cwd {
-            self.chdir(&new_cwd);
+            self.chdir(&new_cwd, None);
         } else {
             self.load_file_list(
                 selected_file

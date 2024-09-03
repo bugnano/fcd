@@ -53,6 +53,7 @@ use crate::{
             dlg_report::DlgReport,
             dlg_rm_progress::DlgRmProgress,
         },
+        dlg_fzf::DlgFzf,
         dlg_mount_archive::DlgMountArchive,
         entry::Entry,
         file_panel::FilePanel,
@@ -338,7 +339,7 @@ impl App {
                                         if let Some(cwd) =
                                             self.panels[self.panel_focus_position].get_cwd()
                                         {
-                                            self.panels[other_panel].chdir(&cwd);
+                                            self.panels[other_panel].chdir(&cwd, None);
                                         }
                                     }
                                     Key::Alt('o') => {
@@ -364,7 +365,7 @@ impl App {
                                                 None => PathBuf::from(cwd.parent().unwrap_or(&cwd)),
                                             };
 
-                                            self.panels[other_panel].chdir(&target_cwd);
+                                            self.panels[other_panel].chdir(&target_cwd, None);
                                         }
                                     }
                                     Key::Alt('v') => self.vertical = !self.vertical,
@@ -1245,6 +1246,15 @@ impl App {
                 if self.pending_jobs.is_empty() {
                     self.umount_unrelated();
                 }
+            }
+            PubSub::Fzf(cwd, file_list, hidden_files) => {
+                self.dialog = Some(Box::new(DlgFzf::new(
+                    &self.palette,
+                    self.pubsub_tx.clone(),
+                    cwd,
+                    file_list,
+                    *hidden_files,
+                )));
             }
             _ => (),
         }

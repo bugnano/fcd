@@ -31,7 +31,7 @@ pub trait Panel {
         Vec::new()
     }
 
-    fn chdir(&mut self, _cwd: &Path) {}
+    fn chdir(&mut self, _cwd: &Path, _selected_file: Option<&Path>) {}
     fn reload(&mut self, _selected_file: Option<&Path>) {}
 }
 

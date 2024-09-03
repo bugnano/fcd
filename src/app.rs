@@ -12,7 +12,7 @@ use crate::{
     fm::{
         archive_mounter::ArchiveEntry,
         cp_mv_rm::database::{DBDirListEntry, DBFileEntry, DBJobEntry, DBJobOperation, OnConflict},
-        entry::{Entry, SortBy, SortOrder},
+        entry::{Entry, HiddenFiles, SortBy, SortOrder},
     },
     viewer::{dlg_goto::GotoType, dlg_hex_search::HexSearch, dlg_text_search::TextSearch},
 };
@@ -89,6 +89,8 @@ pub enum PubSub {
     Rm(PathBuf, Vec<Entry>),
     Cp(PathBuf, Vec<Entry>),
     Mv(PathBuf, Vec<Entry>),
+    Fzf(PathBuf, Vec<Entry>, HiddenFiles),
+    SelectFile((PathBuf, bool)),
 
     // Quick view events
     ToggleQuickView(Option<Entry>),
