@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::Result;
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{select, Receiver, Sender};
 use ratatui::{
     prelude::*,
     widgets::{
@@ -27,10 +27,7 @@ use thousands::Separable;
 use crate::{
     app::{centered_rect, render_shadow, PubSub, MIDDLE_BORDER_SET},
     component::{Component, Focus},
-    fm::{
-        app::natsort_key,
-        entry::{Entry, HiddenFiles},
-    },
+    fm::entry::{Entry, HiddenFiles},
     palette::Palette,
     tilde_layout::tilde_layout,
     widgets::input::Input,
@@ -38,17 +35,26 @@ use crate::{
 
 const SPINNER: &[char] = &['-', '\\', '|', '/'];
 
+struct FzfResult {
+    pub entries: Vec<(PathBuf, bool)>,
+    pub last_write: Instant,
+    pub directories: Vec<PathBuf>,
+}
+
 #[derive(Debug)]
 pub struct DlgFzf {
     palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     cwd: PathBuf,
-    entries: Vec<(PathBuf, bool)>,
+    num_entries: usize,
     shown_entries: Vec<(PathBuf, bool)>,
     hidden_files: HiddenFiles,
-    ev_tx: Sender<()>,
-    info_rx: Receiver<Vec<(PathBuf, bool)>>,
-    result_rx: Receiver<()>,
+    stop_fzf_tx: Sender<()>,
+    fzf_info_rx: Receiver<Vec<(PathBuf, bool)>>,
+    fzf_result_rx: Receiver<()>,
+    stop_filter_tx: Sender<()>,
+    filter_entries_tx: Sender<(String, Vec<(PathBuf, bool)>)>,
+    filter_info_rx: Receiver<(Vec<(PathBuf, bool)>, usize)>,
     i_spinner: Option<usize>,
     input: Input,
     cursor_position: usize,
@@ -64,11 +70,14 @@ impl DlgFzf {
         file_list: &[Entry],
         hidden_files: HiddenFiles,
     ) -> DlgFzf {
-        let (ev_tx, ev_rx) = crossbeam_channel::unbounded();
-        let (info_tx, info_rx) = crossbeam_channel::unbounded();
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        let (stop_fzf_tx, stop_fzf_rx) = crossbeam_channel::unbounded();
+        let (fzf_info_tx, fzf_info_rx) = crossbeam_channel::unbounded();
+        let (fzf_result_tx, fzf_result_rx) = crossbeam_channel::unbounded();
+        let (stop_filter_tx, stop_filter_rx) = crossbeam_channel::unbounded();
+        let (filter_entries_tx, filter_entries_rx) = crossbeam_channel::unbounded();
+        let (filter_info_tx, filter_info_rx) = crossbeam_channel::unbounded();
 
-        let mut entries: Vec<(PathBuf, bool)> = file_list
+        let initial_entries: Vec<(PathBuf, bool)> = file_list
             .iter()
             .filter(|entry| match hidden_files {
                 HiddenFiles::Show => true,
@@ -77,18 +86,19 @@ impl DlgFzf {
             .map(|entry| (entry.file.clone(), entry.stat.is_dir()))
             .collect();
 
-        entries.sort_by_cached_key(|(file, _is_dir)| natsort_key(&file.to_string_lossy()));
-
         let mut dlg = DlgFzf {
             palette: Rc::clone(palette),
             pubsub_tx,
             cwd: PathBuf::from(cwd),
-            entries,
+            num_entries: 0,
             shown_entries: Vec::new(),
             hidden_files,
-            ev_tx,
-            info_rx,
-            result_rx,
+            stop_fzf_tx,
+            fzf_info_rx,
+            fzf_result_rx,
+            stop_filter_tx,
+            filter_entries_tx,
+            filter_info_rx,
             i_spinner: Some(0),
             input: Input::new(&palette.dialog_input, "", 0),
             cursor_position: 0,
@@ -96,20 +106,26 @@ impl DlgFzf {
             rect: Rect::default(),
         };
 
-        dlg.filter_entries();
+        dlg.fzf_thread(&initial_entries, stop_fzf_rx, fzf_info_tx, fzf_result_tx);
 
-        dlg.fzf_thread(ev_rx, info_tx, result_tx);
+        dlg.filter_thread(
+            &initial_entries,
+            stop_filter_rx,
+            filter_entries_rx,
+            filter_info_tx,
+        );
 
         dlg
     }
 
     fn fzf_thread(
         &mut self,
-        ev_rx: Receiver<()>,
-        info_tx: Sender<Vec<(PathBuf, bool)>>,
-        result_tx: Sender<()>,
+        initial_entries: &[(PathBuf, bool)],
+        stop_fzf_rx: Receiver<()>,
+        fzf_info_tx: Sender<Vec<(PathBuf, bool)>>,
+        fzf_result_tx: Sender<()>,
     ) {
-        let initial_entries = self.entries.clone();
+        let initial_entries = Vec::from(initial_entries);
         let hidden_files = self.hidden_files;
 
         let pubsub_tx = self.pubsub_tx.clone();
@@ -118,65 +134,80 @@ impl DlgFzf {
             fzf(
                 &initial_entries,
                 hidden_files,
-                ev_rx,
-                info_tx,
+                stop_fzf_rx,
+                fzf_info_tx,
                 pubsub_tx.clone(),
             );
 
-            let _ = result_tx.send(());
+            let _ = fzf_result_tx.send(());
             let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
         });
     }
 
-    fn filter_entries(&mut self) {
-        if self.entries.is_empty() {
-            return;
-        }
+    fn filter_thread(
+        &mut self,
+        initial_entries: &[(PathBuf, bool)],
+        stop_filter_rx: Receiver<()>,
+        filter_entries_rx: Receiver<(String, Vec<(PathBuf, bool)>)>,
+        filter_info_tx: Sender<(Vec<(PathBuf, bool)>, usize)>,
+    ) {
+        let initial_entries = Vec::from(initial_entries);
+        let cwd = self.cwd.clone();
 
-        let filter = self.input.value();
+        let pubsub_tx = self.pubsub_tx.clone();
 
-        match filter.is_empty() {
-            true => self.shown_entries = self.entries.clone(),
-            false => {
-                let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+        thread::spawn(move || {
+            let mut filter;
+            let mut entries = initial_entries.clone();
 
-                let pattern = Pattern::parse(&filter, CaseMatching::Ignore, Normalization::Smart);
+            entries.sort();
 
-                let mut buf = Vec::new();
+            let _ = filter_info_tx.send((entries.clone(), entries.len()));
 
-                let mut scores: Vec<(PathBuf, bool, usize, u32, usize)> = self
-                    .entries
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, (file, is_dir))| {
-                        let file_name = diff_paths(file, &self.cwd)
-                            .unwrap()
-                            .to_string_lossy()
-                            .to_string();
+            let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+            let mut buf = Vec::new();
 
-                        let utf32_str = Utf32Str::new(&file_name, &mut buf);
-                        let len_utf32_str = utf32_str.len();
+            loop {
+                select! {
+                    recv(stop_filter_rx) -> _ => break,
+                    recv(filter_entries_rx) -> res => if let Ok((new_filter, entry)) = res {
+                        let mut needs_sorting = false;
 
-                        let score = pattern.score(utf32_str, &mut matcher);
+                        filter = new_filter;
 
-                        score.map(|score| (file.clone(), *is_dir, i, score, len_utf32_str))
-                    })
-                    .collect();
+                        if !entry.is_empty() {
+                            needs_sorting = true;
+                            entries.extend(entry);
+                        }
 
-                scores.sort_by(
-                    |(_file1, _is_dir1, i1, score1, len1), (_file2, _is_dir2, i2, score2, len2)| {
-                        score2.cmp(score1).then(len1.cmp(len2)).then(i1.cmp(i2))
-                    },
-                );
 
-                self.shown_entries = scores
-                    .iter()
-                    .map(|(file, is_dir, _i, _score, _len)| (file.clone(), *is_dir))
-                    .collect();
+                        for (new_filter, entry) in filter_entries_rx.try_iter() {
+                            filter = new_filter;
 
-                self.cursor_position = self.clamp_cursor(self.cursor_position);
+                            if !entry.is_empty() {
+                                needs_sorting = true;
+                                entries.extend(entry);
+                            }
+                        }
+
+                        if needs_sorting {
+                            entries.sort();
+                        }
+
+                        match filter.is_empty() {
+                            true => {
+                                let _ = filter_info_tx.send((entries.clone(), entries.len()));
+                            }
+                            false => {
+                                filter_entries(&cwd, &entries, &filter, &mut matcher, &mut buf, &filter_info_tx, &stop_filter_rx);
+                            }
+                        }
+
+                        let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
+                    }
+                }
             }
-        }
+        });
     }
 
     fn clamp_cursor(&self, new_cursor_pos: usize) -> usize {
@@ -204,17 +235,19 @@ impl Component for DlgFzf {
         let filter = self.input.value();
 
         if filter != old_filter {
-            self.filter_entries();
+            self.filter_entries_tx.send((filter, Vec::new())).unwrap();
         }
 
         if !input_handled {
             match key {
                 Key::Esc | Key::Char('q') | Key::Char('Q') | Key::F(10) | Key::Char('0') => {
-                    let _ = self.ev_tx.send(());
+                    let _ = self.stop_fzf_tx.send(());
+                    let _ = self.stop_filter_tx.send(());
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
                 }
                 Key::Char('\n') | Key::Char(' ') => {
-                    let _ = self.ev_tx.send(());
+                    let _ = self.stop_fzf_tx.send(());
+                    let _ = self.stop_filter_tx.send(());
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
                     if !self.shown_entries.is_empty() {
                         self.pubsub_tx
@@ -271,20 +304,22 @@ impl Component for DlgFzf {
         #[allow(clippy::single_match)]
         match event {
             PubSub::ComponentThreadEvent => {
-                if let Ok(info) = self.info_rx.try_recv() {
-                    if !info.is_empty() {
-                        self.entries.extend(info);
-
-                        self.entries.sort_by_cached_key(|(file, _is_dir)| {
-                            natsort_key(&file.to_string_lossy())
-                        });
-
-                        self.filter_entries();
+                if let Ok(entries) = self.fzf_info_rx.try_recv() {
+                    if !entries.is_empty() {
                         self.i_spinner = self.i_spinner.map(|i| (i + 1) % SPINNER.len());
+                        self.filter_entries_tx
+                            .send((self.input.value(), entries))
+                            .unwrap();
                     }
                 }
 
-                if let Ok(()) = self.result_rx.try_recv() {
+                if let Ok((entries, num_entries)) = self.filter_info_rx.try_recv() {
+                    self.shown_entries = entries;
+                    self.num_entries = num_entries;
+                    self.cursor_position = self.clamp_cursor(self.cursor_position);
+                }
+
+                if let Ok(()) = self.fzf_result_rx.try_recv() {
                     self.i_spinner = None;
                 }
             }
@@ -351,13 +386,18 @@ impl Component for DlgFzf {
             .iter()
             .skip(self.first_line)
             .take(upper_area.height.into())
-            .map(|(file, _is_dir)| {
-                ListItem::new::<String>(
-                    diff_paths(file, &self.cwd)
-                        .unwrap()
-                        .to_string_lossy()
-                        .to_string(),
-                )
+            .map(|(file, is_dir)| {
+                ListItem::new::<String>(tilde_layout(
+                    &format!(
+                        "{}{}",
+                        diff_paths(file, &self.cwd).unwrap().to_string_lossy(),
+                        match is_dir {
+                            true => "/",
+                            false => "",
+                        }
+                    ),
+                    upper_area.width as usize,
+                ))
             })
             .collect();
 
@@ -382,7 +422,7 @@ impl Component for DlgFzf {
                             None => String::from(""),
                         },
                         self.shown_entries.len().separate_with_commas(),
-                        self.entries.len().separate_with_commas()
+                        self.num_entries.separate_with_commas()
                     ),
                     sections[0].width as usize,
                 )))
@@ -401,36 +441,107 @@ impl Component for DlgFzf {
     }
 }
 
+fn filter_entries(
+    cwd: &Path,
+    entries: &[(PathBuf, bool)],
+    filter: &str,
+    matcher: &mut Matcher,
+    buf: &mut Vec<char>,
+    filter_info_tx: &Sender<(Vec<(PathBuf, bool)>, usize)>,
+    stop_filter_rx: &Receiver<()>,
+) {
+    let pattern = Pattern::parse(filter, CaseMatching::Ignore, Normalization::Smart);
+
+    let mut scores: Vec<(PathBuf, bool, usize, u32, usize)> = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (file, is_dir))| {
+            let file_name = diff_paths(file, cwd).unwrap().to_string_lossy().to_string();
+
+            let utf32_str = Utf32Str::new(&file_name, buf);
+            let len_utf32_str = utf32_str.len();
+
+            let score = pattern.score(utf32_str, matcher);
+
+            score.map(|score| (file.clone(), *is_dir, i, score, len_utf32_str))
+        })
+        .take_while(|_| stop_filter_rx.is_empty())
+        .collect();
+
+    if !stop_filter_rx.is_empty() {
+        return;
+    }
+
+    scores.sort_by(
+        |(_file1, _is_dir1, i1, score1, len1), (_file2, _is_dir2, i2, score2, len2)| {
+            score2.cmp(score1).then(len1.cmp(len2)).then(i1.cmp(i2))
+        },
+    );
+
+    let _ = filter_info_tx.send((
+        scores
+            .iter()
+            .map(|(file, is_dir, _i, _score, _len)| (file.clone(), *is_dir))
+            .collect(),
+        entries.len(),
+    ));
+}
+
 fn fzf(
     initial_entries: &[(PathBuf, bool)],
     hidden_files: HiddenFiles,
-    ev_rx: Receiver<()>,
-    info_tx: Sender<Vec<(PathBuf, bool)>>,
+    stop_fzf_rx: Receiver<()>,
+    fzf_info_tx: Sender<Vec<(PathBuf, bool)>>,
     pubsub_tx: Sender<PubSub>,
 ) {
-    let mut result = Vec::new();
+    let mut entries = Vec::new();
     let mut last_write = Instant::now();
 
-    for (file, is_dir) in initial_entries.iter() {
-        if !is_dir {
-            continue;
+    let mut directories: Vec<PathBuf> = initial_entries
+        .iter()
+        .filter_map(|(file, is_dir)| match is_dir {
+            true => Some(file.clone()),
+            false => None,
+        })
+        .collect();
+
+    let mut new_directories = Vec::new();
+
+    while !directories.is_empty() {
+        new_directories.clear();
+
+        for file in directories.iter() {
+            if !stop_fzf_rx.is_empty() {
+                return;
+            }
+
+            if last_write.elapsed().as_millis() >= 50 {
+                last_write = Instant::now();
+                let _ = fzf_info_tx.send(entries.clone());
+                let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
+
+                entries.clear();
+            }
+
+            if let Ok(result) = recursive_fzf(
+                file,
+                hidden_files,
+                last_write,
+                &stop_fzf_rx,
+                &fzf_info_tx,
+                &pubsub_tx,
+            ) {
+                entries.extend(result.entries);
+                last_write = result.last_write;
+                new_directories.extend(result.directories);
+            }
         }
 
-        if let Ok((recursive_result, recursive_last_write)) =
-            recursive_fzf(file, hidden_files, last_write, &ev_rx, &info_tx, &pubsub_tx)
-        {
-            result.extend(recursive_result);
-            last_write = recursive_last_write;
-        }
-
-        if !ev_rx.is_empty() {
-            let _ = ev_rx.try_recv();
-            break;
-        }
+        (directories, new_directories) = (new_directories, directories);
     }
 
-    if !result.is_empty() {
-        let _ = info_tx.send(result.clone());
+    if !entries.is_empty() {
+        let _ = fzf_info_tx.send(entries.clone());
         let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
     }
 }
@@ -439,24 +550,27 @@ fn recursive_fzf(
     cwd: &Path,
     hidden_files: HiddenFiles,
     old_last_write: Instant,
-    ev_rx: &Receiver<()>,
-    info_tx: &Sender<Vec<(PathBuf, bool)>>,
+    stop_fzf_rx: &Receiver<()>,
+    fzf_info_tx: &Sender<Vec<(PathBuf, bool)>>,
     pubsub_tx: &Sender<PubSub>,
-) -> Result<(Vec<(PathBuf, bool)>, Instant)> {
-    let mut result = Vec::new();
+) -> Result<FzfResult> {
+    let mut result = FzfResult {
+        entries: Vec::new(),
+        last_write: old_last_write,
+        directories: Vec::new(),
+    };
 
-    let mut last_write = old_last_write;
     for entry in fs::read_dir(cwd)? {
-        if !ev_rx.is_empty() {
-            return Ok((result, last_write));
+        if !stop_fzf_rx.is_empty() {
+            return Ok(result);
         }
 
-        if last_write.elapsed().as_millis() >= 50 {
-            last_write = Instant::now();
-            let _ = info_tx.send(result.clone());
+        if result.last_write.elapsed().as_millis() >= 50 {
+            result.last_write = Instant::now();
+            let _ = fzf_info_tx.send(result.entries.clone());
             let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
 
-            result.clear();
+            result.entries.clear();
         }
 
         if let Ok(entry) = entry {
@@ -469,62 +583,25 @@ fn recursive_fzf(
             }
 
             match entry.file_type() {
-                Ok(file_type) => match (file_type.is_dir(), file_type.is_symlink()) {
-                    (true, _) => {
-                        result.push((path.clone(), true));
-
-                        if let Ok((recursive_result, recursive_last_write)) = recursive_fzf(
-                            &path,
-                            hidden_files,
-                            last_write,
-                            ev_rx,
-                            info_tx,
-                            pubsub_tx,
-                        ) {
-                            result.extend(recursive_result);
-                            last_write = recursive_last_write;
-                        }
-
-                        if !ev_rx.is_empty() {
-                            return Ok((result, last_write));
-                        }
+                Ok(file_type) => match file_type.is_dir() {
+                    true => {
+                        result.entries.push((path.clone(), true));
+                        result.directories.push(path.clone());
                     }
-                    (_, true) => match fs::metadata(&path) {
-                        Ok(metadata) if metadata.is_dir() => {
-                            result.push((path.clone(), true));
-
-                            if let Ok((recursive_result, recursive_last_write)) = recursive_fzf(
-                                &path,
-                                hidden_files,
-                                last_write,
-                                ev_rx,
-                                info_tx,
-                                pubsub_tx,
-                            ) {
-                                result.extend(recursive_result);
-                                last_write = recursive_last_write;
-                            }
-
-                            if !ev_rx.is_empty() {
-                                return Ok((result, last_write));
-                            }
-                        }
-                        _ => result.push((path.clone(), false)),
-                    },
-                    _ => result.push((path.clone(), false)),
+                    _ => result.entries.push((path.clone(), false)),
                 },
-                Err(_) => result.push((path.clone(), false)),
+                Err(_) => result.entries.push((path.clone(), false)),
             }
         }
     }
 
-    if last_write.elapsed().as_millis() >= 50 {
-        last_write = Instant::now();
-        let _ = info_tx.send(result.clone());
+    if result.last_write.elapsed().as_millis() >= 50 {
+        result.last_write = Instant::now();
+        let _ = fzf_info_tx.send(result.entries.clone());
         let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
 
-        result.clear();
+        result.entries.clear();
     }
 
-    Ok((result, last_write))
+    Ok(result)
 }
