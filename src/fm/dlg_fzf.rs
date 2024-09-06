@@ -19,7 +19,7 @@ use termion::event::*;
 
 use nucleo_matcher::{
     pattern::{CaseMatching, Normalization, Pattern},
-    Config, Matcher, Utf32Str,
+    Config, Matcher, Utf32String,
 };
 use pathdiff::diff_paths;
 use thousands::Separable;
@@ -35,26 +35,20 @@ use crate::{
 
 const SPINNER: &[char] = &['-', '\\', '|', '/'];
 
-struct FzfResult {
-    pub entries: Vec<(PathBuf, bool)>,
-    pub last_write: Instant,
-    pub directories: Vec<PathBuf>,
-}
-
 #[derive(Debug)]
 pub struct DlgFzf {
     palette: Rc<Palette>,
     pubsub_tx: Sender<PubSub>,
     cwd: PathBuf,
     num_entries: usize,
-    shown_entries: Vec<(PathBuf, bool)>,
+    shown_entries: Vec<Utf32String>,
     hidden_files: HiddenFiles,
     stop_fzf_tx: Sender<()>,
     fzf_info_rx: Receiver<Vec<(PathBuf, bool)>>,
     fzf_result_rx: Receiver<()>,
     stop_filter_tx: Sender<()>,
     filter_entries_tx: Sender<(String, Vec<(PathBuf, bool)>)>,
-    filter_info_rx: Receiver<(Vec<(PathBuf, bool)>, usize)>,
+    filter_info_rx: Receiver<(Vec<Utf32String>, usize)>,
     i_spinner: Option<usize>,
     input: Input,
     cursor_position: usize,
@@ -81,7 +75,7 @@ impl DlgFzf {
             .iter()
             .filter(|entry| match hidden_files {
                 HiddenFiles::Show => true,
-                HiddenFiles::Hide => !entry.key.starts_with('.'),
+                HiddenFiles::Hide => !entry.file_name.starts_with('.'),
             })
             .map(|entry| (entry.file.clone(), entry.stat.is_dir()))
             .collect();
@@ -108,12 +102,7 @@ impl DlgFzf {
 
         dlg.fzf_thread(&initial_entries, stop_fzf_rx, fzf_info_tx, fzf_result_tx);
 
-        dlg.filter_thread(
-            &initial_entries,
-            stop_filter_rx,
-            filter_entries_rx,
-            filter_info_tx,
-        );
+        dlg.filter_thread(stop_filter_rx, filter_entries_rx, filter_info_tx);
 
         dlg
     }
@@ -146,26 +135,19 @@ impl DlgFzf {
 
     fn filter_thread(
         &mut self,
-        initial_entries: &[(PathBuf, bool)],
         stop_filter_rx: Receiver<()>,
         filter_entries_rx: Receiver<(String, Vec<(PathBuf, bool)>)>,
-        filter_info_tx: Sender<(Vec<(PathBuf, bool)>, usize)>,
+        filter_info_tx: Sender<(Vec<Utf32String>, usize)>,
     ) {
-        let initial_entries = Vec::from(initial_entries);
         let cwd = self.cwd.clone();
 
         let pubsub_tx = self.pubsub_tx.clone();
 
         thread::spawn(move || {
             let mut filter;
-            let mut entries = initial_entries.clone();
-
-            entries.sort();
-
-            let _ = filter_info_tx.send((entries.clone(), entries.len()));
+            let mut entries = Vec::new();
 
             let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
-            let mut buf = Vec::new();
 
             loop {
                 select! {
@@ -177,7 +159,21 @@ impl DlgFzf {
 
                         if !entry.is_empty() {
                             needs_sorting = true;
-                            entries.extend(entry);
+
+                            entries.extend(
+                                entry
+                                    .iter()
+                                    .map(|(file, is_dir)| {
+                                        let mut file_name =
+                                            diff_paths(file, &cwd).unwrap().to_string_lossy().to_string();
+
+                                        if *is_dir {
+                                            file_name.push('/');
+                                        }
+
+                                        Utf32String::from(file_name)
+                                    })
+                            );
                         }
 
 
@@ -186,7 +182,20 @@ impl DlgFzf {
 
                             if !entry.is_empty() {
                                 needs_sorting = true;
-                                entries.extend(entry);
+                                entries.extend(
+                                    entry
+                                        .iter()
+                                        .map(|(file, is_dir)| {
+                                            let mut file_name =
+                                                diff_paths(file, &cwd).unwrap().to_string_lossy().to_string();
+
+                                            if *is_dir {
+                                                file_name.push('/');
+                                            }
+
+                                            Utf32String::from(file_name)
+                                        })
+                                );
                             }
                         }
 
@@ -199,7 +208,7 @@ impl DlgFzf {
                                 let _ = filter_info_tx.send((entries.clone(), entries.len()));
                             }
                             false => {
-                                filter_entries(&cwd, &entries, &filter, &mut matcher, &mut buf, &filter_info_tx, &stop_filter_rx);
+                                filter_entries(&entries, &filter, &mut matcher, &filter_info_tx, &stop_filter_rx);
                             }
                         }
 
@@ -250,10 +259,11 @@ impl Component for DlgFzf {
                     let _ = self.stop_filter_tx.send(());
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
                     if !self.shown_entries.is_empty() {
+                        let mut selected_file = self.cwd.clone();
+                        selected_file.push(self.shown_entries[self.cursor_position].to_string());
+
                         self.pubsub_tx
-                            .send(PubSub::SelectFile(
-                                self.shown_entries[self.cursor_position].clone(),
-                            ))
+                            .send(PubSub::SelectFile(selected_file))
                             .unwrap();
                     }
                 }
@@ -386,19 +396,7 @@ impl Component for DlgFzf {
             .iter()
             .skip(self.first_line)
             .take(upper_area.height.into())
-            .map(|(file, is_dir)| {
-                ListItem::new::<String>(tilde_layout(
-                    &format!(
-                        "{}{}",
-                        diff_paths(file, &self.cwd).unwrap().to_string_lossy(),
-                        match is_dir {
-                            true => "/",
-                            false => "",
-                        }
-                    ),
-                    upper_area.width as usize,
-                ))
-            })
+            .map(|file| ListItem::new(tilde_layout(&file.to_string(), upper_area.width as usize)))
             .collect();
 
         let list = List::new(items)
@@ -442,28 +440,21 @@ impl Component for DlgFzf {
 }
 
 fn filter_entries(
-    cwd: &Path,
-    entries: &[(PathBuf, bool)],
+    entries: &[Utf32String],
     filter: &str,
     matcher: &mut Matcher,
-    buf: &mut Vec<char>,
-    filter_info_tx: &Sender<(Vec<(PathBuf, bool)>, usize)>,
+    filter_info_tx: &Sender<(Vec<Utf32String>, usize)>,
     stop_filter_rx: &Receiver<()>,
 ) {
     let pattern = Pattern::parse(filter, CaseMatching::Ignore, Normalization::Smart);
 
-    let mut scores: Vec<(PathBuf, bool, usize, u32, usize)> = entries
+    let mut scores: Vec<(Utf32String, usize, u32, usize)> = entries
         .iter()
         .enumerate()
-        .filter_map(|(i, (file, is_dir))| {
-            let file_name = diff_paths(file, cwd).unwrap().to_string_lossy().to_string();
+        .filter_map(|(i, file_name)| {
+            let score = pattern.score(file_name.slice(..), matcher);
 
-            let utf32_str = Utf32Str::new(&file_name, buf);
-            let len_utf32_str = utf32_str.len();
-
-            let score = pattern.score(utf32_str, matcher);
-
-            score.map(|score| (file.clone(), *is_dir, i, score, len_utf32_str))
+            score.map(|score| (file_name.clone(), i, score, file_name.len()))
         })
         .take_while(|_| stop_filter_rx.is_empty())
         .collect();
@@ -472,16 +463,14 @@ fn filter_entries(
         return;
     }
 
-    scores.sort_by(
-        |(_file1, _is_dir1, i1, score1, len1), (_file2, _is_dir2, i2, score2, len2)| {
-            score2.cmp(score1).then(len1.cmp(len2)).then(i1.cmp(i2))
-        },
-    );
+    scores.sort_by(|(_file1, i1, score1, len1), (_file2, i2, score2, len2)| {
+        score2.cmp(score1).then(len1.cmp(len2)).then(i1.cmp(i2))
+    });
 
     let _ = filter_info_tx.send((
         scores
             .iter()
-            .map(|(file, is_dir, _i, _score, _len)| (file.clone(), *is_dir))
+            .map(|(file_name, _i, _score, _len)| file_name.clone())
             .collect(),
         entries.len(),
     ));
@@ -494,7 +483,7 @@ fn fzf(
     fzf_info_tx: Sender<Vec<(PathBuf, bool)>>,
     pubsub_tx: Sender<PubSub>,
 ) {
-    let mut entries = Vec::new();
+    let mut entries = Vec::from(initial_entries);
     let mut last_write = Instant::now();
 
     let mut directories: Vec<PathBuf> = initial_entries
@@ -523,17 +512,17 @@ fn fzf(
                 entries.clear();
             }
 
-            if let Ok(result) = recursive_fzf(
+            if let Ok((recursive_last_write, recursive_directories)) = recursive_fzf(
                 file,
                 hidden_files,
+                &mut entries,
                 last_write,
                 &stop_fzf_rx,
                 &fzf_info_tx,
                 &pubsub_tx,
             ) {
-                entries.extend(result.entries);
-                last_write = result.last_write;
-                new_directories.extend(result.directories);
+                last_write = recursive_last_write;
+                new_directories.extend(recursive_directories);
             }
         }
 
@@ -549,28 +538,26 @@ fn fzf(
 fn recursive_fzf(
     cwd: &Path,
     hidden_files: HiddenFiles,
+    entries: &mut Vec<(PathBuf, bool)>,
     old_last_write: Instant,
     stop_fzf_rx: &Receiver<()>,
     fzf_info_tx: &Sender<Vec<(PathBuf, bool)>>,
     pubsub_tx: &Sender<PubSub>,
-) -> Result<FzfResult> {
-    let mut result = FzfResult {
-        entries: Vec::new(),
-        last_write: old_last_write,
-        directories: Vec::new(),
-    };
+) -> Result<(Instant, Vec<PathBuf>)> {
+    let mut last_write = old_last_write;
+    let mut directories = Vec::new();
 
     for entry in fs::read_dir(cwd)? {
         if !stop_fzf_rx.is_empty() {
-            return Ok(result);
+            return Ok((last_write, directories));
         }
 
-        if result.last_write.elapsed().as_millis() >= 50 {
-            result.last_write = Instant::now();
-            let _ = fzf_info_tx.send(result.entries.clone());
+        if last_write.elapsed().as_millis() >= 50 {
+            last_write = Instant::now();
+            let _ = fzf_info_tx.send(entries.clone());
             let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
 
-            result.entries.clear();
+            entries.clear();
         }
 
         if let Ok(entry) = entry {
@@ -585,23 +572,23 @@ fn recursive_fzf(
             match entry.file_type() {
                 Ok(file_type) => match file_type.is_dir() {
                     true => {
-                        result.entries.push((path.clone(), true));
-                        result.directories.push(path.clone());
+                        entries.push((path.clone(), true));
+                        directories.push(path.clone());
                     }
-                    _ => result.entries.push((path.clone(), false)),
+                    _ => entries.push((path.clone(), false)),
                 },
-                Err(_) => result.entries.push((path.clone(), false)),
+                Err(_) => entries.push((path.clone(), false)),
             }
         }
     }
 
-    if result.last_write.elapsed().as_millis() >= 50 {
-        result.last_write = Instant::now();
-        let _ = fzf_info_tx.send(result.entries.clone());
+    if last_write.elapsed().as_millis() >= 50 {
+        last_write = Instant::now();
+        let _ = fzf_info_tx.send(entries.clone());
         let _ = pubsub_tx.send(PubSub::ComponentThreadEvent);
 
-        result.entries.clear();
+        entries.clear();
     }
 
-    Ok(result)
+    Ok((last_write, directories))
 }

@@ -12,7 +12,7 @@ use ratatui::prelude::*;
 use libc::{S_IXGRP, S_IXOTH, S_IXUSR};
 use nucleo_matcher::{
     pattern::{CaseMatching, Normalization, Pattern},
-    Config, Matcher, Utf32Str,
+    Config, Matcher, Utf32String,
 };
 use path_clean::PathClean;
 use thousands::Separable;
@@ -61,7 +61,8 @@ pub const ARCHIVE_EXTENSIONS: &[&str] = &[
 pub struct Entry {
     pub file: PathBuf,
     pub file_name: String,
-    pub key: String,
+    pub filter_key: Utf32String,
+    pub sort_key: String,
     pub extension: String,
     pub label: String,
     pub style: Style,
@@ -227,9 +228,12 @@ pub fn get_file_list(
                 Err(_) => String::from("???????"),
             };
 
+            let key = natsort_key(&file_name);
+
             Some(Entry {
                 file: shown_file,
-                key: natsort_key(&file_name),
+                filter_key: Utf32String::from(key.as_ref()),
+                sort_key: key,
                 file_name,
                 extension,
                 label,
@@ -297,12 +301,11 @@ pub fn filter_file_list(
     let file_filter = natsort_key(file_filter);
     let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
     let pattern = Pattern::parse(&file_filter, CaseMatching::Ignore, Normalization::Smart);
-    let mut buf = Vec::new();
 
     file_list
         .iter()
         .filter(|entry| {
-            if matches!(hidden_files, HiddenFiles::Hide) && entry.key.starts_with('.') {
+            if matches!(hidden_files, HiddenFiles::Hide) && entry.file_name.starts_with('.') {
                 return false;
             }
 
@@ -311,7 +314,7 @@ pub fn filter_file_list(
             }
 
             pattern
-                .score(Utf32Str::new(entry.key.as_ref(), &mut buf), &mut matcher)
+                .score(entry.filter_key.slice(..), &mut matcher)
                 .is_some()
         })
         .cloned()
@@ -329,7 +332,7 @@ pub fn sort_by_name(a: &Entry, b: &Entry, sort_order: SortOrder) -> Ordering {
         (true, false) => Ordering::Less,
         (false, true) => Ordering::Greater,
         _ => {
-            let o = natord::compare(&a.key, &b.key)
+            let o = natord::compare(&a.sort_key, &b.sort_key)
                 .then_with(|| natord::compare(&a.file_name, &b.file_name));
 
             match sort_order {

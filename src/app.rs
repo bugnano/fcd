@@ -90,7 +90,7 @@ pub enum PubSub {
     Cp(PathBuf, Vec<Entry>),
     Mv(PathBuf, Vec<Entry>),
     Fzf(PathBuf, Vec<Entry>, HiddenFiles),
-    SelectFile((PathBuf, bool)),
+    SelectFile(PathBuf),
 
     // Quick view events
     ToggleQuickView(Option<Entry>),

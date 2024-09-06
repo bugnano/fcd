@@ -21,7 +21,7 @@ use termion::{event::*, raw::RawTerminal};
 
 use nucleo_matcher::{
     pattern::{CaseMatching, Normalization, Pattern},
-    Config, Matcher, Utf32Str,
+    Config, Matcher,
 };
 use regex::RegexBuilder;
 use unicode_width::UnicodeWidthStr;
@@ -920,19 +920,15 @@ impl Component for FilePanel {
                             let pattern =
                                 Pattern::parse(filter, CaseMatching::Ignore, Normalization::Smart);
 
-                            let mut buf = Vec::new();
-
                             let scores: Vec<(usize, u32, usize)> = self
                                 .shown_file_list
                                 .iter()
                                 .enumerate()
-                                .map(|(i, entry)| {
-                                    let utf32_str = Utf32Str::new(&entry.key, &mut buf);
-                                    let len_utf32_str = utf32_str.len();
+                                .filter_map(|(i, entry)| {
+                                    let score =
+                                        pattern.score(entry.filter_key.slice(..), &mut matcher);
 
-                                    let score = pattern.score(utf32_str, &mut matcher).unwrap_or(0);
-
-                                    (i, score, len_utf32_str)
+                                    score.map(|score| (i, score, entry.filter_key.len()))
                                 })
                                 .collect();
 
@@ -1057,7 +1053,7 @@ impl Component for FilePanel {
                 },
                 _ => self.reload(self.get_selected_file().as_deref()),
             },
-            PubSub::SelectFile((selected_file, _is_dir)) => {
+            PubSub::SelectFile(selected_file) => {
                 if let Focus::Focused = self.focus {
                     match selected_file.parent() {
                         Some(parent) if parent == self.cwd => {
