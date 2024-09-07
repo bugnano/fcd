@@ -18,6 +18,7 @@ use crate::{
 pub struct Filter {
     pubsub_tx: Sender<PubSub>,
     input: Input,
+    rect: Rect,
 }
 
 impl Filter {
@@ -25,6 +26,7 @@ impl Filter {
         Filter {
             pubsub_tx,
             input: Input::new(&Style::default(), filter, filter.len()),
+            rect: Rect::default(),
         }
     }
 }
@@ -61,6 +63,12 @@ impl Component for Filter {
         key_handled
     }
 
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: Position) {
+        if self.rect.contains(mouse_position) {
+            self.input.handle_mouse(button, mouse_position);
+        }
+    }
+
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {
         let label = "filter: ";
         let label_width = label.width();
@@ -70,6 +78,8 @@ impl Component for Filter {
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(label_width as u16), Constraint::Min(1)])
             .split(*chunk);
+
+        self.rect = sections[1];
 
         f.render_widget(label, sections[0]);
 

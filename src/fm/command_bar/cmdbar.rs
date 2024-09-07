@@ -30,6 +30,7 @@ pub struct CmdBar {
     command_bar_type: CmdBarType,
     label: String,
     input: Input,
+    rect: Rect,
 }
 
 impl CmdBar {
@@ -46,6 +47,7 @@ impl CmdBar {
             command_bar_type,
             label: String::from(label),
             input: Input::new(&Style::default(), input, cursor_position),
+            rect: Rect::default(),
         }
     }
 }
@@ -108,6 +110,12 @@ impl Component for CmdBar {
         key_handled
     }
 
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: Position) {
+        if self.rect.contains(mouse_position) {
+            self.input.handle_mouse(button, mouse_position);
+        }
+    }
+
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {
         let sections = Layout::default()
             .direction(Direction::Horizontal)
@@ -116,6 +124,8 @@ impl Component for CmdBar {
                 Constraint::Min(1),
             ])
             .split(*chunk);
+
+        self.rect = sections[1];
 
         let label = Paragraph::new(Span::raw(&self.label));
 

@@ -11,6 +11,7 @@ pub struct Input {
     style: Style,
     cursor_position: usize,
     scroll_offset: usize,
+    rect: Rect,
 }
 
 impl Input {
@@ -20,6 +21,7 @@ impl Input {
             style: *style,
             cursor_position: 0,
             scroll_offset: 0,
+            rect: Rect::default(),
         };
 
         widget.cursor_position = widget.clamp_cursor(cursor_position);
@@ -99,7 +101,28 @@ impl Component for Input {
         key_handled
     }
 
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: Position) {
+        if let MouseButton::Left = button {
+            let new_width = (mouse_position.x - self.rect.x) as usize;
+
+            let mut cursor_width = 0;
+            self.cursor_position = self.scroll_offset
+                + self
+                    .input
+                    .chars()
+                    .skip(self.scroll_offset)
+                    .take_while(|c| {
+                        cursor_width += c.width().unwrap_or(0);
+
+                        cursor_width <= new_width
+                    })
+                    .count();
+        }
+    }
+
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {
+        self.rect = *chunk;
+
         if (chunk.width == 0) || (chunk.height == 0) {
             return;
         }
