@@ -155,9 +155,9 @@ fn main() -> Result<()> {
     };
 
     let mut app = match cli.view {
-        Some(file) => {
-            Box::new(viewer::app::App::new(&config, &palette, &file, tab_size)?) as Box<dyn App>
-        }
+        Some(file) => Box::new(viewer::app::App::new(
+            &config, &palette, &events_tx, &file, tab_size,
+        )?) as Box<dyn App>,
         None => {
             let bookmark_path = xdg::BaseDirectories::with_prefix(crate_name!())
                 .ok()
@@ -190,9 +190,9 @@ fn main() -> Result<()> {
             Box::new(fm::app::App::new(
                 &config,
                 &palette,
+                &events_tx,
                 &bookmarks,
                 &raw_output,
-                &events_tx,
                 &stop_inputs_tx,
                 &stop_inputs_rx,
                 &initial_path,

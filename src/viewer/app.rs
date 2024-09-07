@@ -53,6 +53,7 @@ impl App {
     pub fn new(
         config: &Rc<Config>,
         palette: &Rc<Palette>,
+        events_tx: &Sender<Events>,
         filename: &Path,
         tabsize: u8,
     ) -> Result<App> {
@@ -65,7 +66,7 @@ impl App {
             pubsub_rx,
             top_bar: TopBar::new(palette),
             viewer: FileViewer::new(palette, pubsub_tx.clone(), filename, tabsize)?,
-            button_bar: ButtonBar::new(palette, LABELS),
+            button_bar: ButtonBar::new(palette, events_tx, LABELS),
             dialog: None,
             ctrl_o: false,
             top_bar_rect: Rect::default(),

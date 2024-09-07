@@ -69,9 +69,9 @@ enum ArchiveMountRequest {
 
 pub struct FilePanel {
     palette: Rc<Palette>,
+    events_tx: Sender<Events>,
     bookmarks: Rc<RefCell<Bookmarks>>,
     raw_output: Rc<RawTerminal<io::Stdout>>,
-    events_tx: Sender<Events>,
     stop_inputs_tx: Sender<Inputs>,
     stop_inputs_rx: Receiver<Inputs>,
     pubsub_tx: Sender<PubSub>,
@@ -106,9 +106,9 @@ impl FilePanel {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         palette: &Rc<Palette>,
+        events_tx: &Sender<Events>,
         bookmarks: &Rc<RefCell<Bookmarks>>,
         raw_output: &Rc<RawTerminal<io::Stdout>>,
-        events_tx: &Sender<Events>,
         stop_inputs_tx: &Sender<Inputs>,
         stop_inputs_rx: &Receiver<Inputs>,
         pubsub_tx: Sender<PubSub>,
@@ -122,9 +122,9 @@ impl FilePanel {
 
         let mut panel = FilePanel {
             palette: Rc::clone(palette),
+            events_tx: events_tx.clone(),
             bookmarks: Rc::clone(bookmarks),
             raw_output: Rc::clone(raw_output),
-            events_tx: events_tx.clone(),
             stop_inputs_tx: stop_inputs_tx.clone(),
             stop_inputs_rx: stop_inputs_rx.clone(),
             pubsub_tx,

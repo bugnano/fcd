@@ -90,10 +90,10 @@ enum Quote {
 pub struct App {
     config: Rc<Config>,
     palette: Rc<Palette>,
+    events_tx: Sender<Events>,
     pubsub_tx: Sender<PubSub>,
     pubsub_rx: Receiver<PubSub>,
     raw_output: Rc<RawTerminal<io::Stdout>>,
-    events_tx: Sender<Events>,
     stop_inputs_tx: Sender<Inputs>,
     stop_inputs_rx: Receiver<Inputs>,
     panels: Vec<Box<dyn PanelComponent>>,
@@ -122,9 +122,9 @@ impl App {
     pub fn new(
         config: &Rc<Config>,
         palette: &Rc<Palette>,
+        events_tx: &Sender<Events>,
         bookmarks: &Rc<RefCell<Bookmarks>>,
         raw_output: &Rc<RawTerminal<io::Stdout>>,
-        events_tx: &Sender<Events>,
         stop_inputs_tx: &Sender<Inputs>,
         stop_inputs_rx: &Receiver<Inputs>,
         initial_path: &Path,
@@ -147,18 +147,18 @@ impl App {
         Ok(App {
             config: Rc::clone(config),
             palette: Rc::clone(palette),
+            events_tx: events_tx.clone(),
             pubsub_tx: pubsub_tx.clone(),
             pubsub_rx,
             raw_output: Rc::clone(raw_output),
-            events_tx: events_tx.clone(),
             stop_inputs_tx: stop_inputs_tx.clone(),
             stop_inputs_rx: stop_inputs_rx.clone(),
             panels: vec![
                 Box::new(FilePanel::new(
                     palette,
+                    events_tx,
                     bookmarks,
                     raw_output,
-                    events_tx,
                     stop_inputs_tx,
                     stop_inputs_rx,
                     pubsub_tx.clone(),
@@ -169,9 +169,9 @@ impl App {
                 )),
                 Box::new(FilePanel::new(
                     palette,
+                    events_tx,
                     bookmarks,
                     raw_output,
-                    events_tx,
                     stop_inputs_tx,
                     stop_inputs_rx,
                     pubsub_tx.clone(),
@@ -188,7 +188,7 @@ impl App {
                 )),
             ],
             command_bar: None,
-            button_bar: ButtonBar::new(palette, LABELS),
+            button_bar: ButtonBar::new(palette, events_tx, LABELS),
             dialog: None,
             fg_app: None,
             panel_focus_position: 0,
@@ -535,9 +535,13 @@ impl App {
             }
             PubSub::ViewFile(cwd, file) => match self.config.options.use_internal_viewer {
                 true => {
-                    if let Ok(app) =
-                        viewer::app::App::new(&self.config, &self.palette, file, self.tabsize)
-                    {
+                    if let Ok(app) = viewer::app::App::new(
+                        &self.config,
+                        &self.palette,
+                        &self.events_tx,
+                        file,
+                        self.tabsize,
+                    ) {
                         self.fg_app = Some(Box::new(app));
                     }
                 }
