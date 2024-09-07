@@ -17,7 +17,7 @@ pub trait Component {
         false
     }
 
-    fn handle_mouse(&mut self, _event: &MouseEvent) {}
+    fn handle_mouse(&mut self, _button: MouseButton, _mouse_position: Position) {}
 
     fn handle_pubsub(&mut self, _event: &PubSub) {}
 

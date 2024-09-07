@@ -310,6 +310,29 @@ impl Component for DlgFzf {
         key_handled
     }
 
+    fn handle_mouse(&mut self, button: MouseButton, _mouse_position: layout::Position) {
+        match button {
+            MouseButton::WheelUp => {
+                self.first_line = self.first_line.saturating_add(1);
+                self.clamp_first_line();
+
+                if self.first_line > self.cursor_position {
+                    self.cursor_position = self.first_line;
+                }
+            }
+            MouseButton::WheelDown => {
+                self.first_line = self.first_line.saturating_sub(1);
+
+                let rect_height = (self.rect.height as usize).saturating_sub(1);
+
+                if (self.cursor_position - self.first_line) > rect_height {
+                    self.cursor_position = self.cursor_position.saturating_sub(1);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn handle_pubsub(&mut self, event: &PubSub) {
         #[allow(clippy::single_match)]
         match event {

@@ -6,6 +6,7 @@ use std::{
 
 use crossbeam_channel::Sender;
 use ratatui::{
+    layout,
     prelude::*,
     widgets::{
         block::{Position, Title},
@@ -244,6 +245,19 @@ impl Component for DlgReport {
         }
 
         key_handled
+    }
+
+    fn handle_mouse(&mut self, button: MouseButton, _mouse_position: layout::Position) {
+        match button {
+            MouseButton::WheelUp => {
+                self.first_line = self.first_line.saturating_sub(1);
+            }
+            MouseButton::WheelDown => {
+                self.first_line = self.first_line.saturating_add(1);
+                self.clamp_first_line();
+            }
+            _ => {}
+        }
     }
 
     fn handle_pubsub(&mut self, event: &PubSub) {

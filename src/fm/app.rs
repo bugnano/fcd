@@ -112,6 +112,9 @@ pub struct App {
     pending_jobs: Vec<DBJobEntry>,
     pending_job: Option<DBJobEntry>,
     pending_archives: Vec<PathBuf>,
+    panel_rects: Vec<Rect>,
+    command_bar_rect: Rect,
+    button_bar_rect: Rect,
 }
 
 impl App {
@@ -199,6 +202,9 @@ impl App {
             pending_jobs,
             pending_job: None,
             pending_archives: Vec::new(),
+            panel_rects: vec![Rect::default(), Rect::default()],
+            command_bar_rect: Rect::default(),
+            button_bar_rect: Rect::default(),
         })
     }
 
@@ -374,12 +380,63 @@ impl App {
                             }
                         }
                         Event::Mouse(mouse) => {
-                            match &mut self.dialog {
-                                Some(dlg) => dlg.handle_mouse(mouse),
-                                None => (),
-                            };
+                            if let MouseEvent::Press(button, x, y) = mouse {
+                                // Mouse coordinates are one-based (WTF)
+                                let mouse_position = Position::new(x - 1, y - 1);
 
-                            self.button_bar.handle_mouse(mouse);
+                                let focus_command_bar = self
+                                    .command_bar
+                                    .as_ref()
+                                    .map(|command_bar| command_bar.is_focusable())
+                                    .unwrap_or(false);
+
+                                for (i, rect) in self.panel_rects.iter().enumerate() {
+                                    if rect.contains(mouse_position) {
+                                        match &mut self.dialog {
+                                            Some(dlg) => {
+                                                // If the command bar takes inputs, the command bar
+                                                // takes precedence over the dialog
+                                                if !focus_command_bar {
+                                                    dlg.handle_mouse(*button, mouse_position);
+                                                }
+                                            }
+                                            None => {
+                                                // The interactions between the panel and the command
+                                                // bar are complex, so don't handle the mouse for the
+                                                // panels if there's any command bar
+                                                if self.command_bar.is_none() {
+                                                    if matches!(button, MouseButton::Left)
+                                                        && self.panel_focus_position != i
+                                                    {
+                                                        self.panels[self.panel_focus_position]
+                                                            .change_focus(Focus::Normal);
+
+                                                        self.panel_focus_position = i;
+
+                                                        self.panels[self.panel_focus_position]
+                                                            .change_focus(Focus::Focused);
+                                                    }
+
+                                                    self.panels[i]
+                                                        .handle_mouse(*button, mouse_position);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if self.command_bar_rect.contains(mouse_position) {
+                                    if let Some(command_bar) = &mut self.command_bar {
+                                        command_bar.handle_mouse(*button, mouse_position);
+                                    }
+                                }
+
+                                if self.config.options.show_button_bar
+                                    && self.button_bar_rect.contains(mouse_position)
+                                {
+                                    self.button_bar.handle_mouse(*button, mouse_position);
+                                }
+                            }
                         }
                         Event::Unsupported(_) => (),
                     },
@@ -1520,6 +1577,12 @@ impl app::App for App {
             .constraints(&constraints)
             .split(f.area());
 
+        self.command_bar_rect = chunks[1];
+
+        if self.config.options.show_button_bar {
+            self.button_bar_rect = chunks[2];
+        };
+
         let panel_chunks = Layout::default()
             .direction(match self.vertical {
                 true => Direction::Vertical,
@@ -1527,6 +1590,9 @@ impl app::App for App {
             })
             .constraints([Constraint::Percentage(50), Constraint::Min(1)])
             .split(chunks[0]);
+
+        self.panel_rects[0] = panel_chunks[0];
+        self.panel_rects[1] = panel_chunks[1];
 
         self.panels[0].render(
             f,

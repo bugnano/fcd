@@ -11,6 +11,7 @@ use std::{
 use anyhow::{anyhow, bail};
 use crossbeam_channel::{Receiver, Sender};
 use ratatui::{
+    layout,
     prelude::*,
     widgets::{
         block::{Position, Title},
@@ -312,9 +313,11 @@ impl FilePanel {
         self.cursor_position = self.clamp_cursor(self.cursor_position.saturating_sub(1));
 
         if self.cursor_position != old_cursor_position {
-            self.pubsub_tx
-                .send(PubSub::SelectedEntry(self.get_selected_entry()))
-                .unwrap();
+            if let Focus::Focused = self.focus {
+                self.pubsub_tx
+                    .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                    .unwrap();
+            }
         }
     }
 
@@ -324,9 +327,11 @@ impl FilePanel {
         self.cursor_position = self.clamp_cursor(self.cursor_position.saturating_add(1));
 
         if self.cursor_position != old_cursor_position {
-            self.pubsub_tx
-                .send(PubSub::SelectedEntry(self.get_selected_entry()))
-                .unwrap();
+            if let Focus::Focused = self.focus {
+                self.pubsub_tx
+                    .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                    .unwrap();
+            }
         }
     }
 
@@ -537,11 +542,13 @@ impl Component for FilePanel {
                                                         .saturating_sub(diff_cursor_first);
                                                     self.clamp_first_line();
 
-                                                    self.pubsub_tx
-                                                        .send(PubSub::SelectedEntry(
-                                                            self.get_selected_entry(),
-                                                        ))
-                                                        .unwrap();
+                                                    if let Focus::Focused = self.focus {
+                                                        self.pubsub_tx
+                                                            .send(PubSub::SelectedEntry(
+                                                                self.get_selected_entry(),
+                                                            ))
+                                                            .unwrap();
+                                                    }
                                                 }
                                             }
                                         }
@@ -622,9 +629,11 @@ impl Component for FilePanel {
                     self.cursor_position = 0;
 
                     if self.cursor_position != old_cursor_position {
-                        self.pubsub_tx
-                            .send(PubSub::SelectedEntry(self.get_selected_entry()))
-                            .unwrap();
+                        if let Focus::Focused = self.focus {
+                            self.pubsub_tx
+                                .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                                .unwrap();
+                        }
                     }
                 }
                 Key::End | Key::Char('G') => {
@@ -633,9 +642,11 @@ impl Component for FilePanel {
                     self.cursor_position = self.clamp_cursor(self.shown_file_list.len());
 
                     if self.cursor_position != old_cursor_position {
-                        self.pubsub_tx
-                            .send(PubSub::SelectedEntry(self.get_selected_entry()))
-                            .unwrap();
+                        if let Focus::Focused = self.focus {
+                            self.pubsub_tx
+                                .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                                .unwrap();
+                        }
                     }
                 }
                 Key::PageUp | Key::Ctrl('b') => {
@@ -649,9 +660,11 @@ impl Component for FilePanel {
                     self.clamp_first_line();
 
                     if self.cursor_position != old_cursor_position {
-                        self.pubsub_tx
-                            .send(PubSub::SelectedEntry(self.get_selected_entry()))
-                            .unwrap();
+                        if let Focus::Focused = self.focus {
+                            self.pubsub_tx
+                                .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                                .unwrap();
+                        }
                     }
                 }
                 Key::PageDown | Key::Ctrl('f') => {
@@ -665,9 +678,11 @@ impl Component for FilePanel {
                     self.clamp_first_line();
 
                     if self.cursor_position != old_cursor_position {
-                        self.pubsub_tx
-                            .send(PubSub::SelectedEntry(self.get_selected_entry()))
-                            .unwrap();
+                        if let Focus::Focused = self.focus {
+                            self.pubsub_tx
+                                .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                                .unwrap();
+                        }
                     }
                 }
                 Key::Char('v') | Key::F(3) | Key::Char('3') => {
@@ -866,6 +881,57 @@ impl Component for FilePanel {
         }
 
         key_handled
+    }
+
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+        match button {
+            MouseButton::Left => {
+                if self.rect.contains(mouse_position) {
+                    let new_cursor_position =
+                        self.first_line + ((mouse_position.y - self.rect.y) as usize);
+
+                    if new_cursor_position < self.shown_file_list.len() {
+                        self.cursor_position = new_cursor_position;
+
+                        if let Focus::Focused = self.focus {
+                            self.pubsub_tx
+                                .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                                .unwrap();
+                        }
+                    }
+                }
+            }
+            MouseButton::WheelUp => {
+                self.first_line = self.first_line.saturating_sub(1);
+
+                let rect_height = (self.rect.height as usize).saturating_sub(1);
+
+                if (self.cursor_position - self.first_line) > rect_height {
+                    self.cursor_position = self.cursor_position.saturating_sub(1);
+
+                    if let Focus::Focused = self.focus {
+                        self.pubsub_tx
+                            .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                            .unwrap();
+                    }
+                }
+            }
+            MouseButton::WheelDown => {
+                self.first_line = self.first_line.saturating_add(1);
+                self.clamp_first_line();
+
+                if self.first_line > self.cursor_position {
+                    self.cursor_position = self.first_line;
+
+                    if let Focus::Focused = self.focus {
+                        self.pubsub_tx
+                            .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                            .unwrap();
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     fn handle_pubsub(&mut self, event: &PubSub) {

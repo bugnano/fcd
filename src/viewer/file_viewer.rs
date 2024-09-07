@@ -123,6 +123,13 @@ impl Component for FileViewer {
         }
     }
 
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: Position) {
+        match (self.hex_mode, &mut self.hex_viewer) {
+            (true, Some(hex_viewer)) => hex_viewer.handle_mouse(button, mouse_position),
+            _ => self.main_viewer.handle_mouse(button, mouse_position),
+        }
+    }
+
     fn handle_pubsub(&mut self, event: &PubSub) {
         match (self.hex_mode, &mut self.hex_viewer) {
             (true, Some(hex_viewer)) => hex_viewer.handle_pubsub(event),

@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use crossbeam_channel::Sender;
 use ratatui::{
+    layout,
     prelude::*,
     widgets::{
         block::{Position, Title},
@@ -89,6 +90,12 @@ impl Component for QuickView {
         match &mut self.viewer {
             Some(viewer) => viewer.handle_key(key),
             None => false,
+        }
+    }
+
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+        if let Some(viewer) = &mut self.viewer {
+            viewer.handle_mouse(button, mouse_position);
         }
     }
 

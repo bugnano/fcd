@@ -153,6 +153,32 @@ impl DirViewer {
             }
         }
     }
+
+    fn handle_up(&mut self) {
+        let old_first_line = self.first_line;
+
+        self.first_line = self.first_line.saturating_sub(1);
+        self.clamp_first_line();
+
+        if self.first_line != old_first_line {
+            self.send_updated_position();
+        }
+
+        self.search_pos = self.first_line;
+    }
+
+    fn handle_down(&mut self) {
+        let old_first_line = self.first_line;
+
+        self.first_line += 1;
+        self.clamp_first_line();
+
+        if self.first_line != old_first_line {
+            self.send_updated_position();
+        }
+
+        self.search_pos = self.first_line;
+    }
 }
 
 impl Component for DirViewer {
@@ -160,30 +186,8 @@ impl Component for DirViewer {
         let mut key_handled = true;
 
         match key {
-            Key::Up | Key::Char('k') => {
-                let old_first_line = self.first_line;
-
-                self.first_line = self.first_line.saturating_sub(1);
-                self.clamp_first_line();
-
-                if self.first_line != old_first_line {
-                    self.send_updated_position();
-                }
-
-                self.search_pos = self.first_line;
-            }
-            Key::Down | Key::Char('j') => {
-                let old_first_line = self.first_line;
-
-                self.first_line += 1;
-                self.clamp_first_line();
-
-                if self.first_line != old_first_line {
-                    self.send_updated_position();
-                }
-
-                self.search_pos = self.first_line;
-            }
+            Key::Up | Key::Char('k') => self.handle_up(),
+            Key::Down | Key::Char('j') => self.handle_down(),
             Key::Home | Key::Char('g') => {
                 let old_first_line = self.first_line;
 
@@ -273,6 +277,14 @@ impl Component for DirViewer {
         }
 
         key_handled
+    }
+
+    fn handle_mouse(&mut self, button: MouseButton, _mouse_position: Position) {
+        match button {
+            MouseButton::WheelUp => self.handle_up(),
+            MouseButton::WheelDown => self.handle_down(),
+            _ => {}
+        }
     }
 
     fn handle_pubsub(&mut self, event: &PubSub) {

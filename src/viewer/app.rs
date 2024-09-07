@@ -44,6 +44,9 @@ pub struct App {
     button_bar: ButtonBar,
     dialog: Option<Box<dyn Component>>,
     ctrl_o: bool,
+    top_bar_rect: Rect,
+    viewer_rect: Rect,
+    button_bar_rect: Rect,
 }
 
 impl App {
@@ -65,6 +68,9 @@ impl App {
             button_bar: ButtonBar::new(palette, LABELS),
             dialog: None,
             ctrl_o: false,
+            top_bar_rect: Rect::default(),
+            viewer_rect: Rect::default(),
+            button_bar_rect: Rect::default(),
         })
     }
 
@@ -116,14 +122,27 @@ impl App {
                             }
                         }
                         Event::Mouse(mouse) => {
-                            self.top_bar.handle_mouse(mouse);
+                            if let MouseEvent::Press(button, x, y) = mouse {
+                                // Mouse coordinates are one-based (WTF)
+                                let mouse_position = Position::new(x - 1, y - 1);
 
-                            match &mut self.dialog {
-                                Some(dlg) => dlg.handle_mouse(mouse),
-                                None => self.viewer.handle_mouse(mouse),
-                            };
+                                if self.top_bar_rect.contains(mouse_position) {
+                                    self.top_bar.handle_mouse(*button, mouse_position);
+                                }
 
-                            self.button_bar.handle_mouse(mouse);
+                                if self.viewer_rect.contains(mouse_position) {
+                                    match &mut self.dialog {
+                                        Some(dlg) => dlg.handle_mouse(*button, mouse_position),
+                                        None => self.viewer.handle_mouse(*button, mouse_position),
+                                    }
+                                }
+
+                                if self.config.options.show_button_bar
+                                    && self.button_bar_rect.contains(mouse_position)
+                                {
+                                    self.button_bar.handle_mouse(*button, mouse_position);
+                                }
+                            }
                         }
                         Event::Unsupported(_) => (),
                     },
@@ -250,6 +269,13 @@ impl app::App for App {
             .direction(Direction::Vertical)
             .constraints(&constraints)
             .split(f.area());
+
+        self.top_bar_rect = chunks[0];
+        self.viewer_rect = chunks[1];
+
+        if self.config.options.show_button_bar {
+            self.button_bar_rect = chunks[2];
+        }
 
         self.top_bar.render(f, &chunks[0], Focus::Normal);
         self.viewer.render(f, &chunks[1], Focus::Focused);
