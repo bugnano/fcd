@@ -655,7 +655,7 @@ impl Component for FilePanel {
                 Key::Down | Key::Char('j') => {
                     self.handle_down();
                 }
-                Key::Home | Key::Char('g') => {
+                Key::Home | Key::CtrlHome | Key::Char('g') => {
                     let old_cursor_position = self.cursor_position;
 
                     self.cursor_position = 0;
@@ -668,7 +668,7 @@ impl Component for FilePanel {
                         }
                     }
                 }
-                Key::End | Key::Char('G') => {
+                Key::End | Key::CtrlEnd | Key::Char('G') => {
                     let old_cursor_position = self.cursor_position;
 
                     self.cursor_position = self.clamp_cursor(self.shown_file_list.len());

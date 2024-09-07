@@ -391,7 +391,7 @@ impl Component for TextViewer {
         match key {
             Key::Up | Key::Char('k') => self.handle_up(),
             Key::Down | Key::Char('j') => self.handle_down(),
-            Key::Home | Key::Char('g') => {
+            Key::Home | Key::CtrlHome | Key::Char('g') => {
                 let old_first_line = self.first_line;
 
                 self.first_line = 0;
@@ -403,7 +403,7 @@ impl Component for TextViewer {
 
                 self.search_pos = self.first_line;
             }
-            Key::End | Key::Char('G') => {
+            Key::End | Key::CtrlEnd | Key::Char('G') => {
                 let old_first_line = self.first_line;
 
                 self.first_line = self.lines.len();

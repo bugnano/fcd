@@ -151,10 +151,10 @@ impl Component for DlgPendingJob {
                 self.first_line = self.first_line.saturating_add(1);
                 self.clamp_first_line();
             }
-            Key::Home | Key::Char('g') => {
+            Key::Home | Key::CtrlHome | Key::Char('g') => {
                 self.first_line = 0;
             }
-            Key::End | Key::Char('G') => {
+            Key::End | Key::CtrlEnd | Key::Char('G') => {
                 self.first_line = self.messages.len();
                 self.clamp_first_line();
             }

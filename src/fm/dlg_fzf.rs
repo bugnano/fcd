@@ -275,10 +275,10 @@ impl Component for DlgFzf {
                     self.cursor_position =
                         self.clamp_cursor(self.cursor_position.saturating_sub(1));
                 }
-                Key::Home | Key::Char('g') => {
+                Key::Home | Key::CtrlHome | Key::Char('g') => {
                     self.cursor_position = self.clamp_cursor(self.shown_entries.len());
                 }
-                Key::End | Key::Char('G') => {
+                Key::End | Key::CtrlEnd | Key::Char('G') => {
                     self.cursor_position = 0;
                 }
                 Key::PageUp | Key::Ctrl('b') => {
