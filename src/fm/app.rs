@@ -405,8 +405,10 @@ impl App {
                                                 // bar are complex, so don't handle the mouse for the
                                                 // panels if there's any command bar
                                                 if self.command_bar.is_none() {
-                                                    if matches!(button, MouseButton::Left)
-                                                        && self.panel_focus_position != i
+                                                    if matches!(
+                                                        button,
+                                                        MouseButton::Left | MouseButton::Right
+                                                    ) && self.panel_focus_position != i
                                                     {
                                                         self.panels[self.panel_focus_position]
                                                             .change_focus(Focus::Normal);

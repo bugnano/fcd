@@ -335,6 +335,38 @@ impl FilePanel {
         }
     }
 
+    fn handle_click(&mut self, mouse_position: layout::Position) {
+        if self.rect.contains(mouse_position) {
+            let new_cursor_position = self.first_line + ((mouse_position.y - self.rect.y) as usize);
+
+            if new_cursor_position < self.shown_file_list.len() {
+                let old_cursor_position = self.cursor_position;
+
+                self.cursor_position = new_cursor_position;
+
+                if self.cursor_position != old_cursor_position {
+                    if let Focus::Focused = self.focus {
+                        self.pubsub_tx
+                            .send(PubSub::SelectedEntry(self.get_selected_entry()))
+                            .unwrap();
+                    }
+                }
+            }
+        }
+    }
+
+    fn tag_toggle(&mut self) {
+        if !self.shown_file_list.is_empty() {
+            let entry = &self.shown_file_list[self.cursor_position];
+
+            if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
+                self.tagged_files.swap_remove(i);
+            } else {
+                self.tagged_files.push(entry.clone());
+            }
+        }
+    }
+
     fn unarchive_path(&self, file: &Path) -> PathBuf {
         match &self.archive_mounter_command_tx {
             Some(command_tx) => archive_mounter::unarchive_path(command_tx, file),
@@ -712,16 +744,7 @@ impl Component for FilePanel {
                     }
                 }
                 Key::Insert | Key::Char(' ') => {
-                    if !self.shown_file_list.is_empty() {
-                        let entry = &self.shown_file_list[self.cursor_position];
-
-                        if let Some(i) = self.tagged_files.iter().position(|x| x == entry) {
-                            self.tagged_files.swap_remove(i);
-                        } else {
-                            self.tagged_files.push(entry.clone());
-                        }
-                    }
-
+                    self.tag_toggle();
                     self.handle_down();
                 }
                 Key::Char('t') => {
@@ -885,20 +908,11 @@ impl Component for FilePanel {
 
     fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
         match button {
-            MouseButton::Left => {
+            MouseButton::Left => self.handle_click(mouse_position),
+            MouseButton::Right => {
                 if self.rect.contains(mouse_position) {
-                    let new_cursor_position =
-                        self.first_line + ((mouse_position.y - self.rect.y) as usize);
-
-                    if new_cursor_position < self.shown_file_list.len() {
-                        self.cursor_position = new_cursor_position;
-
-                        if let Focus::Focused = self.focus {
-                            self.pubsub_tx
-                                .send(PubSub::SelectedEntry(self.get_selected_entry()))
-                                .unwrap();
-                        }
-                    }
+                    self.handle_click(mouse_position);
+                    self.tag_toggle();
                 }
             }
             MouseButton::WheelUp => {
