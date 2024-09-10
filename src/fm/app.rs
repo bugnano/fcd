@@ -63,6 +63,7 @@ use crate::{
     palette::Palette,
     shutil::{expanduser, which},
     template,
+    terminal_restorer::{ENTER_MOUSE_SEQUENCE, EXIT_MOUSE_SEQUENCE},
     viewer::{
         self, dlg_goto::DlgGoto, dlg_hex_search::DlgHexSearch, dlg_text_search::DlgTextSearch,
     },
@@ -1744,8 +1745,13 @@ pub fn raw_output_activate(raw_output: &RawTerminal<io::Stdout>) {
 
     let mut output = io::stdout();
 
-    write!(output, "{}", termion::screen::ToAlternateScreen)
-        .expect("unable to enter alternate screen");
+    write!(
+        output,
+        "{}{}",
+        ENTER_MOUSE_SEQUENCE,
+        termion::screen::ToAlternateScreen
+    )
+    .expect("unable to enter alternate screen");
 
     output.flush().expect("unable to enter alternate screen");
 }
@@ -1755,7 +1761,8 @@ pub fn raw_output_suspend(raw_output: &RawTerminal<io::Stdout>) {
 
     write!(
         output,
-        "{}{}",
+        "{}{}{}",
+        EXIT_MOUSE_SEQUENCE,
         termion::screen::ToMainScreen,
         termion::cursor::Show
     )

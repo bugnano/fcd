@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use ratatui::prelude::*;
-use termion::{input::MouseTerminal, raw::IntoRawMode, screen::IntoAlternateScreen};
+use termion::raw::IntoRawMode;
 
 use clap::{crate_name, ArgAction, Parser};
 use path_clean::PathClean;
@@ -25,6 +25,7 @@ mod palette;
 mod shutil;
 mod stat;
 mod template;
+mod terminal_restorer;
 mod tilde_layout;
 mod viewer;
 mod widgets;
@@ -34,6 +35,7 @@ use crate::{
     config::load_config,
     fm::bookmarks::Bookmarks,
     palette::{get_monochrome_palette, get_palette},
+    terminal_restorer::{TerminalRestorer, ENTER_MOUSE_SEQUENCE, EXIT_MOUSE_SEQUENCE},
 };
 
 #[derive(Parser, Debug)]
@@ -79,8 +81,9 @@ fn initialize_panic_handler() -> Result<()> {
             let mut output = io::stdout();
             write!(
                 output,
-                "{}{}{}",
+                "{}{}{}{}",
                 termion::clear::All,
+                EXIT_MOUSE_SEQUENCE,
                 termion::screen::ToMainScreen,
                 termion::cursor::Show
             )?;
@@ -132,13 +135,12 @@ fn main() -> Result<()> {
         .suspend_raw_mode()
         .context("failed to suspend raw mode")?;
 
-    let output = MouseTerminal::from(
-        io::stdout()
-            .into_raw_mode()
-            .context("failed to activate raw mode")?
-            .into_alternate_screen()
-            .context("unable to enter alternate screen")?,
-    );
+    let output = io::stdout()
+        .into_raw_mode()
+        .context("failed to activate raw mode")?;
+
+    let _terminal_restorer =
+        TerminalRestorer::new().context("failed to activate terminal restorer")?;
 
     // Terminal<TermionBackend<MouseTerminal<AlternateScreen<RawTerminal<Stdout>>>>>
     let mut terminal =
@@ -236,7 +238,8 @@ fn main() -> Result<()> {
                     true => {
                         write!(
                             output,
-                            "{}{}",
+                            "{}{}{}",
+                            EXIT_MOUSE_SEQUENCE,
                             termion::cursor::Restore,
                             termion::clear::UntilNewline,
                         )?;
@@ -244,7 +247,8 @@ fn main() -> Result<()> {
                     false => {
                         write!(
                             output,
-                            "{}{}",
+                            "{}{}{}",
+                            EXIT_MOUSE_SEQUENCE,
                             termion::screen::ToMainScreen,
                             termion::cursor::Show
                         )?;
@@ -270,13 +274,19 @@ fn main() -> Result<()> {
                     true => {
                         write!(
                             output,
-                            "{}Press ENTER to continue...",
+                            "{}{}Press ENTER to continue...",
+                            ENTER_MOUSE_SEQUENCE,
                             termion::cursor::Save
                         )?;
                         output.flush()?;
                     }
                     false => {
-                        write!(output, "{}", termion::screen::ToAlternateScreen)?;
+                        write!(
+                            output,
+                            "{}{}",
+                            ENTER_MOUSE_SEQUENCE,
+                            termion::screen::ToAlternateScreen
+                        )?;
                         output.flush()?;
 
                         terminal.clear()?;
