@@ -235,7 +235,9 @@ impl TextViewer {
                                         0x09 => palette.base09,
                                         0x0F => palette.base0f,
                                         _ => {
+                                            #[cfg(debug_assertions)]
                                             log::debug!("{:?}", style);
+
                                             palette.base05
                                         }
                                     },

@@ -183,7 +183,7 @@ fn main() -> Result<()> {
                         .ok()
                         .and_then(|xdg_dirs| {
                             xdg_dirs
-                                .place_state_file(&format!("{}.db", crate_name!()))
+                                .place_state_file(format!("{}.db", crate_name!()))
                                 .ok()
                         })
                 })

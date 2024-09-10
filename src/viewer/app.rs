@@ -118,7 +118,10 @@ impl App {
                                         self.ctrl_o = true;
                                         action = Action::CtrlO;
                                     }
-                                    _ => log::debug!("{:?}", key),
+                                    _ => {
+                                        #[cfg(debug_assertions)]
+                                        log::debug!("{:?}", key);
+                                    }
                                 }
                             }
                         }

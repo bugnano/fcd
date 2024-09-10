@@ -296,15 +296,13 @@ impl ArchiveMounter {
 
                                     temp_dir.clone()
                                 })
-                                .map_err(|e| {
+                                .inspect_err(|_| {
                                     let _ = Command::new("umount")
                                         .arg(&temp_dir)
                                         .current_dir(self.unarchive_path(archive.parent().unwrap()))
                                         .output();
 
                                     let _ = fs::remove_dir(&temp_dir);
-
-                                    e
                                 })
                         }
                         Err(e) => break Err(e.into()),

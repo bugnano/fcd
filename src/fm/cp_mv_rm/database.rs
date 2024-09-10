@@ -447,7 +447,7 @@ impl DataBase {
                     return true;
                 }
 
-                match (&exe, &fs::canonicalize(&format!("/proc/{}/exe", job.pid))) {
+                match (&exe, &fs::canonicalize(format!("/proc/{}/exe", job.pid))) {
                     // If the pid stored in the job has the same executable as me,
                     // it means that the job is running in another instance,
                     // and has not been interrupted.

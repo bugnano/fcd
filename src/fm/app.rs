@@ -376,7 +376,10 @@ impl App {
                                         }
                                     }
                                     Key::Alt('v') => self.vertical = !self.vertical,
-                                    _ => log::debug!("{:?}", key),
+                                    _ => {
+                                        #[cfg(debug_assertions)]
+                                        log::debug!("{:?}", key);
+                                    }
                                 }
                             }
                         }
