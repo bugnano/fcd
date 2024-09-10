@@ -46,6 +46,11 @@ pub struct DlgTextSearch {
     middle_focus_position: usize,
     check_focus_position: usize,
     button_focus_position: usize,
+    input_rect: Rect,
+    radio_rect: Rect,
+    check_box_rect: Rc<[Rect]>,
+    btn_ok_rect: Rect,
+    btn_cancel_rect: Rect,
 }
 
 impl DlgTextSearch {
@@ -104,7 +109,29 @@ impl DlgTextSearch {
             middle_focus_position: 0,
             check_focus_position: 0,
             button_focus_position: 0,
+            input_rect: Rect::default(),
+            radio_rect: Rect::default(),
+            check_box_rect: Rc::new([]),
+            btn_ok_rect: Rect::default(),
+            btn_cancel_rect: Rect::default(),
         }
+    }
+
+    fn on_ok(&mut self) {
+        self.pubsub_tx
+            .send(PubSub::TextSearch(TextSearch {
+                search_string: self.input.value(),
+                search_type: match self.radio.value() {
+                    0 => SearchType::Normal,
+                    1 => SearchType::Regex,
+                    2 => SearchType::Wildcard,
+                    _ => unreachable!(),
+                },
+                case_sensitive: self.check_boxes[0].value(),
+                backwards: self.check_boxes[1].value(),
+                whole_words: self.check_boxes[2].value(),
+            }))
+            .unwrap();
     }
 }
 
@@ -131,21 +158,8 @@ impl Component for DlgTextSearch {
                 Key::Char('\n') | Key::Char(' ') => {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
 
-                    if (self.section_focus_position == 0) || (self.button_focus_position == 0) {
-                        self.pubsub_tx
-                            .send(PubSub::TextSearch(TextSearch {
-                                search_string: self.input.value(),
-                                search_type: match self.radio.value() {
-                                    0 => SearchType::Normal,
-                                    1 => SearchType::Regex,
-                                    2 => SearchType::Wildcard,
-                                    _ => unreachable!(),
-                                },
-                                case_sensitive: self.check_boxes[0].value(),
-                                backwards: self.check_boxes[1].value(),
-                                whole_words: self.check_boxes[2].value(),
-                            }))
-                            .unwrap();
+                    if (self.section_focus_position != 2) || (self.button_focus_position == 0) {
+                        self.on_ok();
                     }
                 }
                 Key::BackTab => {
@@ -210,6 +224,55 @@ impl Component for DlgTextSearch {
         key_handled
     }
 
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+        if matches!(button, MouseButton::Left | MouseButton::Right) {
+            if self.input_rect.contains(mouse_position) {
+                self.section_focus_position = 0;
+
+                self.input.handle_mouse(button, mouse_position);
+            }
+
+            if self.radio_rect.contains(mouse_position) {
+                self.section_focus_position = 1;
+                self.middle_focus_position = 0;
+
+                self.radio.handle_mouse(button, mouse_position);
+            }
+
+            self.check_box_rect
+                .iter()
+                .enumerate()
+                .for_each(|(i, rect)| {
+                    if rect.contains(mouse_position) {
+                        self.section_focus_position = 1;
+                        self.middle_focus_position = 1;
+                        self.check_focus_position = i;
+
+                        self.check_boxes[i].handle_mouse(button, mouse_position);
+                    }
+                });
+
+            if self.btn_ok_rect.contains(mouse_position) {
+                self.section_focus_position = 2;
+                self.button_focus_position = 0;
+
+                if let MouseButton::Left = button {
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+                    self.on_ok();
+                }
+            }
+
+            if self.btn_cancel_rect.contains(mouse_position) {
+                self.section_focus_position = 2;
+                self.button_focus_position = 1;
+
+                if let MouseButton::Left = button {
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+                }
+            }
+        }
+    }
+
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
         let area = centered_rect(58, 12, chunk);
 
@@ -249,13 +312,15 @@ impl Component for DlgTextSearch {
             .constraints([Constraint::Length(1), Constraint::Length(1)])
             .split(upper_block.inner(sections[0]));
 
+        self.input_rect = upper_area[1];
+
         let label = Paragraph::new(Span::raw("Enter search string:"));
 
         f.render_widget(upper_block, sections[0]);
         f.render_widget(label, upper_area[0]);
         self.input.render(
             f,
-            &upper_area[1],
+            &self.input_rect,
             match self.section_focus_position {
                 0 => Focus::Focused,
                 _ => Focus::Normal,
@@ -275,16 +340,20 @@ impl Component for DlgTextSearch {
             .constraints([Constraint::Percentage(50), Constraint::Min(1)])
             .split(middle_block.inner(sections[1]));
 
+        self.radio_rect = middle_sections[0];
+
         let check_sections = Layout::default()
             .direction(Direction::Vertical)
             .constraints(vec![Constraint::Length(1); self.check_boxes.len()])
             .split(middle_sections[1]);
 
+        self.check_box_rect = check_sections;
+
         f.render_widget(middle_block, sections[1]);
 
         self.radio.render(
             f,
-            &middle_sections[0],
+            &self.radio_rect,
             match (self.section_focus_position, self.middle_focus_position) {
                 (1, 0) => Focus::Focused,
                 _ => Focus::Normal,
@@ -297,7 +366,7 @@ impl Component for DlgTextSearch {
             .for_each(|(i, check_box)| {
                 check_box.render(
                     f,
-                    &check_sections[i],
+                    &self.check_box_rect[i],
                     if (self.section_focus_position == 1)
                         && (self.middle_focus_position == 1)
                         && (self.check_focus_position == i)
@@ -329,10 +398,13 @@ impl Component for DlgTextSearch {
                 &lower_block.inner(sections[2]),
             ));
 
+        self.btn_ok_rect = lower_area[0];
+        self.btn_cancel_rect = lower_area[2];
+
         f.render_widget(lower_block, sections[2]);
         self.btn_ok.render(
             f,
-            &lower_area[0],
+            &self.btn_ok_rect,
             match (self.section_focus_position, self.button_focus_position) {
                 (2, 0) => Focus::Focused,
                 (_, 0) => Focus::Active,
@@ -341,7 +413,7 @@ impl Component for DlgTextSearch {
         );
         self.btn_cancel.render(
             f,
-            &lower_area[2],
+            &self.btn_cancel_rect,
             match (self.section_focus_position, self.button_focus_position) {
                 (2, 1) => Focus::Focused,
                 (_, 1) => Focus::Active,

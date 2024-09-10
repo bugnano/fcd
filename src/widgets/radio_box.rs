@@ -14,6 +14,7 @@ pub struct RadioBox {
     focused_style: Style,
     selected_button: usize,
     cursor_position: usize,
+    rect: Rect,
 }
 
 impl RadioBox {
@@ -36,6 +37,7 @@ impl RadioBox {
             focused_style: *focused_style,
             selected_button: selected,
             cursor_position: 0,
+            rect: Rect::default(),
         }
     }
 
@@ -78,7 +80,19 @@ impl Component for RadioBox {
         key_handled
     }
 
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: Position) {
+        if matches!(button, MouseButton::Left | MouseButton::Right) {
+            self.cursor_position = (mouse_position.y - self.rect.y) as usize;
+        }
+
+        if let MouseButton::Left = button {
+            self.selected_button = self.cursor_position;
+        }
+    }
+
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {
+        self.rect = *chunk;
+
         let list = List::new(
             self.buttons
                 .iter()

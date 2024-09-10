@@ -51,6 +51,9 @@ pub struct DlgDirscan {
     total_size: Option<u64>,
     focus_position: usize,
     suspend_tx: Option<Sender<()>>,
+    btn_suspend_rect: Rect,
+    btn_skip_rect: Rect,
+    btn_abort_rect: Rect,
 }
 
 impl DlgDirscan {
@@ -97,6 +100,9 @@ impl DlgDirscan {
             total_size: None,
             focus_position: 0,
             suspend_tx: None,
+            btn_suspend_rect: Rect::default(),
+            btn_skip_rect: Rect::default(),
+            btn_abort_rect: Rect::default(),
         };
 
         dlg.dirscan_thread(ev_rx, info_tx, result_tx);
@@ -200,6 +206,41 @@ impl Component for DlgDirscan {
         }
 
         key_handled
+    }
+
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+        if matches!(button, MouseButton::Left | MouseButton::Right) {
+            if self.btn_suspend_rect.contains(mouse_position) {
+                self.focus_position = 0;
+
+                if let MouseButton::Left = button {
+                    match &self.suspend_tx {
+                        Some(_suspend_tx) => self.resume(),
+                        None => self.suspend(),
+                    }
+                }
+            }
+
+            if self.btn_skip_rect.contains(mouse_position) {
+                self.focus_position = 1;
+
+                if let MouseButton::Left = button {
+                    self.resume();
+
+                    let _ = self.ev_tx.send(DirScanEvent::Skip);
+                }
+            }
+
+            if self.btn_abort_rect.contains(mouse_position) {
+                self.focus_position = 2;
+
+                if let MouseButton::Left = button {
+                    self.resume();
+
+                    let _ = self.ev_tx.send(DirScanEvent::Abort);
+                }
+            }
+        }
     }
 
     fn handle_pubsub(&mut self, event: &PubSub) {
@@ -359,10 +400,14 @@ impl Component for DlgDirscan {
                 &lower_block.inner(sections[1]),
             ));
 
+        self.btn_suspend_rect = lower_area[0];
+        self.btn_skip_rect = lower_area[2];
+        self.btn_abort_rect = lower_area[4];
+
         f.render_widget(lower_block, sections[1]);
         self.btn_suspend.render(
             f,
-            &lower_area[0],
+            &self.btn_suspend_rect,
             match self.focus_position {
                 0 => Focus::Focused,
                 _ => Focus::Normal,
@@ -370,7 +415,7 @@ impl Component for DlgDirscan {
         );
         self.btn_skip.render(
             f,
-            &lower_area[2],
+            &self.btn_skip_rect,
             match self.focus_position {
                 1 => Focus::Focused,
                 _ => Focus::Normal,
@@ -378,7 +423,7 @@ impl Component for DlgDirscan {
         );
         self.btn_abort.render(
             f,
-            &lower_area[4],
+            &self.btn_abort_rect,
             match self.focus_position {
                 2 => Focus::Focused,
                 _ => Focus::Normal,

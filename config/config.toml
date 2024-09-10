@@ -45,7 +45,6 @@ title_fg = "blue"
 focus_fg = "black"
 focus_bg = "cyan"
 
-placeholder_fg = "dark gray"
 input_fg = "black"
 input_bg = "cyan"
 

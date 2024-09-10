@@ -41,6 +41,10 @@ pub struct DlgCpMv {
     btn_cancel: Button,
     section_focus_position: usize,
     button_focus_position: usize,
+    input_rect: Rect,
+    radio_rect: Rect,
+    btn_ok_rect: Rect,
+    btn_cancel_rect: Rect,
 }
 
 impl DlgCpMv {
@@ -79,7 +83,31 @@ impl DlgCpMv {
             ),
             section_focus_position: 0,
             button_focus_position: 0,
+            input_rect: Rect::default(),
+            radio_rect: Rect::default(),
+            btn_ok_rect: Rect::default(),
+            btn_cancel_rect: Rect::default(),
         }
+    }
+
+    fn on_ok(&mut self) {
+        let on_conflict = match self.radio.value() {
+            0 => OnConflict::Overwrite,
+            1 => OnConflict::Skip,
+            2 => OnConflict::RenameExisting,
+            3 => OnConflict::RenameCopy,
+            _ => unreachable!(),
+        };
+
+        self.pubsub_tx
+            .send(PubSub::DoDirscan(
+                self.cwd.clone(),
+                self.entries.clone(),
+                self.input.value(),
+                on_conflict,
+                self.operation,
+            ))
+            .unwrap();
     }
 }
 
@@ -102,24 +130,8 @@ impl Component for DlgCpMv {
                 Key::Char('\n') | Key::Char(' ') => {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
 
-                    if (self.section_focus_position == 0) || (self.button_focus_position == 0) {
-                        let on_conflict = match self.radio.value() {
-                            0 => OnConflict::Overwrite,
-                            1 => OnConflict::Skip,
-                            2 => OnConflict::RenameExisting,
-                            3 => OnConflict::RenameCopy,
-                            _ => unreachable!(),
-                        };
-
-                        self.pubsub_tx
-                            .send(PubSub::DoDirscan(
-                                self.cwd.clone(),
-                                self.entries.clone(),
-                                self.input.value(),
-                                on_conflict,
-                                self.operation,
-                            ))
-                            .unwrap();
+                    if (self.section_focus_position != 2) || (self.button_focus_position == 0) {
+                        self.on_ok();
                     }
                 }
                 Key::BackTab => {
@@ -154,6 +166,41 @@ impl Component for DlgCpMv {
         }
 
         key_handled
+    }
+
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+        if matches!(button, MouseButton::Left | MouseButton::Right) {
+            if self.input_rect.contains(mouse_position) {
+                self.section_focus_position = 0;
+
+                self.input.handle_mouse(button, mouse_position);
+            }
+
+            if self.radio_rect.contains(mouse_position) {
+                self.section_focus_position = 1;
+
+                self.radio.handle_mouse(button, mouse_position);
+            }
+
+            if self.btn_ok_rect.contains(mouse_position) {
+                self.section_focus_position = 2;
+                self.button_focus_position = 0;
+
+                if let MouseButton::Left = button {
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+                    self.on_ok();
+                }
+            }
+
+            if self.btn_cancel_rect.contains(mouse_position) {
+                self.section_focus_position = 2;
+                self.button_focus_position = 1;
+
+                if let MouseButton::Left = button {
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+                }
+            }
+        }
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
@@ -200,6 +247,8 @@ impl Component for DlgCpMv {
             .constraints([Constraint::Length(1), Constraint::Length(1)])
             .split(upper_block.inner(sections[0]));
 
+        self.input_rect = upper_area[1];
+
         let question = Paragraph::new(Span::raw(tilde_layout(
             &match self.entries.len() {
                 1 => format!("{} {} to:", title, self.entries[0].file_name),
@@ -212,7 +261,7 @@ impl Component for DlgCpMv {
         f.render_widget(question, upper_area[0]);
         self.input.render(
             f,
-            &upper_area[1],
+            &self.input_rect,
             match self.section_focus_position {
                 0 => Focus::Focused,
                 _ => Focus::Normal,
@@ -238,6 +287,8 @@ impl Component for DlgCpMv {
                 &middle_block.inner(sections[1]),
             ));
 
+        self.radio_rect = middle_area[1];
+
         let label = Paragraph::new(Span::raw(tilde_layout(
             label,
             middle_area[0].width as usize,
@@ -247,7 +298,7 @@ impl Component for DlgCpMv {
         f.render_widget(label, middle_area[0]);
         self.radio.render(
             f,
-            &middle_area[1],
+            &self.radio_rect,
             match self.section_focus_position {
                 1 => Focus::Focused,
                 _ => Focus::Normal,
@@ -274,10 +325,13 @@ impl Component for DlgCpMv {
                 &lower_block.inner(sections[2]),
             ));
 
+        self.btn_ok_rect = lower_area[0];
+        self.btn_cancel_rect = lower_area[2];
+
         f.render_widget(lower_block, sections[2]);
         self.btn_ok.render(
             f,
-            &lower_area[0],
+            &self.btn_ok_rect,
             match (self.section_focus_position, self.button_focus_position) {
                 (2, 0) => Focus::Focused,
                 (_, 0) => Focus::Active,
@@ -286,7 +340,7 @@ impl Component for DlgCpMv {
         );
         self.btn_cancel.render(
             f,
-            &lower_area[2],
+            &self.btn_cancel_rect,
             match (self.section_focus_position, self.button_focus_position) {
                 (2, 1) => Focus::Focused,
                 (_, 1) => Focus::Active,

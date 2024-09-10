@@ -35,6 +35,9 @@ pub struct DlgGoto {
     btn_cancel: Button,
     section_focus_position: usize,
     button_focus_position: usize,
+    input_rect: Rect,
+    btn_ok_rect: Rect,
+    btn_cancel_rect: Rect,
 }
 
 impl DlgGoto {
@@ -58,6 +61,9 @@ impl DlgGoto {
             ),
             section_focus_position: 0,
             button_focus_position: 0,
+            input_rect: Rect::default(),
+            btn_ok_rect: Rect::default(),
+            btn_cancel_rect: Rect::default(),
         }
     }
 }
@@ -80,7 +86,7 @@ impl Component for DlgGoto {
                 Key::Char('\n') | Key::Char(' ') => {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
 
-                    if (self.section_focus_position == 0) || (self.button_focus_position == 0) {
+                    if (self.section_focus_position != 1) || (self.button_focus_position == 0) {
                         self.pubsub_tx
                             .send(PubSub::Goto(self.goto_type, self.input.value()))
                             .unwrap();
@@ -114,6 +120,38 @@ impl Component for DlgGoto {
         }
 
         key_handled
+    }
+
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+        if matches!(button, MouseButton::Left | MouseButton::Right) {
+            if self.input_rect.contains(mouse_position) {
+                self.section_focus_position = 0;
+
+                self.input.handle_mouse(button, mouse_position);
+            }
+
+            if self.btn_ok_rect.contains(mouse_position) {
+                self.section_focus_position = 1;
+                self.button_focus_position = 0;
+
+                if let MouseButton::Left = button {
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                    self.pubsub_tx
+                        .send(PubSub::Goto(self.goto_type, self.input.value()))
+                        .unwrap();
+                }
+            }
+
+            if self.btn_cancel_rect.contains(mouse_position) {
+                self.section_focus_position = 1;
+                self.button_focus_position = 1;
+
+                if let MouseButton::Left = button {
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+                }
+            }
+        }
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
@@ -156,11 +194,13 @@ impl Component for DlgGoto {
             .constraints([Constraint::Length(label.width() as u16), Constraint::Min(1)])
             .split(upper_block.inner(sections[0]));
 
+        self.input_rect = upper_area[1];
+
         f.render_widget(upper_block, sections[0]);
         f.render_widget(Paragraph::new(Span::raw(label)), upper_area[0]);
         self.input.render(
             f,
-            &upper_area[1],
+            &self.input_rect,
             match self.section_focus_position {
                 0 => Focus::Focused,
                 _ => Focus::Normal,
@@ -187,10 +227,13 @@ impl Component for DlgGoto {
                 &lower_block.inner(sections[1]),
             ));
 
+        self.btn_ok_rect = lower_area[0];
+        self.btn_cancel_rect = lower_area[2];
+
         f.render_widget(lower_block, sections[1]);
         self.btn_ok.render(
             f,
-            &lower_area[0],
+            &self.btn_ok_rect,
             match (self.section_focus_position, self.button_focus_position) {
                 (1, 0) => Focus::Focused,
                 (_, 0) => Focus::Active,
@@ -199,7 +242,7 @@ impl Component for DlgGoto {
         );
         self.btn_cancel.render(
             f,
-            &lower_area[2],
+            &self.btn_cancel_rect,
             match (self.section_focus_position, self.button_focus_position) {
                 (1, 1) => Focus::Focused,
                 (_, 1) => Focus::Active,

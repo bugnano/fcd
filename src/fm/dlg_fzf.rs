@@ -54,6 +54,7 @@ pub struct DlgFzf {
     cursor_position: usize,
     first_line: usize,
     rect: Rect,
+    input_rect: Rect,
 }
 
 impl DlgFzf {
@@ -98,6 +99,7 @@ impl DlgFzf {
             cursor_position: 0,
             first_line: 0,
             rect: Rect::default(),
+            input_rect: Rect::default(),
         };
 
         dlg.fzf_thread(&initial_entries, stop_fzf_rx, fzf_info_tx, fzf_result_tx);
@@ -310,8 +312,22 @@ impl Component for DlgFzf {
         key_handled
     }
 
-    fn handle_mouse(&mut self, button: MouseButton, _mouse_position: layout::Position) {
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
         match button {
+            MouseButton::Left | MouseButton::Right => {
+                if self.rect.contains(mouse_position) {
+                    let new_cursor_position = self.first_line
+                        + ((self.rect.height - 1 - (mouse_position.y - self.rect.y)) as usize);
+
+                    if new_cursor_position < self.shown_entries.len() {
+                        self.cursor_position = new_cursor_position;
+                    }
+                }
+
+                if self.input_rect.contains(mouse_position) {
+                    self.input.handle_mouse(button, mouse_position);
+                }
+            }
             MouseButton::WheelUp => {
                 self.first_line = self.first_line.saturating_add(1);
                 self.clamp_first_line();
@@ -457,8 +473,10 @@ impl Component for DlgFzf {
 
         let lower_area = lower_block.inner(sections[1]);
 
+        self.input_rect = lower_area;
+
         f.render_widget(lower_block, sections[1]);
-        self.input.render(f, &lower_area, focus);
+        self.input.render(f, &self.input_rect, focus);
     }
 }
 

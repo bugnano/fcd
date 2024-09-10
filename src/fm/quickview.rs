@@ -2,7 +2,6 @@ use std::rc::Rc;
 
 use crossbeam_channel::Sender;
 use ratatui::{
-    layout,
     prelude::*,
     widgets::{
         block::{Position, Title},

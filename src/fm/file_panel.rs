@@ -11,7 +11,6 @@ use std::{
 use anyhow::{anyhow, bail};
 use crossbeam_channel::{Receiver, Sender};
 use ratatui::{
-    layout,
     prelude::*,
     widgets::{
         block::{Position, Title},

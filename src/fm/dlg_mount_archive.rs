@@ -35,6 +35,7 @@ pub struct DlgMountArchive {
     result_rx: Receiver<Result<PathBuf>>,
     cancel_tx: Sender<()>,
     btn_cancel: Button,
+    btn_cancel_rect: Rect,
 }
 
 impl DlgMountArchive {
@@ -79,7 +80,18 @@ impl DlgMountArchive {
                 &palette.dialog_focus,
                 &palette.dialog_title,
             ),
+            btn_cancel_rect: Rect::default(),
         }
+    }
+
+    fn on_cancel(&mut self) {
+        self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+        let _ = self.cancel_tx.send(());
+
+        self.pubsub_tx
+            .send(PubSub::ArchiveMountCancel(self.archive.clone()))
+            .unwrap();
     }
 }
 
@@ -89,23 +101,9 @@ impl Component for DlgMountArchive {
 
         match key {
             Key::Esc | Key::Char('q') | Key::Char('Q') | Key::F(10) | Key::Char('0') => {
-                self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
-
-                let _ = self.cancel_tx.send(());
-
-                self.pubsub_tx
-                    .send(PubSub::ArchiveMountCancel(self.archive.clone()))
-                    .unwrap();
+                self.on_cancel();
             }
-            Key::Char('\n') | Key::Char(' ') => {
-                self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
-
-                let _ = self.cancel_tx.send(());
-
-                self.pubsub_tx
-                    .send(PubSub::ArchiveMountCancel(self.archive.clone()))
-                    .unwrap();
-            }
+            Key::Char('\n') | Key::Char(' ') => self.on_cancel(),
             Key::Ctrl('c') => key_handled = false,
             Key::Ctrl('l') => key_handled = false,
             Key::Ctrl('z') => key_handled = false,
@@ -114,6 +112,14 @@ impl Component for DlgMountArchive {
         }
 
         key_handled
+    }
+
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+        if self.btn_cancel_rect.contains(mouse_position) {
+            if let MouseButton::Left = button {
+                self.on_cancel();
+            }
+        }
     }
 
     fn handle_pubsub(&mut self, event: &PubSub) {
@@ -199,7 +205,10 @@ impl Component for DlgMountArchive {
             &lower_block.inner(sections[1]),
         );
 
+        self.btn_cancel_rect = lower_area;
+
         f.render_widget(lower_block, sections[1]);
-        self.btn_cancel.render(f, &lower_area, Focus::Focused);
+        self.btn_cancel
+            .render(f, &self.btn_cancel_rect, Focus::Focused);
     }
 }

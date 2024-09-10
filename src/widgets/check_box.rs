@@ -38,6 +38,12 @@ impl Component for CheckBox {
         key_handled
     }
 
+    fn handle_mouse(&mut self, button: MouseButton, _mouse_position: Position) {
+        if let MouseButton::Left = button {
+            self.checked = !self.checked;
+        }
+    }
+
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {
         let check_box = Paragraph::new(format!(
             "[{}] {}",

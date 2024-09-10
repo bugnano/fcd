@@ -61,7 +61,6 @@ pub struct Dialog {
     pub title_fg: Color,
     pub focus_fg: Color,
     pub focus_bg: Color,
-    pub placeholder_fg: Color,
     pub input_fg: Color,
     pub input_bg: Color,
 }

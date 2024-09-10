@@ -6,7 +6,6 @@ use std::{
 
 use crossbeam_channel::Sender;
 use ratatui::{
-    layout,
     prelude::*,
     widgets::{
         block::{Position, Title},
@@ -43,6 +42,8 @@ pub struct DlgReport {
     first_line: usize,
     focus_position: usize,
     rect: Rect,
+    btn_close_rect: Rect,
+    btn_save_rect: Rect,
 }
 
 impl DlgReport {
@@ -165,6 +166,8 @@ impl DlgReport {
             first_line: 0,
             focus_position: 0,
             rect: Rect::default(),
+            btn_close_rect: Rect::default(),
+            btn_save_rect: Rect::default(),
         }
     }
 
@@ -188,6 +191,15 @@ impl DlgReport {
 
         self.pubsub_tx.send(PubSub::NextPendingJob).unwrap();
     }
+
+    fn on_save(&mut self) {
+        let mut path = self.job.cwd.clone();
+        path.push("fcd-report.txt");
+
+        self.pubsub_tx
+            .send(PubSub::PromptSaveReport(self.job.cwd.clone(), path))
+            .unwrap();
+    }
 }
 
 impl Component for DlgReport {
@@ -200,14 +212,7 @@ impl Component for DlgReport {
             }
             Key::Char('\n') | Key::Char(' ') => match self.focus_position {
                 0 => self.close(),
-                1 => {
-                    let mut path = self.job.cwd.clone();
-                    path.push("fcd-report.txt");
-
-                    self.pubsub_tx
-                        .send(PubSub::PromptSaveReport(self.job.cwd.clone(), path))
-                        .unwrap();
-                }
+                1 => self.on_save(),
                 _ => unreachable!(),
             },
             Key::Left | Key::Char('h') => self.focus_position = 0,
@@ -247,8 +252,25 @@ impl Component for DlgReport {
         key_handled
     }
 
-    fn handle_mouse(&mut self, button: MouseButton, _mouse_position: layout::Position) {
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
         match button {
+            MouseButton::Left | MouseButton::Right => {
+                if self.btn_close_rect.contains(mouse_position) {
+                    self.focus_position = 0;
+
+                    if let MouseButton::Left = button {
+                        self.close();
+                    }
+                }
+
+                if self.btn_save_rect.contains(mouse_position) {
+                    self.focus_position = 1;
+
+                    if let MouseButton::Left = button {
+                        self.on_save();
+                    }
+                }
+            }
             MouseButton::WheelUp => {
                 self.first_line = self.first_line.saturating_sub(1);
             }
@@ -393,10 +415,13 @@ impl Component for DlgReport {
                 &lower_block.inner(sections[1]),
             ));
 
+        self.btn_close_rect = lower_area[0];
+        self.btn_save_rect = lower_area[2];
+
         f.render_widget(lower_block, sections[1]);
         self.btn_close.render(
             f,
-            &lower_area[0],
+            &self.btn_close_rect,
             match self.focus_position {
                 0 => match focus {
                     Focus::Focused => Focus::Focused,
@@ -407,7 +432,7 @@ impl Component for DlgReport {
         );
         self.btn_save.render(
             f,
-            &lower_area[2],
+            &self.btn_save_rect,
             match self.focus_position {
                 1 => match focus {
                     Focus::Focused => Focus::Focused,

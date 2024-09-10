@@ -30,6 +30,8 @@ pub struct DlgQuestion {
     question: String,
     on_yes: PubSub,
     focus_position: usize,
+    btn_yes_rect: Rect,
+    btn_no_rect: Rect,
 }
 
 impl DlgQuestion {
@@ -59,6 +61,8 @@ impl DlgQuestion {
             question: String::from(question),
             on_yes: on_yes.clone(),
             focus_position: 0,
+            btn_yes_rect: Rect::default(),
+            btn_no_rect: Rect::default(),
         }
     }
 }
@@ -90,6 +94,28 @@ impl Component for DlgQuestion {
         }
 
         key_handled
+    }
+
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+        if matches!(button, MouseButton::Left | MouseButton::Right) {
+            if self.btn_yes_rect.contains(mouse_position) {
+                self.focus_position = 0;
+
+                if let MouseButton::Left = button {
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                    self.pubsub_tx.send(self.on_yes.clone()).unwrap();
+                }
+            }
+
+            if self.btn_no_rect.contains(mouse_position) {
+                self.focus_position = 1;
+
+                if let MouseButton::Left = button {
+                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+                }
+            }
+        }
     }
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
@@ -155,10 +181,13 @@ impl Component for DlgQuestion {
                 &lower_block.inner(sections[1]),
             ));
 
+        self.btn_yes_rect = lower_area[0];
+        self.btn_no_rect = lower_area[2];
+
         f.render_widget(lower_block, sections[1]);
         self.btn_yes.render(
             f,
-            &lower_area[0],
+            &self.btn_yes_rect,
             match self.focus_position {
                 0 => Focus::Focused,
                 _ => Focus::Normal,
@@ -166,7 +195,7 @@ impl Component for DlgQuestion {
         );
         self.btn_no.render(
             f,
-            &lower_area[2],
+            &self.btn_no_rect,
             match self.focus_position {
                 1 => Focus::Focused,
                 _ => Focus::Normal,

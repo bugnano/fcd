@@ -6,7 +6,6 @@ use std::{
 
 use crossbeam_channel::Sender;
 use ratatui::{
-    layout,
     prelude::*,
     widgets::{
         block::{Position, Title},
@@ -39,6 +38,9 @@ pub struct DlgPendingJob {
     first_line: usize,
     focus_position: usize,
     rect: Rect,
+    btn_continue_rect: Rect,
+    btn_skip_rect: Rect,
+    btn_abort_rect: Rect,
 }
 
 impl DlgPendingJob {
@@ -94,6 +96,9 @@ impl DlgPendingJob {
             first_line: 0,
             focus_position: 0,
             rect: Rect::default(),
+            btn_continue_rect: Rect::default(),
+            btn_skip_rect: Rect::default(),
+            btn_abort_rect: Rect::default(),
         }
     }
 
@@ -104,6 +109,17 @@ impl DlgPendingJob {
                 .len()
                 .saturating_sub(self.rect.height as usize);
         }
+    }
+
+    fn on_abort(&mut self) {
+        self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+        self.db_file
+            .as_deref()
+            .and_then(|db_file| DataBase::new(db_file).ok())
+            .map(|db| db.delete_job(self.job.id));
+
+        self.pubsub_tx.send(PubSub::NextPendingJob).unwrap();
     }
 }
 
@@ -128,16 +144,7 @@ impl Component for DlgPendingJob {
                     self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
                     self.pubsub_tx.send(PubSub::NextPendingJob).unwrap();
                 }
-                2 => {
-                    self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
-
-                    self.db_file
-                        .as_deref()
-                        .and_then(|db_file| DataBase::new(db_file).ok())
-                        .map(|db| db.delete_job(self.job.id));
-
-                    self.pubsub_tx.send(PubSub::NextPendingJob).unwrap();
-                }
+                2 => self.on_abort(),
                 _ => unreachable!(),
             },
             Key::Left | Key::Char('h') => {
@@ -179,8 +186,38 @@ impl Component for DlgPendingJob {
         key_handled
     }
 
-    fn handle_mouse(&mut self, button: MouseButton, _mouse_position: layout::Position) {
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
         match button {
+            MouseButton::Left | MouseButton::Right => {
+                if self.btn_continue_rect.contains(mouse_position) {
+                    self.focus_position = 0;
+
+                    if let MouseButton::Left = button {
+                        self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                        self.pubsub_tx
+                            .send(PubSub::MountArchivesForJob(self.job.clone()))
+                            .unwrap();
+                    }
+                }
+
+                if self.btn_skip_rect.contains(mouse_position) {
+                    self.focus_position = 1;
+
+                    if let MouseButton::Left = button {
+                        self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+                        self.pubsub_tx.send(PubSub::NextPendingJob).unwrap();
+                    }
+                }
+
+                if self.btn_abort_rect.contains(mouse_position) {
+                    self.focus_position = 2;
+
+                    if let MouseButton::Left = button {
+                        self.on_abort();
+                    }
+                }
+            }
             MouseButton::WheelUp => {
                 self.first_line = self.first_line.saturating_sub(1);
             }
@@ -270,10 +307,14 @@ impl Component for DlgPendingJob {
                 &lower_block.inner(sections[1]),
             ));
 
+        self.btn_continue_rect = lower_area[0];
+        self.btn_skip_rect = lower_area[2];
+        self.btn_abort_rect = lower_area[4];
+
         f.render_widget(lower_block, sections[1]);
         self.btn_continue.render(
             f,
-            &lower_area[0],
+            &self.btn_continue_rect,
             match self.focus_position {
                 0 => match focus {
                     Focus::Focused => Focus::Focused,
@@ -284,7 +325,7 @@ impl Component for DlgPendingJob {
         );
         self.btn_skip.render(
             f,
-            &lower_area[2],
+            &self.btn_skip_rect,
             match self.focus_position {
                 1 => match focus {
                     Focus::Focused => Focus::Focused,
@@ -295,7 +336,7 @@ impl Component for DlgPendingJob {
         );
         self.btn_abort.render(
             f,
-            &lower_area[4],
+            &self.btn_abort_rect,
             match self.focus_position {
                 2 => match focus {
                     Focus::Focused => Focus::Focused,

@@ -80,6 +80,18 @@ impl Component for DlgError {
         key_handled
     }
 
+    fn handle_mouse(&mut self, button: MouseButton, _mouse_position: layout::Position) {
+        if let MouseButton::Left = button {
+            if matches!(self.dialog_type, DialogType::Error | DialogType::Warning) {
+                self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
+
+                if let Some(next_action) = &self.next_action {
+                    self.pubsub_tx.send(*next_action.clone()).unwrap();
+                }
+            }
+        }
+    }
+
     fn render(&mut self, f: &mut Frame, chunk: &Rect, _focus: Focus) {
         let area = centered_rect((self.message.width() + 6) as u16, 7, chunk);
 
