@@ -1,48 +1,61 @@
 [package]
 name = "fcd"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["Franco Bugnano <franco@bugnano.it>"]
+license = "GPL-3.0-or-later"
+description = "The FCD File Manager (FranCommanDer) - a text based file manager that combines the best features of Midnight Commander and Ranger"
+repository = "https://github.com/bugnano/fcd"
+readme = "README.md"
+keywords = ["file-manager", "orthodox", "commander", "tui", "ratatui"]
+categories = ["command-line-utilities", "filesystem"]
+include = [
+	"src/**/*.rs",
+	"src/**/*.sql",
+	"Cargo.toml",
+	"Cargo.lock",
+	"config/config.toml",
+]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-termion = "*"
-ratatui = { version = "*", default-features = false, features = ["termion", "serde"] }
-crossbeam-channel = "*"
-signal-hook = "*"
-anyhow = "*"
-log = "*"
-env_logger = "*"
-clap = { version = "*", features = ["derive", "cargo"] }
-encoding_rs = "*"
-#syntect = { version = "*", default-features = false, features = ["default-fancy"] }
-syntect = "*"
-#bat = { version = "*", default-features = false, features = ["regex-fancy"] }
-bat = { version = "*", default-features = false, features = ["regex-onig"] }
-serde = "*"
-toml = "*"
-xdg = "*"
-libc = "*"
-unicode-width = "*"
-unicode-normalization = "*"
-regex = "*"
-uzers = "*"
-path-clean = "*"
-caseless = "*"
-chrono = "*"
-nucleo-matcher = "*"
-natord = "*"
-atomicwrites = "*"
-home = "*"
-tempfile = "*"
-wait-timeout = "*"
-shlex = "*"
-pathdiff = "*"
-itertools = "*"
-thousands = "*"
-rusqlite = { version = "*", features = ["bundled"] }
-rustix = { version = "*", features = ["fs"] }
+termion = "4"
+ratatui = { version = "0.28", default-features = false, features = ["termion", "serde"] }
+crossbeam-channel = "0.5"
+signal-hook = "0.3"
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+clap = { version = "4", features = ["derive", "cargo"] }
+encoding_rs = "0.8"
+#syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+syntect = "5"
+#bat = { version = "0.24", default-features = false, features = ["regex-fancy"] }
+bat = { version = "0.24", default-features = false, features = ["regex-onig"] }
+serde = "1"
+toml = "0.8"
+xdg = "2"
+libc = "0.2"
+unicode-width = "0.1"
+unicode-normalization = "0.1"
+regex = "1"
+uzers = "0.12"
+path-clean = "1"
+caseless = "0.2"
+chrono = "0.4"
+nucleo-matcher = "0.3"
+natord = "1"
+atomicwrites = "0.4"
+home = "0.5"
+tempfile = "3"
+wait-timeout = "0.2"
+shlex = "1"
+pathdiff = "0.2"
+itertools = "0.13"
+thousands = "0.2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+rustix = { version = "0.38", features = ["fs"] }
 
 [profile.release]
 strip = true
