@@ -7,18 +7,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # platform: [linux/amd64, linux/arm64]
-        platform: [linux/amd64]
+        # target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
+        target: [x86_64-unknown-linux-musl]
         include:
-          - platform: linux/amd64
-            target: x86_64-unknown-linux-musl
+          - target: x86_64-unknown-linux-musl
+            platform: linux/amd64
             runner: ubuntu-latest
-          # - platform: linux/arm64
-          #   target: aarch64-unknown-linux-musl
+          # - target: aarch64-unknown-linux-musl
+          #   platform: linux/arm64
           #   runner: ubuntu-latest
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install asciidoctor
+        run: |
+          sudo apt update
+          sudo apt -y install asciidoctor
       - name: Build Linux
         run: |
           docker run --platform ${{ matrix.platform }} --rm -t \
@@ -26,9 +30,20 @@ jobs:
             -v "$(pwd)":/volume \
             clux/muslrust:stable \
             env CFLAGS=-Os cargo build --release --target ${{ matrix.target }}
+      - name: Build man pages
+        run: |
+          asciidoctor -b manpage doc/fcd.1.adoc
+          asciidoctor -b manpage doc/fcd-view.1.adoc
+      - name: Package
+        run: |
+          mkdir fcd
+          cp fcd.{sh,fish} fcd/
+          cp doc/fcd{,-view}.1 fcd/
+          cp target/${{ matrix.target }}/release/fcd fcd/
+          tar cvzf fcd-${{ matrix.target }}.tar.gz fcd/
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: fcd-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/fcd
+          path: fcd-${{ matrix.target }}.tar.gz
           if-no-files-found: error

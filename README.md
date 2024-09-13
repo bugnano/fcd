@@ -69,8 +69,8 @@ Yes, that's it, no other dependencies required.
 
 ### For building the man page
 
-* Python
-* AsciiDoc
+* Ruby
+* Asciidoctor
 
 ### For compressed archive support
 * [archivefs](https://github.com/bugnano/archivefs) (Recommended), or
@@ -100,8 +100,8 @@ cargo build --release
 # and then copy the file target/release/fcd somewhere in your PATH
 
 # To build the man pages:
-a2x -f manpage doc/fcd.1.adoc
-a2x -f manpage doc/fcd-view.1.adoc
+asciidoctor -b manpage doc/fcd.1.adoc
+asciidoctor -b manpage doc/fcd-view.1.adoc
 # and then copy the file doc/fcd.1 in a man path (like $HOME/.local/share/man/man1 )
 ```
 
