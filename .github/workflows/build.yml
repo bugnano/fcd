@@ -36,10 +36,13 @@ jobs:
           asciidoctor -b manpage doc/fcd-view.1.adoc
       - name: Package
         run: |
-          mkdir fcd
-          cp fcd.{sh,fish} fcd/
-          cp doc/fcd{,-view}.1 fcd/
-          cp target/${{ matrix.target }}/release/fcd fcd/
+          mkdir -p fcd/{bin,share/{man/man1,doc/fcd,fcd,licenses/fcd}}
+          cp target/${{ matrix.target }}/release/fcd fcd/bin/
+          cp doc/fcd{,-view}.1 fcd/share/man/man1/
+          cp fcd.{sh,fish} fcd/share/fcd/
+          cp README.md fcd/share/doc/fcd/
+          cp CHANGELOG.md fcd/share/doc/fcd/
+          cp LICENSE fcd/share/licenses/fcd/
           tar cvzf fcd-${{ matrix.target }}.tar.gz fcd/
       - name: Upload
         uses: actions/upload-artifact@v4
