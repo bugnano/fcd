@@ -256,14 +256,25 @@ impl App {
                                         let cwd = if self.panel_focus_position
                                             == self.quickviewer_position
                                         {
-                                            self.panels[self.panel_focus_position ^ 1].get_cwd()
+                                            self.panels[self.panel_focus_position ^ 1]
+                                                .get_shown_cwd()
                                         } else {
-                                            self.panels[self.panel_focus_position].get_cwd()
+                                            self.panels[self.panel_focus_position].get_shown_cwd()
                                         };
 
+                                        if let Some(command_tx) = &self.archive_mounter_command_tx {
+                                            archive_mounter::umount_all(command_tx);
+                                        }
+
                                         if let (Some(pwd), Some(cwd)) = (&self.printwd, cwd) {
-                                            let _ =
-                                                fs::write(pwd, cwd.as_os_str().as_encoded_bytes());
+                                            let exit_cwd = cwd
+                                                .ancestors()
+                                                .find(|d| fs::read_dir(d).is_ok())
+                                                .unwrap()
+                                                .as_os_str()
+                                                .as_encoded_bytes();
+
+                                            let _ = fs::write(pwd, exit_cwd);
                                         }
                                     }
                                     //Key::Char('p') => panic!("at the disco"),
@@ -736,68 +747,84 @@ impl App {
                             }
                         }
                     }
-                    _ => match fs::rename(&selected_entry.file, &new_name) {
-                        Ok(()) => {
-                            if let (Ok(old_file), Ok(new_file)) =
-                                (old_name, fs::canonicalize(&new_name))
-                            {
-                                let parent = new_file.parent().unwrap();
+                    _ => {
+                        if let Some(command_tx) = &self.archive_mounter_command_tx {
+                            // If the file that we're renaming is (parent of) a mounted archive,
+                            // we need to umount that archive before renaming.
+                            archive_mounter::umount_parents(
+                                command_tx,
+                                &[selected_entry.file.clone()],
+                            );
+                        }
 
-                                let old_file_name = selected_entry
-                                    .file
-                                    .file_name()
-                                    .unwrap()
-                                    .to_string_lossy()
-                                    .to_string();
+                        match fs::rename(&selected_entry.file, &new_name) {
+                            Ok(()) => {
+                                if let (Ok(old_file), Ok(new_file)) =
+                                    (old_name, fs::canonicalize(&new_name))
+                                {
+                                    let parent = new_file.parent().unwrap();
 
-                                let new_file_name =
-                                    new_name.file_name().unwrap().to_string_lossy().to_string();
+                                    let old_file_name = selected_entry
+                                        .file
+                                        .file_name()
+                                        .unwrap()
+                                        .to_string_lossy()
+                                        .to_string();
 
-                                // We need to reload the panels, taking into consideration that
-                                // if the selected entry was the renamed file, we need to update the
-                                // selected entry to the new name
-                                if old_file.parent().unwrap() == parent {
-                                    for panel in &mut self.panels {
-                                        match panel.get_cwd() {
-                                            Some(cwd) => match fs::canonicalize(&cwd) {
-                                                Ok(canonical_cwd) if canonical_cwd == parent => {
-                                                    match panel.get_selected_entry() {
-                                                        Some(entry)
-                                                            if entry.file_name == old_file_name =>
-                                                        {
-                                                            let mut selected_entry =
-                                                                PathBuf::from(&cwd);
+                                    let new_file_name =
+                                        new_name.file_name().unwrap().to_string_lossy().to_string();
 
-                                                            selected_entry.push(&new_file_name);
+                                    // We need to reload the panels, taking into consideration that
+                                    // if the selected entry was the renamed file, we need to update the
+                                    // selected entry to the new name
+                                    if old_file.parent().unwrap() == parent {
+                                        for panel in &mut self.panels {
+                                            match panel.get_cwd() {
+                                                Some(cwd) => match fs::canonicalize(&cwd) {
+                                                    Ok(canonical_cwd)
+                                                        if canonical_cwd == parent =>
+                                                    {
+                                                        match panel.get_selected_entry() {
+                                                            Some(entry)
+                                                                if entry.file_name
+                                                                    == old_file_name =>
+                                                            {
+                                                                let mut selected_entry =
+                                                                    PathBuf::from(&cwd);
 
-                                                            panel.reload(Some(&selected_entry));
+                                                                selected_entry.push(&new_file_name);
+
+                                                                panel.reload(Some(&selected_entry));
+                                                            }
+                                                            Some(entry) => {
+                                                                panel.reload(Some(&entry.file));
+                                                            }
+                                                            None => panel.reload(None),
                                                         }
+                                                    }
+                                                    _ => match panel.get_selected_entry() {
                                                         Some(entry) => {
-                                                            panel.reload(Some(&entry.file));
+                                                            panel.reload(Some(&entry.file))
                                                         }
                                                         None => panel.reload(None),
-                                                    }
-                                                }
-                                                _ => match panel.get_selected_entry() {
-                                                    Some(entry) => panel.reload(Some(&entry.file)),
-                                                    None => panel.reload(None),
+                                                    },
                                                 },
-                                            },
-                                            None => panel.reload(None),
+                                                None => panel.reload(None),
+                                            }
                                         }
+                                    } else {
+                                        self.pubsub_tx.send(PubSub::Reload).unwrap();
                                     }
                                 } else {
                                     self.pubsub_tx.send(PubSub::Reload).unwrap();
                                 }
-                            } else {
-                                self.pubsub_tx.send(PubSub::Reload).unwrap();
                             }
+                            Err(e) => self
+                                .pubsub_tx
+                                .send(PubSub::Error(e.to_string(), None))
+                                .unwrap(),
                         }
-                        Err(e) => self
-                            .pubsub_tx
-                            .send(PubSub::Error(e.to_string(), None))
-                            .unwrap(),
-                    },
+                    }
                 }
             }
             PubSub::PromptShell(cwd) => {
@@ -957,6 +984,17 @@ impl App {
             PubSub::DoDirscan(cwd, entries, str_dest, on_conflict, operation) => {
                 let archive_dest =
                     expanduser(&PathBuf::from(&self.apply_template(str_dest, Quote::No)));
+
+                let archive_dest = match archive_dest.is_absolute() {
+                    true => archive_dest.clean(),
+                    false => {
+                        let mut archive_cwd = self.archive_path(cwd);
+
+                        archive_cwd.push(archive_dest);
+
+                        archive_cwd.clean()
+                    }
+                };
 
                 let archive_dest_parent = archive_dest
                     .parent()
@@ -1172,12 +1210,12 @@ impl App {
                     expanduser(&PathBuf::from(&self.apply_template(str_path, Quote::No)));
 
                 let path = match archive_path.is_absolute() {
-                    true => self.unarchive_path(&archive_path),
+                    true => self.unarchive_path(&archive_path.clean()),
                     false => {
                         let mut path = cwd.clone();
                         path.push(&archive_path);
 
-                        self.unarchive_path(&path)
+                        self.unarchive_path(&path.clean())
                     }
                 };
 

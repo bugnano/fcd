@@ -17,3 +17,4 @@ for f in (rg -l '[(]C[)] 2023-[0-9]+')
 	sed -i -e "s/[(]C[)] 2023-[0-9]\+/(C) 2023-$new_year/g" $f
 end
 
+sed -i -e "s/[[]Unreleased[]]/[$new_version] - $new_date/g" CHANGELOG.md

@@ -42,6 +42,16 @@ fn universal_newlines(content: &str) -> String {
                 }
                 last_cr = false;
             }
+            '\t' => {
+                // TAB is considered a control character, and should be displayed as-is
+                out.push('\t');
+                last_cr = false;
+            }
+            c if c.is_control() => {
+                // Control characters can be problematic to display
+                out.push('\u{00B7}');
+                last_cr = false;
+            }
             c => {
                 out.push(c);
                 last_cr = false;
