@@ -274,8 +274,7 @@ fn main() -> Result<()> {
                     true => {
                         write!(
                             output,
-                            "{}{}Press ENTER to continue...",
-                            ENTER_MOUSE_SEQUENCE,
+                            "{}Press ENTER to continue...",
                             termion::cursor::Save
                         )?;
                         output.flush()?;
@@ -300,7 +299,8 @@ fn main() -> Result<()> {
 
                 write!(
                     output,
-                    "{}{}{}Press ENTER to continue...",
+                    "{}{}{}{}Press ENTER to continue...",
+                    EXIT_MOUSE_SEQUENCE,
                     termion::screen::ToMainScreen,
                     termion::cursor::Show,
                     termion::cursor::Save
@@ -314,9 +314,10 @@ fn main() -> Result<()> {
 
                 write!(
                     output,
-                    "{}{}{}",
+                    "{}{}{}{}",
                     termion::cursor::Restore,
                     termion::clear::UntilNewline,
+                    ENTER_MOUSE_SEQUENCE,
                     termion::screen::ToAlternateScreen
                 )?;
                 output.flush()?;
