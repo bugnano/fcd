@@ -27,6 +27,7 @@ pub enum ArchiveMounterCommand {
     UnarchivePath(PathBuf, Sender<PathBuf>),
     ArchivePath(PathBuf, Sender<PathBuf>),
     GetArchiveDirs(Sender<Vec<ArchiveEntry>>),
+    UmountAll(Sender<()>),
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +76,11 @@ pub fn start() -> Option<Sender<ArchiveMounterCommand>> {
                         }
                         ArchiveMounterCommand::GetArchiveDirs(archive_dirs_tx) => {
                             let _ = archive_dirs_tx.send(archive_mounter.get_archive_dirs());
+                        }
+                        ArchiveMounterCommand::UmountAll(completed_tx) => {
+                            archive_mounter.umount_all();
+
+                            let _ = completed_tx.send(());
                         }
                     },
 
@@ -141,6 +147,16 @@ pub fn umount_unrelated<T: AsRef<Path>>(command_tx: &Sender<ArchiveMounterComman
                 .collect(),
         ))
         .unwrap();
+}
+
+pub fn umount_all(command_tx: &Sender<ArchiveMounterCommand>) {
+    let (completed_tx, completed_rx) = crossbeam_channel::unbounded();
+
+    command_tx
+        .send(ArchiveMounterCommand::UmountAll(completed_tx))
+        .unwrap();
+
+    let _ = completed_rx.recv();
 }
 
 pub fn unarchive_path(command_tx: &Sender<ArchiveMounterCommand>, file: &Path) -> PathBuf {
@@ -381,6 +397,19 @@ impl ArchiveMounter {
         }
     }
 
+    pub fn umount_all(&mut self) {
+        let archives_to_umount: Vec<PathBuf> = self
+            .archive_dirs
+            .iter()
+            .rev()
+            .map(|entry| entry.archive_file.clone())
+            .collect();
+
+        for archive in &archives_to_umount {
+            self.umount_archive(archive);
+        }
+    }
+
     pub fn unarchive_path(&self, file: &Path) -> PathBuf {
         unarchive_path_map(file, &self.archive_dirs)
     }
@@ -396,15 +425,6 @@ impl ArchiveMounter {
 
 impl Drop for ArchiveMounter {
     fn drop(&mut self) {
-        let archives_to_umount: Vec<PathBuf> = self
-            .archive_dirs
-            .iter()
-            .rev()
-            .map(|entry| entry.archive_file.clone())
-            .collect();
-
-        for archive in &archives_to_umount {
-            self.umount_archive(archive);
-        }
+        self.umount_all();
     }
 }

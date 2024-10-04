@@ -156,7 +156,7 @@ impl FilePanel {
 
         panel.file_list_thread();
         panel.chdir(initial_path, None);
-        panel.old_cwd.clone_from(&panel.cwd);
+        panel.old_cwd.clone_from(&panel.shown_cwd);
 
         panel
     }
@@ -242,7 +242,7 @@ impl FilePanel {
     }
 
     fn chdir_old_cwd(&mut self) {
-        let old_cwd = self.old_cwd.clone();
+        let old_cwd = self.unarchive_path(&self.old_cwd);
 
         self.chdir(&old_cwd, None)
     }
@@ -1369,8 +1369,12 @@ impl Panel for FilePanel {
         Some(self.cwd.clone())
     }
 
+    fn get_shown_cwd(&self) -> Option<PathBuf> {
+        Some(self.shown_cwd.clone())
+    }
+
     fn get_old_cwd(&self) -> Option<PathBuf> {
-        Some(self.old_cwd.clone())
+        Some(self.unarchive_path(&self.old_cwd))
     }
 
     fn get_tagged_files(&self) -> Vec<Entry> {
@@ -1407,7 +1411,7 @@ impl Panel for FilePanel {
         );
 
         if new_cwd != self.cwd {
-            self.old_cwd.clone_from(&self.cwd);
+            self.old_cwd.clone_from(&self.shown_cwd);
             self.shown_cwd = self.archive_path(&new_cwd);
             self.cwd = new_cwd;
 
@@ -1419,7 +1423,7 @@ impl Panel for FilePanel {
             self.load_file_list(
                 selected_file
                     .map(|selected_file| self.archive_path(selected_file))
-                    .or(Some(self.archive_path(&self.old_cwd)))
+                    .or_else(|| Some(self.old_cwd.clone()))
                     .as_deref(),
             );
 
