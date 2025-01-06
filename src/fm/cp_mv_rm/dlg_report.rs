@@ -207,9 +207,6 @@ impl Component for DlgReport {
         let mut key_handled = true;
 
         match key {
-            Key::Esc | Key::Char('q') | Key::Char('Q') | Key::F(10) | Key::Char('0') => {
-                self.close();
-            }
             Key::Char('\n') | Key::Char(' ') => match self.focus_position {
                 0 => self.close(),
                 1 => self.on_save(),

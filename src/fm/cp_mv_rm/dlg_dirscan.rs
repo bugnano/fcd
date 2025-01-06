@@ -172,11 +172,6 @@ impl Component for DlgDirscan {
         let mut key_handled = true;
 
         match key {
-            Key::Esc | Key::Char('q') | Key::Char('Q') | Key::F(10) | Key::Char('0') => {
-                self.resume();
-
-                let _ = self.ev_tx.send(DirScanEvent::Abort);
-            }
             Key::Char('\n') | Key::Char(' ') => match self.focus_position {
                 0 => match &self.suspend_tx {
                     Some(_suspend_tx) => self.resume(),
