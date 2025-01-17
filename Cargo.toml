@@ -1,6 +1,6 @@
 [package]
 name = "fcd"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 authors = ["Franco Bugnano <franco@bugnano.it>"]
 license = "GPL-3.0-or-later"

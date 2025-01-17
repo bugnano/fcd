@@ -7,15 +7,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
-        target: [x86_64-unknown-linux-musl]
+        target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
         include:
           - target: x86_64-unknown-linux-musl
             platform: linux/amd64
+            simple_target: Linux-x86_64
             runner: ubuntu-latest
-          # - target: aarch64-unknown-linux-musl
-          #   platform: linux/arm64
-          #   runner: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            platform: linux/arm64
+            simple_target: Linux-arm64
+            runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -43,10 +44,10 @@ jobs:
           cp README.md fcd/share/doc/fcd/
           cp CHANGELOG.md fcd/share/doc/fcd/
           cp LICENSE fcd/share/licenses/fcd/
-          tar cvzf fcd-${{ matrix.target }}.tar.gz fcd/
+          tar cvzf fcd-${{ matrix.simple_target }}.tar.gz fcd/
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: fcd-${{ matrix.target }}
-          path: fcd-${{ matrix.target }}.tar.gz
+          name: fcd-${{ matrix.simple_target }}
+          path: fcd-${{ matrix.simple_target }}.tar.gz
           if-no-files-found: error
