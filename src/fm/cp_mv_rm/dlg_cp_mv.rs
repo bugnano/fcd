@@ -5,13 +5,7 @@ use std::{
 };
 
 use crossbeam_channel::Sender;
-use ratatui::{
-    prelude::*,
-    widgets::{
-        block::{Position, Title},
-        *,
-    },
-};
+use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
 use unicode_width::UnicodeWidthStr;
@@ -168,7 +162,7 @@ impl Component for DlgCpMv {
         key_handled
     }
 
-    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: Position) {
         if matches!(button, MouseButton::Left | MouseButton::Right) {
             if self.input_rect.contains(mouse_position) {
                 self.section_focus_position = 0;
@@ -230,13 +224,12 @@ impl Component for DlgCpMv {
         let title = self.operation.to_string();
 
         let upper_block = Block::default()
-            .title(
-                Title::from(Span::styled(
+            .title_top(
+                Line::from(Span::styled(
                     tilde_layout(&format!(" {} ", title), sections[0].width as usize),
                     self.palette.dialog_title,
                 ))
-                .position(Position::Top)
-                .alignment(Alignment::Center),
+                .centered(),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))

@@ -1,13 +1,7 @@
 use std::rc::Rc;
 
 use crossbeam_channel::Sender;
-use ratatui::{
-    prelude::*,
-    widgets::{
-        block::{Position, Title},
-        *,
-    },
-};
+use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
 use crate::{
@@ -224,7 +218,7 @@ impl Component for DlgTextSearch {
         key_handled
     }
 
-    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: Position) {
         if matches!(button, MouseButton::Left | MouseButton::Right) {
             if self.input_rect.contains(mouse_position) {
                 self.section_focus_position = 0;
@@ -298,11 +292,7 @@ impl Component for DlgTextSearch {
         // Upper section
 
         let upper_block = Block::default()
-            .title(
-                Title::from(Span::styled(" Search ", self.palette.dialog_title))
-                    .position(Position::Top)
-                    .alignment(Alignment::Center),
-            )
+            .title_top(Line::from(Span::styled(" Search ", self.palette.dialog_title)).centered())
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))
             .style(self.palette.dialog);

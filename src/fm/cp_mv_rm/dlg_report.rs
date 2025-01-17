@@ -5,13 +5,7 @@ use std::{
 };
 
 use crossbeam_channel::Sender;
-use ratatui::{
-    prelude::*,
-    widgets::{
-        block::{Position, Title},
-        *,
-    },
-};
+use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
 use atomicwrites::{AllowOverwrite, AtomicFile};
@@ -249,7 +243,7 @@ impl Component for DlgReport {
         key_handled
     }
 
-    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: Position) {
         match button {
             MouseButton::Left | MouseButton::Right => {
                 if self.btn_close_rect.contains(mouse_position) {
@@ -362,13 +356,12 @@ impl Component for DlgReport {
         // Upper section
 
         let upper_block = Block::default()
-            .title(
-                Title::from(Span::styled(
+            .title_top(
+                Line::from(Span::styled(
                     tilde_layout(" Report ", sections[0].width as usize),
                     title_style,
                 ))
-                .position(Position::Top)
-                .alignment(Alignment::Center),
+                .centered(),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))

@@ -37,7 +37,7 @@ impl ButtonBar {
 }
 
 impl Component for ButtonBar {
-    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: Position) {
         if let MouseButton::Left = button {
             for (i, rect) in self.rects.iter().enumerate() {
                 if rect.contains(mouse_position) {

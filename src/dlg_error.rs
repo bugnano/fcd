@@ -1,13 +1,7 @@
 use std::rc::Rc;
 
 use crossbeam_channel::Sender;
-use ratatui::{
-    prelude::*,
-    widgets::{
-        block::{Position, Title},
-        *,
-    },
-};
+use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
 use unicode_width::UnicodeWidthStr;
@@ -80,7 +74,7 @@ impl Component for DlgError {
         key_handled
     }
 
-    fn handle_mouse(&mut self, button: MouseButton, _mouse_position: layout::Position) {
+    fn handle_mouse(&mut self, button: MouseButton, _mouse_position: Position) {
         if let MouseButton::Left = button {
             if matches!(self.dialog_type, DialogType::Error | DialogType::Warning) {
                 self.pubsub_tx.send(PubSub::CloseDialog).unwrap();
@@ -120,10 +114,8 @@ impl Component for DlgError {
         )))
         .block(
             Block::default()
-                .title(
-                    Title::from(Span::styled(format!(" {} ", self.title), title_style))
-                        .position(Position::Top)
-                        .alignment(Alignment::Center),
+                .title_top(
+                    Line::from(Span::styled(format!(" {} ", self.title), title_style)).centered(),
                 )
                 .borders(Borders::ALL)
                 .padding(Padding::uniform(1))

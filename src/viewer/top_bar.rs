@@ -1,9 +1,6 @@
 use std::rc::Rc;
 
-use ratatui::{
-    prelude::*,
-    widgets::{block::Title, *},
-};
+use ratatui::{prelude::*, widgets::*};
 
 use unicode_width::UnicodeWidthStr;
 
@@ -63,18 +60,21 @@ impl Component for TopBar {
             .split(*chunk);
 
         let filename_block = Block::default()
-            .title(Span::raw(tilde_layout(
-                &self.filename,
-                filename_width.into(),
-            )))
+            .title_top(
+                Line::from(Span::raw(tilde_layout(
+                    &self.filename,
+                    filename_width.into(),
+                )))
+                .left_aligned(),
+            )
             .style(self.palette.selected);
 
         let position_block = Block::default()
-            .title(Title::from(Span::raw(&self.position)).alignment(Alignment::Center))
+            .title_top(Line::from(Span::raw(&self.position)).centered())
             .style(self.palette.selected);
 
         let percent_block = Block::default()
-            .title(Span::raw(&self.percent))
+            .title_top(Line::from(Span::raw(&self.percent)).right_aligned())
             .style(self.palette.selected);
 
         f.render_widget(filename_block, sections[0]);

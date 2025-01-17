@@ -6,13 +6,7 @@ use std::{
 
 use anyhow::{anyhow, Result};
 use crossbeam_channel::{Receiver, Sender};
-use ratatui::{
-    prelude::*,
-    widgets::{
-        block::{Position, Title},
-        *,
-    },
-};
+use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
 use unicode_width::UnicodeWidthStr;
@@ -114,7 +108,7 @@ impl Component for DlgMountArchive {
         key_handled
     }
 
-    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: Position) {
         if self.btn_cancel_rect.contains(mouse_position) {
             if let MouseButton::Left = button {
                 self.on_cancel();
@@ -173,13 +167,12 @@ impl Component for DlgMountArchive {
         // Upper section
 
         let upper_block = Block::default()
-            .title(
-                Title::from(Span::styled(
+            .title_top(
+                Line::from(Span::styled(
                     tilde_layout(&format!(" {} ", self.title), sections[0].width as usize),
                     self.palette.dialog_title,
                 ))
-                .position(Position::Top)
-                .alignment(Alignment::Center),
+                .centered(),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))

@@ -7,13 +7,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
-use ratatui::{
-    prelude::*,
-    widgets::{
-        block::{Position, Title},
-        *,
-    },
-};
+use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
 use thousands::Separable;
@@ -252,7 +246,7 @@ impl Component for DlgCpMvProgress {
         key_handled
     }
 
-    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: Position) {
         if matches!(button, MouseButton::Left | MouseButton::Right) {
             if self.btn_suspend_rect.contains(mouse_position) {
                 self.focus_position = 0;
@@ -355,13 +349,12 @@ impl Component for DlgCpMvProgress {
         // Upper section
 
         let upper_block = Block::default()
-            .title(
-                Title::from(Span::styled(
+            .title_top(
+                Line::from(Span::styled(
                     tilde_layout(&format!(" {} ", self.operation), sections[0].width as usize),
                     self.palette.dialog_title,
                 ))
-                .position(Position::Top)
-                .alignment(Alignment::Center),
+                .centered(),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))
@@ -458,8 +451,8 @@ impl Component for DlgCpMvProgress {
         // Middle section
 
         let middle_block = Block::default()
-            .title(
-                Title::from(Span::raw(tilde_layout(
+            .title_top(
+                Line::from(Span::raw(tilde_layout(
                     &format!(
                         " Total: {}/{} ",
                         human_readable_size(self.total_bytes),
@@ -467,8 +460,7 @@ impl Component for DlgCpMvProgress {
                     ),
                     sections[0].width as usize,
                 )))
-                .position(Position::Top)
-                .alignment(Alignment::Center),
+                .centered(),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .border_set(MIDDLE_BORDER_SET)

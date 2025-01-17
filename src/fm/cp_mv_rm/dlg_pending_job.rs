@@ -5,13 +5,7 @@ use std::{
 };
 
 use crossbeam_channel::Sender;
-use ratatui::{
-    prelude::*,
-    widgets::{
-        block::{Position, Title},
-        *,
-    },
-};
+use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
 use pathdiff::diff_paths;
@@ -186,7 +180,7 @@ impl Component for DlgPendingJob {
         key_handled
     }
 
-    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: Position) {
         match button {
             MouseButton::Left | MouseButton::Right => {
                 if self.btn_continue_rect.contains(mouse_position) {
@@ -254,13 +248,12 @@ impl Component for DlgPendingJob {
         // Upper section
 
         let upper_block = Block::default()
-            .title(
-                Title::from(Span::styled(
+            .title_top(
+                Line::from(Span::styled(
                     tilde_layout(" Interrupted Job ", sections[0].width as usize),
                     self.palette.dialog_title,
                 ))
-                .position(Position::Top)
-                .alignment(Alignment::Center),
+                .centered(),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .padding(Padding::horizontal(1))

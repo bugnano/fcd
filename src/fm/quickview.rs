@@ -1,13 +1,7 @@
 use std::rc::Rc;
 
 use crossbeam_channel::Sender;
-use ratatui::{
-    prelude::*,
-    widgets::{
-        block::{Position, Title},
-        *,
-    },
-};
+use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
 use crate::{
@@ -92,7 +86,7 @@ impl Component for QuickView {
         }
     }
 
-    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: Position) {
         if let Some(viewer) = &mut self.viewer {
             viewer.handle_mouse(button, mouse_position);
         }
@@ -120,8 +114,8 @@ impl Component for QuickView {
 
     fn render(&mut self, f: &mut Frame, chunk: &Rect, focus: Focus) {
         let block = Block::default()
-            .title(
-                Title::from(Line::from(vec![
+            .title_top(
+                Line::from(vec![
                     Span::raw(symbols::line::NORMAL.horizontal),
                     Span::styled(
                         tilde_layout(
@@ -137,9 +131,8 @@ impl Component for QuickView {
                         },
                     ),
                     Span::raw(symbols::line::NORMAL.horizontal),
-                ]))
-                .position(Position::Top)
-                .alignment(Alignment::Left),
+                ])
+                .left_aligned(),
             )
             .borders(Borders::ALL)
             .style(self.palette.panel);

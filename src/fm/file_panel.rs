@@ -10,13 +10,7 @@ use std::{
 
 use anyhow::{anyhow, bail};
 use crossbeam_channel::{Receiver, Sender};
-use ratatui::{
-    prelude::*,
-    widgets::{
-        block::{Position, Title},
-        *,
-    },
-};
+use ratatui::{prelude::*, widgets::*};
 use termion::{event::*, raw::RawTerminal};
 
 use nucleo_matcher::{
@@ -334,7 +328,7 @@ impl FilePanel {
         }
     }
 
-    fn handle_click(&mut self, mouse_position: layout::Position) {
+    fn handle_click(&mut self, mouse_position: Position) {
         if self.rect.contains(mouse_position) {
             let new_cursor_position = self.first_line + ((mouse_position.y - self.rect.y) as usize);
 
@@ -905,7 +899,7 @@ impl Component for FilePanel {
         key_handled
     }
 
-    fn handle_mouse(&mut self, button: MouseButton, mouse_position: layout::Position) {
+    fn handle_mouse(&mut self, button: MouseButton, mouse_position: Position) {
         match button {
             MouseButton::Left => self.handle_click(mouse_position),
             MouseButton::Right => {
@@ -1175,8 +1169,8 @@ impl Component for FilePanel {
             .split(*chunk);
 
         let upper_block = Block::default()
-            .title(
-                Title::from(Line::from(vec![
+            .title_top(
+                Line::from(vec![
                     Span::raw(symbols::line::NORMAL.horizontal),
                     Span::styled(
                         tilde_layout(
@@ -1189,9 +1183,8 @@ impl Component for FilePanel {
                         },
                     ),
                     Span::raw(symbols::line::NORMAL.horizontal),
-                ]))
-                .position(Position::Top)
-                .alignment(Alignment::Left),
+                ])
+                .left_aligned(),
             )
             .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
             .style(self.palette.panel);
@@ -1216,7 +1209,7 @@ impl Component for FilePanel {
             true => {
                 f.render_widget(
                     Block::default()
-                        .title("Loading...")
+                        .title_top(Line::from(Span::raw("Loading...")).left_aligned())
                         .style(self.palette.panel),
                     upper_inner,
                 );
@@ -1290,20 +1283,19 @@ impl Component for FilePanel {
         }
 
         let lower_block = Block::default()
-            .title(
-                Title::from(Line::from(vec![
+            .title_bottom(
+                Line::from(vec![
                     Span::raw(symbols::line::NORMAL.horizontal),
                     Span::raw(tilde_layout(
                         &format!(" Free: {} ", human_readable_size(self.free)),
                         chunk.width.saturating_sub(4).into(),
                     )),
                     Span::raw(symbols::line::NORMAL.horizontal),
-                ]))
-                .position(Position::Bottom)
-                .alignment(Alignment::Right),
+                ])
+                .right_aligned(),
             )
-            .title(
-                Title::from(match self.tagged_files.is_empty() {
+            .title_top(
+                Line::from(match self.tagged_files.is_empty() {
                     true => Span::raw(symbols::line::NORMAL.horizontal),
                     false => Span::styled(
                         tilde_layout(
@@ -1332,8 +1324,7 @@ impl Component for FilePanel {
                         self.palette.marked,
                     ),
                 })
-                .position(Position::Top)
-                .alignment(Alignment::Center),
+                .centered(),
             )
             .borders(Borders::ALL)
             .border_set(MIDDLE_BORDER_SET)
@@ -1346,10 +1337,13 @@ impl Component for FilePanel {
         if (!self.is_loading) && (!self.shown_file_list.is_empty()) {
             f.render_widget(
                 Block::new()
-                    .title(tilde_layout(
-                        &self.shown_file_list[self.cursor_position].details,
-                        lower_inner.width.into(),
-                    ))
+                    .title_top(
+                        Line::from(Span::raw(tilde_layout(
+                            &self.shown_file_list[self.cursor_position].details,
+                            lower_inner.width.into(),
+                        )))
+                        .left_aligned(),
+                    )
                     .style(self.palette.panel),
                 lower_inner,
             );
