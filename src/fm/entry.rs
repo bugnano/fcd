@@ -108,6 +108,7 @@ pub fn get_file_list(
             let file_name = entry.file_name().to_string_lossy().to_string();
             let extension: String = natsort_key(&tar_suffix(&file_name));
 
+            let mode_executable: u32 = (S_IXUSR | S_IXGRP | S_IXOTH).into();
             let (stat, label, style) = if metadata.is_symlink() {
                 match fs::metadata(entry.path()) {
                     Ok(stat) => {
@@ -144,7 +145,7 @@ pub fn get_file_list(
                 (metadata.clone(), format!("|{}", file_name), palette.special)
             } else if metadata.file_type().is_socket() {
                 (metadata.clone(), format!("={}", file_name), palette.special)
-            } else if (metadata.mode() & (S_IXUSR | S_IXGRP | S_IXOTH)) != 0 {
+            } else if (metadata.mode() & mode_executable) != 0 {
                 (
                     metadata.clone(),
                     format!("*{}", file_name),
@@ -170,8 +171,8 @@ pub fn get_file_list(
                 || metadata.file_type().is_block_device()
             {
                 let rdev = metadata.rdev();
-                let major = rustix::fs::major(rdev);
-                let minor = rustix::fs::minor(rdev);
+                let major = rustix::fs::major(rdev.try_into().unwrap());
+                let minor = rustix::fs::minor(rdev.try_into().unwrap());
 
                 (
                     // This works as long as size is u64 and major and minor are u32

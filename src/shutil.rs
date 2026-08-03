@@ -4,10 +4,13 @@ use std::{
 };
 
 use rustix::fs::{
-    access, fchmod, ioctl_getflags, ioctl_setflags, lgetxattr, llistxattr, lsetxattr, lstat, open,
-    statvfs, utimensat, Access, AtFlags, FileType, Mode, OFlags, Timespec, Timestamps, XattrFlags,
-    CWD,
+    access, fchmod, lstat, open, statvfs, utimensat, Access, AtFlags, FileType, Mode, OFlags,
+    Timespec, Timestamps, CWD,
 };
+
+#[cfg(target_os = "linux")]
+use rustix::fs::{ioctl_getflags, ioctl_setflags, lgetxattr, llistxattr, lsetxattr, XattrFlags};
+
 use uzers::{get_current_uid, get_user_by_name, get_user_by_uid, os::unix::UserExt};
 
 #[derive(Debug, Clone, Copy)]
@@ -118,6 +121,8 @@ pub fn copystat(src: &Path, dst: &Path) -> rustix::io::Result<()> {
     // We must copy extended attributes before the file is (potentially)
     // chmod()'ed read-only, otherwise setxattr() will error with -EACCES.
     let mut names = vec![0; 65536];
+
+    #[cfg(target_os = "linux")]
     if let Ok(len_names) = llistxattr(src, &mut names) {
         let mut value = vec![0; 65536];
 
@@ -132,11 +137,13 @@ pub fn copystat(src: &Path, dst: &Path) -> rustix::io::Result<()> {
     }
 
     if FileType::from_raw_mode(st.st_mode) != FileType::Symlink {
+        #[cfg(target_os = "linux")]
         let fi = open(src, OFlags::RDONLY | OFlags::NOFOLLOW, Mode::RUSR)?;
         let fo = open(dst, OFlags::RDONLY | OFlags::NOFOLLOW, Mode::RUSR)?;
 
         let _ = fchmod(&fo, Mode::from_raw_mode(st.st_mode));
 
+        #[cfg(target_os = "linux")]
         if let Ok(flags) = ioctl_getflags(&fi) {
             let _ = ioctl_setflags(&fo, flags);
         }

@@ -11,12 +11,12 @@ use crossbeam_channel::{Receiver, Sender};
 
 use pathdiff::diff_paths;
 use rustix::{
-    fs::{
-        copy_file_range, fadvise, fallocate, fstat, fsync, open, seek, sendfile, sync, Advice,
-        FallocateFlags, Mode, OFlags, SeekFrom,
-    },
+    fs::{fstat, fsync, open, seek, sync, Mode, OFlags, SeekFrom},
     io::{read, write, Errno},
 };
+
+#[cfg(target_os = "linux")]
+use rustix::fs::{copy_file_range, fadvise, fallocate, sendfile, Advice, FallocateFlags};
 
 use crate::{
     app::PubSub,
@@ -792,6 +792,7 @@ fn copy_file(
             )
             .context("target_fd")?;
 
+            #[cfg(target_os = "linux")]
             let _ = fallocate(&fd, FallocateFlags::KEEP_SIZE, 0, file_size);
 
             if let Some(_db) = &database {
@@ -824,9 +825,14 @@ fn copy_file(
         false => 0,
     };
 
+    #[cfg(target_os = "linux")]
     let _ = fadvise(&source_fd, bytes_written, 0, Advice::Sequential);
 
-    let mut copy_method = CopyMethod::CopyFileRange;
+    let mut copy_method = if cfg!(target_os = "linux") {
+        CopyMethod::CopyFileRange
+    } else {
+        CopyMethod::ReadWrite
+    };
 
     let mut buf = vec![0; block_size as usize];
 
@@ -861,24 +867,42 @@ fn copy_file(
 
         let (bytes_copied, done) = match copy_method {
             CopyMethod::CopyFileRange => {
-                match copy_file_range(&source_fd, None, &target_fd, None, block_size as usize) {
+                #[cfg(not(target_os = "linux"))]
+                let retval = (0, false);
+
+                #[cfg(target_os = "linux")]
+                let retval = match copy_file_range(
+                    &source_fd,
+                    None,
+                    &target_fd,
+                    None,
+                    block_size as usize,
+                ) {
                     Ok(bytes_copied) => (bytes_copied, bytes_copied == 0),
                     Err(_) => {
                         copy_method = CopyMethod::Sendfile;
 
                         (0, false)
                     }
-                }
+                };
+
+                retval
             }
             CopyMethod::Sendfile => {
-                match sendfile(&target_fd, &source_fd, None, block_size as usize) {
+                #[cfg(not(target_os = "linux"))]
+                let retval = (0, false);
+
+                #[cfg(target_os = "linux")]
+                let retval = match sendfile(&target_fd, &source_fd, None, block_size as usize) {
                     Ok(bytes_copied) => (bytes_copied, bytes_copied == 0),
                     Err(_) => {
                         copy_method = CopyMethod::ReadWrite;
 
                         (0, false)
                     }
-                }
+                };
+
+                retval
             }
             CopyMethod::ReadWrite => {
                 let mut bytes_copied = 0;
