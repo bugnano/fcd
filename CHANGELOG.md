@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Improved CP/MV performance by using WAL mode for the SQLite database
+
 ### Fixed
 
 - fcd can be compiled on non-Linux platforms. This does NOT mean that non-Linux

@@ -1,4 +1,6 @@
 PRAGMA foreign_keys = ON;
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
 
 CREATE TABLE IF NOT EXISTS kv (
     k TEXT NOT NULL PRIMARY KEY,
