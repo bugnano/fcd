@@ -9,7 +9,7 @@ use crossbeam_channel::{Receiver, Sender};
 use ratatui::{prelude::*, widgets::*};
 use termion::event::*;
 
-use bat::assets::HighlightingAssets;
+use bat::{assets::HighlightingAssets, SyntaxMapping};
 use encoding_rs::WINDOWS_1252;
 use regex::{self, Regex, RegexBuilder};
 use syntect::{easy::HighlightLines, util::LinesWithEndings};
@@ -208,13 +208,22 @@ impl TextViewer {
         thread::spawn(move || {
             // Load these once at the start of your program
             let assets = HighlightingAssets::from_binary();
-            let syntax_set = assets.get_syntax_set().unwrap();
+            let mapping = SyntaxMapping::new();
             let theme = assets.get_theme("base16");
 
-            let syntax = match syntax_set.find_syntax_for_file(&filename) {
-                Ok(syntax) => syntax.unwrap_or_else(|| syntax_set.find_syntax_plain_text()),
-                Err(_) => syntax_set.find_syntax_plain_text(),
-            };
+            let (syntax_set, syntax) = assets
+                .get_syntax_for_path(&filename, &mapping)
+                .map(|reference_in_set| (reference_in_set.syntax_set, reference_in_set.syntax))
+                .unwrap_or_else(|_| {
+                    let syntax_set = assets.get_syntax_set().unwrap();
+
+                    let syntax = match syntax_set.find_syntax_for_file(&filename) {
+                        Ok(syntax) => syntax.unwrap_or_else(|| syntax_set.find_syntax_plain_text()),
+                        Err(_) => syntax_set.find_syntax_plain_text(),
+                    };
+
+                    (syntax_set, syntax)
+                });
 
             let mut highlighter = HighlightLines::new(syntax, theme);
             let styled_lines: Vec<Vec<(String, Style)>> = lines
